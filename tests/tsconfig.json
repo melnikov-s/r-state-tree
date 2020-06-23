@@ -1,0 +1,17 @@
+{
+	"compilerOptions": {
+		"rootDir": "src",
+		"target": "es6",
+		"alwaysStrict": false,
+		"noImplicitReturns": false,
+		"noUnusedLocals": false,
+		"noImplicitAny": false,
+		"noImplicitThis": false,
+		"lib": ["es6"],
+		"strictNullChecks": false,
+		"experimentalDecorators": true,
+		"downlevelIteration": true
+	},
+	"include": ["*"],
+	"exclude": ["node_modules"]
+}

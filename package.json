@@ -1,0 +1,50 @@
+{
+	"name": "r-state-tree",
+	"version": "0.1.0-rc2",
+	"description": "reactive state management library",
+	"main": "lib/r-state-tree.js",
+	"module": "lib/r-state-tree.module.js",
+	"files": [
+		"lib/*"
+	],
+	"types": "lib/index.d.ts",
+	"scripts": {
+		"test": "jest",
+		"test:watch": "jest --watch",
+		"test:cover": "jest --coverage",
+		"build": "rollup -c rollup.config.js",
+		"lint": "eslint ./src ./tests --ext .ts"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/melnikov-s/r-state-tree.git"
+	},
+	"author": "Sergey Melnikov",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/melnikov-s/r-state-tree/issues"
+	},
+	"homepage": "https://github.com/melnikov-s/r-state-tree#readme",
+	"devDependencies": {
+		"@rollup/plugin-alias": "^3.1.1",
+		"@types/jest": "^26.0.0",
+		"@typescript-eslint/eslint-plugin": "^3.4.0",
+		"@typescript-eslint/parser": "^3.4.0",
+		"eslint": "^7.3.0",
+		"eslint-config-airbnb": "^18.2.0",
+		"eslint-config-prettier": "^6.11.0",
+		"eslint-import-resolver-typescript": "^2.0.0",
+		"eslint-plugin-import": "^2.21.2",
+		"eslint-plugin-prettier": "^3.1.4",
+		"jest": "^26.0.1",
+		"prettier": "^2.0.5",
+		"rollup": "^2.18.0",
+		"rollup-plugin-typescript2": "^0.27.1",
+		"ts-jest": "^26.1.1",
+		"tslib": "^2.0.0",
+		"typescript": "^3.9.5"
+	},
+	"dependencies": {
+		"lobx": "^0.2.0-rc3"
+	}
+}
