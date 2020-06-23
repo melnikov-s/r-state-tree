@@ -11,7 +11,7 @@ import {
 	children,
 	autorun,
 	reaction,
-	unmount
+	unmount,
 } from "../src/index";
 
 test("can mount a model", () => {
@@ -530,7 +530,7 @@ test("can get the parent of a model", () => {
 	expect(m.parent).toBe(null);
 	expect(m.mc.parent).toBe(m);
 	expect(m.mcs.length).toBe(2);
-	m.mcs.forEach(mc => expect(mc.parent).toBe(m));
+	m.mcs.forEach((mc) => expect(mc.parent).toBe(m));
 	m.mc2 = new MC();
 	expect(m.mc2.parent).toBe(m);
 	m.mcs.push(new M());
@@ -577,4 +577,36 @@ test("model refs can be an array", () => {
 	expect(m.mr).toEqual([]);
 	m.restoreModel2();
 	expect(m.mr).toEqual([m.mc2]);
+});
+
+test("children models can be set with Object.defineProperty", () => {
+	let childMountedCount = 0;
+	class MC extends Model {
+		modelDidMount() {
+			childMountedCount++;
+		}
+	}
+
+	class M extends Model {
+		@children mcs;
+
+		constructor() {
+			super();
+			Object.defineProperty(this, "mcs", {
+				value: [],
+				writable: true,
+				configurable: true,
+			});
+		}
+
+		@action addChild() {
+			this.mcs.push(new MC());
+		}
+	}
+
+	const m = mount(new M());
+	m.addChild();
+	expect(childMountedCount).toBe(1);
+	m.addChild();
+	expect(childMountedCount).toBe(2);
 });

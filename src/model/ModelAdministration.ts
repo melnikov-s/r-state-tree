@@ -6,7 +6,7 @@ import {
 	computed,
 	getAdministration,
 	MutationEvent,
-	trace
+	trace,
 } from "lobx";
 import Model from "../model/Model";
 import { ModelConfiguration, IdType } from "../types";
@@ -15,7 +15,7 @@ import {
 	getModelById,
 	onModelMounted,
 	onModelUnmounted,
-	setIdentifier
+	setIdentifier,
 } from "./idMap";
 import { mapConfigure } from "../utils";
 import { graph, graphOptions } from "../lobx";
@@ -31,7 +31,7 @@ export const modelPropertyType = {
 	children: "children",
 	modelRef: "modelRef",
 	modelRefs: "modelRefs",
-	id: "id"
+	id: "id",
 } as const;
 
 export class ModelAdministration<T extends Model = Model> {
@@ -47,6 +47,7 @@ export class ModelAdministration<T extends Model = Model> {
 	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
 	private observableProxyGet: ProxyHandler<T>["get"];
 	private observableProxySet: ProxyHandler<T>["set"];
+	private writeInProgress: Set<PropertyKey> = new Set();
 
 	constructor(source: T, configuration: ModelConfiguration<T>) {
 		this.source = source;
@@ -61,6 +62,8 @@ export class ModelAdministration<T extends Model = Model> {
 		this.observableProxySet = proxyTraps.set;
 		proxyTraps.get = (_, name) => this.proxyGet(name);
 		proxyTraps.set = (_, name, value) => this.proxySet(name, value);
+		proxyTraps.defineProperty = (_, name, desc) =>
+			this.proxyDefineProperty(name, desc);
 		administrationMap.set(this.proxy, this);
 		administrationMap.set(this.source, this);
 	}
@@ -77,30 +80,56 @@ export class ModelAdministration<T extends Model = Model> {
 	}
 
 	private proxySet(name: PropertyKey, value: unknown): boolean {
-		switch (this.configuration[name]) {
-			case modelPropertyType.modelRef: {
-				this.setModelRef(name, value as Model | null);
-				return true;
+		this.writeInProgress.add(name);
+		try {
+			switch (this.configuration[name]) {
+				case modelPropertyType.modelRef: {
+					this.setModelRef(name, value as Model | null);
+					return true;
+				}
+				case modelPropertyType.modelRefs: {
+					this.setModelRefs(name, value as Model[]);
+					return true;
+				}
+				case modelPropertyType.children: {
+					this.setModels(name, value as Model[]);
+					return true;
+				}
+				case modelPropertyType.child: {
+					this.setModel(name, value as Model | null);
+					break;
+				}
+				case modelPropertyType.id: {
+					this.setId(name as string, value as IdType);
+					break;
+				}
 			}
-			case modelPropertyType.modelRefs: {
-				this.setModelRefs(name, value as Model[]);
-				return true;
-			}
-			case modelPropertyType.children: {
-				this.setModels(name, value as Model[]);
-				return true;
-			}
-			case modelPropertyType.child: {
-				this.setModel(name, value as Model | null);
-				break;
-			}
-			case modelPropertyType.id: {
-				this.setId(name as string, value as IdType);
-				break;
+
+			return this.observableProxySet!(this.source, name, value, this.proxy);
+		} finally {
+			this.writeInProgress.delete(name);
+		}
+	}
+
+	private proxyDefineProperty(
+		name: PropertyKey,
+		desc: PropertyDescriptor
+	): boolean {
+		// if we don't check for writeInProgress we will blow the stack
+		// as Reflect.set will eventually trigger defineProperty proxy handler
+		if (desc && "value" in desc && !this.writeInProgress.has(name)) {
+			switch (this.configuration[name]) {
+				case modelPropertyType.modelRef:
+				case modelPropertyType.modelRefs:
+				case modelPropertyType.children:
+				case modelPropertyType.child:
+				case modelPropertyType.id: {
+					this.proxySet(name, desc.value);
+				}
 			}
 		}
 
-		return this.observableProxySet!(this.source, name, value, this.proxy);
+		return Reflect.defineProperty(this.source, name, desc);
 	}
 
 	private getReferencedAtom(name: PropertyKey): Atom {
@@ -164,7 +193,7 @@ export class ModelAdministration<T extends Model = Model> {
 
 		if (this.isMounted) {
 			oldModels.forEach(
-				child => newModelSet.has(child) || getModelAdm(child).unmount()
+				(child) => newModelSet.has(child) || getModelAdm(child).unmount()
 			);
 		}
 
@@ -184,14 +213,14 @@ export class ModelAdministration<T extends Model = Model> {
 						getModelAdm(event.oldValue).unmount();
 						getModelAdm(event.newValue).mount(this);
 					} else if (event.type === "spliceArray") {
-						event.added.forEach(model => getModelAdm(model).mount(this));
-						event.removed.forEach(model => getModelAdm(model).unmount());
+						event.added.forEach((model) => getModelAdm(model).mount(this));
+						event.removed.forEach((model) => getModelAdm(model).unmount());
 					}
 				}
 			})
 		);
 
-		newModels.forEach(child => {
+		newModels.forEach((child) => {
 			if (!oldModelSet.has(child)) {
 				const internalModel = getModelAdm(child);
 				if (this.mounted) {
@@ -271,7 +300,7 @@ export class ModelAdministration<T extends Model = Model> {
 	}
 
 	setModelRefs(name: PropertyKey, modelValue: Model[]): void {
-		const ids = modelValue.map(model => {
+		const ids = modelValue.map((model) => {
 			const id = getIdentifier(model);
 			if (id == null) {
 				throw new Error(
@@ -303,10 +332,10 @@ export class ModelAdministration<T extends Model = Model> {
 			this.root = this;
 		}
 
-		this.activeModels.forEach(name => {
+		this.activeModels.forEach((name) => {
 			const model = this.getModel(name);
 			if (Array.isArray(model)) {
-				model.forEach(m => getModelAdm(m).mount(this));
+				model.forEach((m) => getModelAdm(m).mount(this));
 			} else if (model) {
 				getModelAdm(model).mount(this);
 			}
@@ -326,10 +355,10 @@ export class ModelAdministration<T extends Model = Model> {
 			onModelUnmounted(this.proxy);
 		});
 
-		this.activeModels.forEach(name => {
+		this.activeModels.forEach((name) => {
 			const model = this.getModel(name);
 			if (Array.isArray(model)) {
-				model.forEach(m => getModelAdm(m).unmount());
+				model.forEach((m) => getModelAdm(m).unmount());
 			} else if (model) {
 				getModelAdm(model).unmount();
 			}
