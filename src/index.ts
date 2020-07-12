@@ -13,7 +13,7 @@ export {
 	mount,
 	unmount,
 	updateStore,
-	rStateTypes as type
+	rStateTypes as type,
 };
 
 export * from "./lobx";

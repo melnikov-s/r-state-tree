@@ -1,5 +1,12 @@
 import Store from "./store/Store";
 import Model from "./model/Model";
+import { reaction } from "lobx";
+
+export type ReactionParams = [
+	Parameters<typeof reaction>[0],
+	Parameters<typeof reaction>[1]
+];
+export type ReactionReturn = ReturnType<typeof reaction>;
 
 export type StoreElement = {
 	Type: new (...args: unknown[]) => Store;

@@ -7,7 +7,7 @@ import {
 	mount,
 	autorun,
 	reaction,
-	createStore
+	createStore,
 } from "../src/index";
 
 export function createContainer<
@@ -20,7 +20,7 @@ export function createContainer<
 	return createStore(Container);
 }
 
-[Model, Store].forEach(c => {
+[Model, Store].forEach((c) => {
 	const Container = c as typeof Model; // for typing purposes
 
 	describe(`(${Container.name}) state equality tests`, () => {
@@ -119,7 +119,7 @@ export function createContainer<
 			expect(c.stateB).toBe(c.stateA);
 			expect(Array.from(map.entries())).toEqual([
 				["prop", "value"],
-				["anotherProp", "anotherValue"]
+				["anotherProp", "anotherValue"],
 			]);
 		});
 
@@ -227,7 +227,7 @@ export function createContainer<
 			@action({ async: true })
 			async inc() {
 				this.value++;
-				this.result = await new Promise(resolve =>
+				this.result = await new Promise((resolve) =>
 					setTimeout(() => resolve(result), 0)
 				);
 				this.value++;

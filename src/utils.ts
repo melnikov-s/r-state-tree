@@ -28,7 +28,7 @@ export function mapConfigure<T extends object>(
 	propertyType: Record<string, unknown>
 ): T {
 	const mappedConfigure = {};
-	Object.keys(config).forEach(key => {
+	Object.keys(config).forEach((key) => {
 		if (propertyType[config[key]]) {
 			mappedConfigure[key] = type.observable;
 		} else {

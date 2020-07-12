@@ -41,5 +41,5 @@ export function unmount<S extends Store | Model>(container: S): void {
 export const rStateTypes = {
 	...type,
 	...storePropertyType,
-	...modelPropertyType
+	...modelPropertyType,
 };

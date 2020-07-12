@@ -1,9 +1,16 @@
-import { Props, Context, StoreConfiguration, Configuration } from "../types";
+import {
+	Props,
+	Context,
+	StoreConfiguration,
+	Configuration,
+	ReactionParams,
+	ReactionReturn,
+} from "../types";
 import { observable } from "lobx";
 import {
 	StoreAdministration,
 	getStoreAdm,
-	updateProps
+	updateProps,
 } from "./StoreAdministration";
 import { graphOptions } from "../lobx";
 
@@ -24,7 +31,7 @@ export function createStore<K extends Store<T>, T extends Props>(
 	return ({
 		Type,
 		props: props || {},
-		key: props && props.key
+		key: props && props.key,
 	} as unknown) as K;
 }
 
@@ -68,6 +75,10 @@ export default class Store<T extends Props = any, S extends Context = any> {
 
 	get context(): S {
 		return getStoreAdm(this).computedContext;
+	}
+
+	reaction(...args: ReactionParams): ReactionReturn {
+		return getStoreAdm(this).reaction(...args);
 	}
 
 	provideContext(): null | Record<string, unknown> {

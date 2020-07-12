@@ -3,7 +3,7 @@ import { type } from "lobx";
 import Model from "./model/Model";
 
 function makeDecorator(type: unknown): any {
-	return function(...args: unknown[]) {
+	return function (...args: unknown[]) {
 		if (args.length === 1) {
 			return makeDecorator((type as Function)(args[0]));
 		} else {

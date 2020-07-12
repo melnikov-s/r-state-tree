@@ -3,11 +3,18 @@ import {
 	computed,
 	getAdministration,
 	observable,
-	Observable
+	Observable,
+	reaction,
 } from "lobx";
 import Store, { allowNewStore } from "./Store";
 import Model from "../model/Model";
-import { StoreConfiguration, StoreElement, Props } from "../types";
+import {
+	StoreConfiguration,
+	StoreElement,
+	Props,
+	ReactionParams,
+	ReactionReturn,
+} from "../types";
 import { getPropertyDescriptor } from "../utils";
 import computedProxy from "../computedProxy";
 import { listener, Listener, graph, graphOptions } from "../lobx";
@@ -18,7 +25,7 @@ export function updateProps(props: Props, newProps: Props): void {
 	graph.untracked(() => {
 		graph.transaction(() => {
 			const propKeys = Object.keys(newProps);
-			propKeys.forEach(k => {
+			propKeys.forEach((k) => {
 				if (k !== "models") {
 					props[k] = newProps[k];
 				}
@@ -39,7 +46,7 @@ export function getStoreAdm(store: Store): StoreAdministration {
 export const storePropertyType = {
 	child: "child",
 	children: "children",
-	model: "model"
+	model: "model",
 } as const;
 
 type ChildStoreData = {
@@ -59,6 +66,7 @@ export class StoreAdministration<T extends Store = Store> {
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData>;
 	private observableProxyGet: ProxyHandler<T>["get"];
 	private observableProxySet: ProxyHandler<T>["set"];
+	private reactionsUnsub: ReactionReturn[] = [];
 
 	constructor(source: T, configuration: StoreConfiguration<T>) {
 		this.source = source;
@@ -128,7 +136,7 @@ export class StoreAdministration<T extends Store = Store> {
 			});
 
 			childStoreData.value.set(stores);
-			stores.forEach(s => getStoreAdm(s).mount(this));
+			stores.forEach((s) => getStoreAdm(s).mount(this));
 
 			return stores;
 		}
@@ -197,8 +205,8 @@ export class StoreAdministration<T extends Store = Store> {
 			childStoreData.value.set(stores);
 		}
 
-		removedStores.forEach(s => getStoreAdm(s).unmount());
-		newStores.forEach(s => getStoreAdm(s).mount(this));
+		removedStores.forEach((s) => getStoreAdm(s).unmount());
+		newStores.forEach((s) => getStoreAdm(s).mount(this));
 
 		return stores;
 	}
@@ -215,6 +223,7 @@ export class StoreAdministration<T extends Store = Store> {
 
 		if (!element) {
 			oldStore && getStoreAdm(oldStore).unmount();
+			childStoreData.value.set(null);
 			return null;
 		} else if (
 			!oldStore ||
@@ -262,7 +271,7 @@ export class StoreAdministration<T extends Store = Store> {
 		return computed(descriptor.get, {
 			context: this.proxy,
 			keepAlive: true,
-			graph
+			graph,
 		});
 	}
 
@@ -272,7 +281,7 @@ export class StoreAdministration<T extends Store = Store> {
 			listener: listener(() => this.updateStore(name)),
 			value: observable.box(null, graphOptions) as Observable<
 				null | Store | Store[]
-			>
+			>,
 		};
 
 		this.childStoreDataMap.set(name, childStoreData);
@@ -289,7 +298,7 @@ export class StoreAdministration<T extends Store = Store> {
 			listener: listener(() => this.updateStores(name)),
 			value: observable.box([] as Store[], graphOptions) as Observable<
 				null | Store | Store[]
-			>
+			>,
 		};
 
 		this.childStoreDataMap.set(name, childStoreData);
@@ -328,6 +337,12 @@ export class StoreAdministration<T extends Store = Store> {
 		return !this.parent;
 	}
 
+	reaction(...args: ReactionParams): ReactionReturn {
+		const unsub = reaction(args[0], args[1], graphOptions);
+		this.reactionsUnsub.push(unsub);
+		return unsub;
+	}
+
 	mount(parent: StoreAdministration | null = null): void {
 		this.parent = parent || null;
 		if (this.parent) {
@@ -336,18 +351,18 @@ export class StoreAdministration<T extends Store = Store> {
 				computed(
 					() => ({
 						...parentSource.context,
-						...parentSource.provideContext()
+						...parentSource.provideContext(),
 					}),
 					graphOptions
 				)
 			);
 		}
 
-		this.childStoreDataMap.forEach(data => {
+		this.childStoreDataMap.forEach((data) => {
 			const { value } = data;
 			const stores = value.get();
 			if (Array.isArray(stores)) {
-				stores?.forEach(s => getStoreAdm(s)?.mount(this));
+				stores?.forEach((s) => getStoreAdm(s)?.mount(this));
 			} else if (stores) {
 				getStoreAdm(stores)?.mount(this);
 			}
@@ -359,13 +374,13 @@ export class StoreAdministration<T extends Store = Store> {
 	unmount(): void {
 		this.proxy.storeWillUnmount?.();
 		this.mounted = false;
-		this.childStoreDataMap.forEach(data => {
+		this.childStoreDataMap.forEach((data) => {
 			const { value, computed, listener } = data;
 
 			const stores = value.get();
 
 			if (Array.isArray(stores)) {
-				stores?.forEach(s => getStoreAdm(s)?.unmount());
+				stores?.forEach((s) => getStoreAdm(s)?.unmount());
 			} else if (stores) {
 				getStoreAdm(stores)?.unmount();
 			}
@@ -374,6 +389,7 @@ export class StoreAdministration<T extends Store = Store> {
 		});
 		this.childStoreDataMap.clear();
 		this.contextReactionUnsub?.();
+		this.reactionsUnsub.forEach((u) => u());
 		this.parent = null;
 	}
 }

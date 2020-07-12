@@ -11,7 +11,7 @@ import {
 	Model,
 	model,
 	reaction,
-	updateStore
+	updateStore,
 } from "../src/index";
 
 test("can mount a store", () => {
@@ -45,6 +45,26 @@ test("can create a child store", () => {
 
 	expect(s.c).toBeInstanceOf(C);
 	expect(s.c.props.prop).toBe(0);
+});
+
+test("child store can be null", () => {
+	class S extends Store {
+		@observable mounted = true;
+		@child
+		get c() {
+			return this.mounted ? createStore(C, { prop: 0 }) : null;
+		}
+
+		@action unmountChild() {
+			this.mounted = false;
+		}
+	}
+	class C extends Store {}
+	const s = mount(createStore(S));
+	expect(s.c).toBeInstanceOf(C);
+	s.unmountChild();
+	expect(s.c).toBe(null);
+
 });
 
 test("can create an array of child stores", () => {
@@ -92,7 +112,7 @@ test("updates an array of stores", () => {
 	const types = [C, C1, C2];
 
 	const s = mount(createStore(S));
-	const equals = v => expect(s.cs.map(c => c.props.prop)).toEqual(v);
+	const equals = (v) => expect(s.cs.map((c) => c.props.prop)).toEqual(v);
 	equals([0, 1, 2]);
 	s.inc();
 	equals([1, 2, 3]);
@@ -112,7 +132,7 @@ test("child stores are reactive", () => {
 			this.values.push(this.values.length);
 		}
 		@children get c() {
-			return this.values.map(value => createStore(C, { value }));
+			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
 
@@ -131,7 +151,7 @@ test("child stores are reactive", () => {
 });
 
 test("child store can be retrieved during an action", () => {
-class C extends Store {
+	class C extends Store {
 		@computed get value() {
 			return this.props.value;
 		}
@@ -141,7 +161,7 @@ class C extends Store {
 		@action add() {
 			count++;
 			this.value = true;
-			expect(this.c).toBeInstanceOf(C)
+			expect(this.c).toBeInstanceOf(C);
 		}
 		@child get c() {
 			return this.value ? createStore(C, { value: this.value }) : null;
@@ -157,10 +177,10 @@ class C extends Store {
 
 	s.add();
 	expect(count).toBe(1);
-})
+});
 
 test("children stores can be retrieved during an action", () => {
-class C extends Store {
+	class C extends Store {
 		@computed get value() {
 			return this.props.value;
 		}
@@ -173,7 +193,7 @@ class C extends Store {
 			expect(this.c.length).toBe(this.values.length);
 		}
 		@children get c() {
-			return this.values.map(value => createStore(C, { value }));
+			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
 
@@ -186,7 +206,7 @@ class C extends Store {
 
 	s.add();
 	expect(count).toBe(1);
-})
+});
 
 test("child stores do not trigger listeners when only props change", () => {
 	class C extends Store {
@@ -197,10 +217,10 @@ test("child stores do not trigger listeners when only props change", () => {
 	class S extends Store {
 		@observable values = [1, 2];
 		@action changeValues() {
-			this.values = this.values.map(v => v + 1);
+			this.values = this.values.map((v) => v + 1);
 		}
 		@children get c() {
-			return this.values.map(value => createStore(C, { value }));
+			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
 
@@ -212,10 +232,10 @@ test("child stores do not trigger listeners when only props change", () => {
 		count++;
 	});
 
-	expect(s.c.map(c => c.value)).toEqual([1, 2]);
+	expect(s.c.map((c) => c.value)).toEqual([1, 2]);
 	s.changeValues();
 	expect(count).toBe(1);
-	expect(s.c.map(c => c.value)).toEqual([2, 3]);
+	expect(s.c.map((c) => c.value)).toEqual([2, 3]);
 });
 
 test("child stores are reactive", () => {
@@ -230,7 +250,7 @@ test("child stores are reactive", () => {
 			this.values.push(this.values.length);
 		}
 		@children get c() {
-			return this.values.map(value => createStore(C, { value }));
+			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
 
@@ -257,7 +277,7 @@ test("child stores with keys", () => {
 	class S extends Store {
 		@observable keys = [1, 2, 3];
 		@children get cs() {
-			return this.keys.map(value => createStore(C, { value, key: value }));
+			return this.keys.map((value) => createStore(C, { value, key: value }));
 		}
 		@action reverse() {
 			this.keys.reverse();
@@ -296,7 +316,7 @@ test("props are reactive", () => {
 		get c() {
 			propsCounter++;
 			return createStore(S, {
-				value: this.value + this.props.value
+				value: this.value + this.props.value,
 			});
 		}
 	}
@@ -406,7 +426,7 @@ test("context test", () => {
 			provideCount++;
 			return {
 				value: this.value,
-				values: this.values
+				values: this.values,
 			};
 		}
 
@@ -448,7 +468,7 @@ test("context can use child store values", () => {
 	class S extends Store {
 		provideContext() {
 			return {
-				value: this.cs1.value
+				value: this.cs1.value,
 			};
 		}
 
@@ -474,7 +494,7 @@ test("context can use child store values (children)", () => {
 	class S extends Store {
 		provideContext() {
 			return {
-				value: this.css[0].value
+				value: this.css[0].value,
 			};
 		}
 
@@ -605,7 +625,7 @@ test("models on the store are reactive", () => {
 
 		@child get cs() {
 			return createStore(CS, {
-				models: { m: this.state ? this.m1 : this.m2, m1: this.m1 }
+				models: { m: this.state ? this.m1 : this.m2, m1: this.m1 },
 			});
 		}
 	}
@@ -636,4 +656,79 @@ test("can't initianialize store directly", () => {
 	class S extends Store {}
 
 	expect(() => new S()).toThrow();
+});
+
+test("can setup a reaction in a store", () => {
+	class S extends Store {
+		@observable prop = 0;
+		count = 0;
+		unsub;
+
+		storeDidMount() {
+			this.unsub = this.reaction(
+				() => this.prop,
+				() => this.count++
+			);
+		}
+		@action inc() {
+			this.prop++;
+		}
+	}
+
+	const s = mount(createStore(S));
+	expect(s.count).toBe(0);
+	s.inc();
+	expect(s.count).toBe(1);
+	s.inc();
+	expect(s.count).toBe(2);
+	s.unsub();
+	s.inc();
+	expect(s.count).toBe(2);
+});
+
+test("reaction in a store will auto unsub after store is unmounted ", () => {
+	class C extends Store {
+		storeDidMount() {
+			this.reaction(
+				() => this.props.prop,
+				() => this.props.countUp()
+			);
+		}
+	}
+
+	class S extends Store {
+		@observable mounted = true;
+		@observable prop = 0;
+		count = 0;
+
+		@child get c() {
+			return this.mounted
+				? createStore(C, {
+						inc: this.inc.bind(this),
+						prop: this.prop,
+						countUp: () => this.count++,
+				  })
+				: null;
+		}
+
+		@action inc() {
+			this.prop++;
+		}
+
+		@action unMountChild() {
+			this.mounted = false;
+		}
+	}
+
+	const s = mount(createStore(S));
+	expect(s.count).toBe(0);
+	expect(s.c).toBeTruthy(); // mounts the store
+	s.inc();
+	expect(s.count).toBe(1);
+	s.inc();
+	expect(s.count).toBe(2);
+	s.unMountChild();
+	expect(s.c).toBe(null);
+	s.inc();
+	expect(s.count).toBe(2);
 });
