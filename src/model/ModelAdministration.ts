@@ -13,8 +13,8 @@ import { ModelConfiguration, IdType } from "../types";
 import {
 	getIdentifier,
 	getModelById,
-	onModelMounted,
-	onModelUnmounted,
+	onModelAttached,
+	onModelDetached,
 	setIdentifier,
 } from "./idMap";
 import { mapConfigure } from "../utils";
@@ -39,11 +39,10 @@ export class ModelAdministration<T extends Model = Model> {
 	source: T;
 	configuration: ModelConfiguration<T>;
 	parent: ModelAdministration | null = null;
-	mounted: boolean = false;
 	referencedAtoms!: Map<PropertyKey, Atom>;
 	referencedModels!: Map<PropertyKey, Computed<Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
-	root!: ModelAdministration;
+	root: ModelAdministration = this;
 	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
 	private observableProxyGet: ProxyHandler<T>["get"];
 	private observableProxySet: ProxyHandler<T>["set"];
@@ -84,7 +83,7 @@ export class ModelAdministration<T extends Model = Model> {
 		try {
 			switch (this.configuration[name]) {
 				case modelPropertyType.modelRef: {
-					this.setModelRef(name, value as Model | null);
+					this.setModelRef(name, value as Model | undefined);
 					return true;
 				}
 				case modelPropertyType.modelRefs: {
@@ -167,15 +166,13 @@ export class ModelAdministration<T extends Model = Model> {
 		}
 
 		this.activeModels.add(name);
-		if (this.isMounted && oldModel) {
-			getModelAdm(oldModel).unmount();
+		if (oldModel) {
+			getModelAdm(oldModel).detach();
 		}
 
 		if (newModel) {
 			const adm = getModelAdm(newModel);
-			if (this.mounted) {
-				adm.mount(this);
-			}
+			adm.attach(this);
 		}
 	}
 
@@ -191,11 +188,9 @@ export class ModelAdministration<T extends Model = Model> {
 
 		this.activeModels.add(name);
 
-		if (this.isMounted) {
-			oldModels.forEach(
-				(child) => newModelSet.has(child) || getModelAdm(child).unmount()
-			);
-		}
+		oldModels.forEach(
+			(child) => newModelSet.has(child) || getModelAdm(child).detach()
+		);
 
 		// unsub from old model trace
 		this.modelsTraceUnsub.get(name)?.();
@@ -208,14 +203,12 @@ export class ModelAdministration<T extends Model = Model> {
 		this.modelsTraceUnsub.set(
 			name,
 			trace(this.proxy[name], (event: MutationEvent<Model>) => {
-				if (this.isMounted) {
-					if (event.type === "updateArray") {
-						getModelAdm(event.oldValue).unmount();
-						getModelAdm(event.newValue).mount(this);
-					} else if (event.type === "spliceArray") {
-						event.added.forEach((model) => getModelAdm(model).mount(this));
-						event.removed.forEach((model) => getModelAdm(model).unmount());
-					}
+				if (event.type === "updateArray") {
+					getModelAdm(event.oldValue).detach();
+					getModelAdm(event.newValue).attach(this);
+				} else if (event.type === "spliceArray") {
+					event.added.forEach((model) => getModelAdm(model).attach(this));
+					event.removed.forEach((model) => getModelAdm(model).detach());
 				}
 			})
 		);
@@ -223,9 +216,7 @@ export class ModelAdministration<T extends Model = Model> {
 		newModels.forEach((child) => {
 			if (!oldModelSet.has(child)) {
 				const internalModel = getModelAdm(child);
-				if (this.mounted) {
-					internalModel.mount(this);
-				}
+				internalModel.attach(this);
 			}
 		});
 	}
@@ -243,10 +234,6 @@ export class ModelAdministration<T extends Model = Model> {
 	}
 
 	getModelRef(name: PropertyKey): Model | undefined {
-		if (!this.mounted) {
-			return undefined;
-		}
-
 		const a = this.getReferencedAtom(name);
 
 		a.reportObserved();
@@ -256,10 +243,6 @@ export class ModelAdministration<T extends Model = Model> {
 	}
 
 	getModelRefs(name: PropertyKey): Model[] {
-		if (!this.mounted) {
-			return [];
-		}
-
 		const a = this.getReferencedAtom(name);
 
 		let c = this.referencedModels?.get(name);
@@ -282,7 +265,7 @@ export class ModelAdministration<T extends Model = Model> {
 		return c.get();
 	}
 
-	setModelRef(name: PropertyKey, modelValue: Model | null): void {
+	setModelRef(name: PropertyKey, modelValue: Model | undefined): void {
 		let id = undefined;
 
 		if (modelValue) {
@@ -316,52 +299,29 @@ export class ModelAdministration<T extends Model = Model> {
 		this.referencedAtoms?.get(name)?.reportChanged();
 	}
 
-	get isMounted(): boolean {
-		return this.mounted;
-	}
-
-	mount(parent: ModelAdministration | null = null): void {
-		if (this.mounted) {
-			throw new Error("r-state-tree child model already mounted to a parent");
+	attach(parent: ModelAdministration | null = null): void {
+		if (this.parent) {
+			throw new Error(
+				"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
+			);
 		}
 
 		if (parent) {
 			this.parent = parent;
 			this.root = parent.root;
-		} else {
-			this.root = this;
 		}
 
-		this.activeModels.forEach((name) => {
-			const model = this.getModel(name);
-			if (Array.isArray(model)) {
-				model.forEach((m) => getModelAdm(m).mount(this));
-			} else if (model) {
-				getModelAdm(model).mount(this);
-			}
-		});
-
 		graph.runInAction(() => {
-			this.mounted = true;
-			onModelMounted(this.proxy);
-			this.proxy.modelDidMount();
+			onModelAttached(this.proxy);
+			this.proxy.modelDidAttach();
 		});
 	}
 
-	unmount(): void {
+	detach(): void {
+		this.parent = null;
 		graph.runInAction(() => {
-			this.proxy.modelWillUnmount();
-			this.mounted = false;
-			onModelUnmounted(this.proxy);
-		});
-
-		this.activeModels.forEach((name) => {
-			const model = this.getModel(name);
-			if (Array.isArray(model)) {
-				model.forEach((m) => getModelAdm(m).unmount());
-			} else if (model) {
-				getModelAdm(model).unmount();
-			}
+			this.proxy.modelWillDetach();
+			onModelDetached(this.proxy);
 		});
 	}
 }

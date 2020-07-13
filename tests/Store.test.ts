@@ -64,7 +64,6 @@ test("child store can be null", () => {
 	expect(s.c).toBeInstanceOf(C);
 	s.unmountChild();
 	expect(s.c).toBe(null);
-
 });
 
 test("can create an array of child stores", () => {
@@ -517,7 +516,7 @@ test("models on the store can be accessed", () => {
 		@model m: M;
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	const s = mount(createStore(S, { models: { m } }));
 	expect(s.m).toBe(m);
 });
@@ -557,7 +556,7 @@ test("models on the store can be an array", () => {
 		@model ms: M[];
 	}
 
-	const models = [mount(new M()), mount(new M())];
+	const models = [new M(), new M()];
 	const s = mount(createStore(S, { models: { ms: models } }));
 	expect(s.ms).toEqual(models);
 });
@@ -588,8 +587,8 @@ test("models on the store can be updated", () => {
 		}
 	}
 
-	const m1 = mount(new M1());
-	const m2 = mount(new M2());
+	const m1 = new M1();
+	const m2 = new M2();
 	const s = mount(createStore(S, { models: { m1, m2 } }));
 	expect(s.cs.m).toBe(m1);
 	s.switchModel();
@@ -630,8 +629,8 @@ test("models on the store are reactive", () => {
 		}
 	}
 
-	const m1 = mount(new M1());
-	const m2 = mount(new M2());
+	const m1 = new M1();
+	const m2 = new M2();
 	const s = mount(createStore(S, { models: { m1, m2 } }));
 
 	reaction(

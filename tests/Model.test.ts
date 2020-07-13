@@ -6,65 +6,36 @@ import {
 	identifier,
 	modelRef,
 	modelRefs,
-	mount,
 	child,
 	children,
 	autorun,
 	reaction,
-	unmount,
 } from "../src/index";
 
-test("can mount a model", () => {
-	class S extends Model {}
+test("can create a model", () => {
+	class M extends Model {}
 
-	const store = mount(new S());
+	const model = new M();
 
-	expect(store instanceof Model).toBe(true);
+	expect(model instanceof Model).toBe(true);
 });
 
-test("will call modelDidMount on mount", () => {
-	let count = 0;
-
-	class S extends Model {
-		modelDidMount() {
-			count++;
-		}
-	}
-
-	mount(new S());
-	expect(count).toBe(1);
-});
-
-test("modelDidMount is executed in an action", () => {
-	class S extends Model {
+test("modelDidAttach is executed in an action", () => {
+	class M extends Model {
 		@observable count = 0;
-		modelDidMount() {
+		modelDidAttach() {
 			this.count++;
 		}
 	}
 
-	expect(() => mount(new S())).not.toThrow();
+	expect(() => new M()).not.toThrow();
 });
 
-test("will call modelWillUnmount on unmount", () => {
-	let count = 0;
-
-	class S extends Model {
-		modelWillUnmount() {
-			count++;
-		}
-	}
-
-	const store = mount(new S());
-	unmount(store);
-	expect(count).toBe(1);
-});
-
-test("will call modelWillMount when children are attached", () => {
+test("will call modelDidAttach when children are attached", () => {
 	let count = 0;
 
 	class CM extends Model {
-		modelDidMount() {
+		modelDidAttach() {
 			count++;
 		}
 	}
@@ -77,17 +48,17 @@ test("will call modelWillMount when children are attached", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(count).toBe(0);
 	m.setCM();
 	expect(count).toBe(1);
 });
 
-test("will call modelWillMount on children that are attached (delayed list)", () => {
+test("will call modelDidAttach on children that are attached (delayed list)", () => {
 	let count = 0;
 
 	class CM extends Model {
-		modelDidMount() {
+		modelDidAttach() {
 			count++;
 		}
 	}
@@ -100,7 +71,7 @@ test("will call modelWillMount on children that are attached (delayed list)", ()
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(count).toBe(0);
 	m.addCM();
 	expect(count).toBe(1);
@@ -108,11 +79,11 @@ test("will call modelWillMount on children that are attached (delayed list)", ()
 	expect(count).toBe(2);
 });
 
-test("will call modelWillUnmount when children are detached", () => {
+test("will call modelWillDetach when children are detached", () => {
 	let count = 0;
 
 	class CM extends Model {
-		modelWillUnmount() {
+		modelWillDetach() {
 			count++;
 		}
 	}
@@ -125,17 +96,17 @@ test("will call modelWillUnmount when children are detached", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(count).toBe(0);
 	m.clearCM();
 	expect(count).toBe(1);
 });
 
-test("will call modelWillUnmount when children are detached (delayed list)", () => {
+test("will call modelWillDetach when children are detached (delayed list)", () => {
 	let count = 0;
 
 	class CM extends Model {
-		modelWillUnmount() {
+		modelWillDetach() {
 			count++;
 		}
 	}
@@ -148,7 +119,7 @@ test("will call modelWillUnmount when children are detached (delayed list)", () 
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(count).toBe(0);
 	m.popCM();
 	expect(count).toBe(1);
@@ -156,9 +127,9 @@ test("will call modelWillUnmount when children are detached (delayed list)", () 
 	expect(count).toBe(2);
 });
 
-test("can re-attach an unmounted model", () => {
-	let unMountCount = 0;
-	let mountCount = 0;
+test("can re-attach an detached model", () => {
+	let detachCount = 0;
+	let attachCount = 0;
 
 	class CM extends Model {
 		@observable state = 0;
@@ -170,12 +141,12 @@ test("can re-attach an unmounted model", () => {
 			return this.state * 2;
 		}
 
-		modelDidMount() {
-			mountCount++;
+		modelDidAttach() {
+			attachCount++;
 		}
 
-		modelWillUnmount() {
-			unMountCount++;
+		modelWillDetach() {
+			detachCount++;
 		}
 	}
 
@@ -194,18 +165,18 @@ test("can re-attach an unmounted model", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	m.setCM();
 	m.cm.incState();
 	expect(m.cm.computed).toBe(2);
-	expect(mountCount).toBe(1);
-	expect(unMountCount).toBe(0);
+	expect(attachCount).toBe(1);
+	expect(detachCount).toBe(0);
 	m.clearCM();
-	expect(mountCount).toBe(1);
-	expect(unMountCount).toBe(1);
+	expect(attachCount).toBe(1);
+	expect(detachCount).toBe(1);
 	m.setCM();
-	expect(mountCount).toBe(2);
-	expect(unMountCount).toBe(1);
+	expect(attachCount).toBe(2);
+	expect(detachCount).toBe(1);
 	expect(m.cm.computed).toBe(2);
 	m.cm.incState();
 	expect(m.cm.computed).toBe(4);
@@ -229,7 +200,7 @@ test("can have a child model", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(m.mc).toBe(null);
 	m.addModel(1);
 	expect(m.mc).toBeInstanceOf(MC);
@@ -245,7 +216,7 @@ test("child models are reactive properties", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	let count = 0;
 	reaction(
 		() => m.mc,
@@ -263,7 +234,7 @@ test("model can initialzie child model", () => {
 		@child mc: MC = new MC();
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(m.mc).toBeInstanceOf(MC);
 });
 
@@ -277,8 +248,8 @@ test("child model can't be placed in multiple locations in the tree", () => {
 	}
 
 	const mc = new MC();
-	const m1 = mount(new M());
-	const m2 = mount(new M());
+	const m1 = new M();
+	const m2 = new M();
 	m1.setModel(mc);
 	expect(() => m2.setModel(mc)).toThrow();
 });
@@ -306,8 +277,8 @@ test("identifiers can only be assigned once", () => {
 		}
 	}
 
-	expect(() => mount(new M1())).toThrow();
-	const m = mount(new M2());
+	expect(() => new M1()).toThrow();
+	const m = new M2();
 	expect(() => m.setId()).toThrow();
 });
 
@@ -325,7 +296,7 @@ test("can assing a model to a reference", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	m.setRef();
 	expect(m.mc).toBe(m.mr);
 });
@@ -341,27 +312,32 @@ test("can't assing a model without an identifier to a reference", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(() => m.setRef()).toThrow();
 });
 
-test("model ref is not available until the referenced model is mounted", () => {
+test("model ref is not available until the referenced model is attached", () => {
 	class MC extends Model {
 		@identifier id = 0;
 	}
 
 	class M extends Model {
-		@child mc: MC = new MC();
-		@modelRef mr: MC = this.mc;
+		mctemp = new MC();
+		@child mc: MC | null = null;
+		@modelRef mr: MC = this.mctemp;
+
+		@action setChild() {
+			this.mc = this.mctemp;
+		}
 	}
 
 	const m = new M();
 	expect(m.mr).toBe(undefined);
-	mount(m);
+	m.setChild();
 	expect(m.mr).toBe(m.mc);
 });
 
-test("model ref will become undefined when model is unmounted", () => {
+test("model ref will become undefined when model is detached", () => {
 	class MC extends Model {
 		@identifier id = 0;
 	}
@@ -369,7 +345,7 @@ test("model ref will become undefined when model is unmounted", () => {
 		@child mc: MC = new MC();
 		@modelRef mr: MC;
 
-		modelDidMount() {
+		@action setRef() {
 			this.mr = this.mc;
 		}
 
@@ -378,13 +354,15 @@ test("model ref will become undefined when model is unmounted", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
+	expect(m.mr).toBe(undefined);
+	m.setRef();
 	expect(m.mc).toBe(m.mr);
 	m.clearModel();
 	expect(m.mr).toBe(undefined);
 });
 
-test("model ref will become undefined when model is unmounted (array)", () => {
+test("model ref will become undefined when model is detached (array)", () => {
 	class MC extends Model {
 		@identifier id;
 		constructor(id) {
@@ -397,7 +375,7 @@ test("model ref will become undefined when model is unmounted (array)", () => {
 		@children mc: MC[] = [new MC(0), new MC(1)];
 		@modelRef mr: MC;
 
-		modelDidMount() {
+		@action setRef() {
 			this.mr = this.mc[0];
 		}
 
@@ -406,7 +384,8 @@ test("model ref will become undefined when model is unmounted (array)", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
+	m.setRef();
 	expect(m.mc[0]).toBe(m.mr);
 	m.clearModel();
 	expect(m.mr).toBe(undefined);
@@ -429,7 +408,7 @@ test("model ref is reactive", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	let current;
 
 	autorun(() => (current = m.mr));
@@ -443,7 +422,7 @@ test("model ref is reactive", () => {
 	expect(current).toBe(undefined);
 });
 
-test("model ref is restored when model is re-mounted", () => {
+test("model ref is restored when model is re-attached", () => {
 	class MC extends Model {
 		@identifier id = 0;
 	}
@@ -452,7 +431,7 @@ test("model ref is restored when model is re-mounted", () => {
 		@modelRef mr: MC;
 		_temp: MC;
 
-		modelDidMount() {
+		@action setRef() {
 			this.mr = this.mc;
 		}
 
@@ -466,7 +445,8 @@ test("model ref is restored when model is re-mounted", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
+	m.setRef();
 	m.clearModel();
 	expect(m.mr).toBe(undefined);
 	expect(m.mc).toBe(null);
@@ -475,7 +455,7 @@ test("model ref is restored when model is re-mounted", () => {
 	expect(m.mr).toBe(m.mc);
 });
 
-test("model ref is NOT restored when model is re-mounted to a another tree root", () => {
+test("model ref is NOT restored when model is re-attached to a another tree root", () => {
 	let temp: MC | null = null;
 
 	class MC extends Model {
@@ -491,7 +471,7 @@ test("model ref is NOT restored when model is re-mounted to a another tree root"
 			this.setRef = setRef;
 		}
 
-		modelDidMount() {
+		modelDidAttach() {
 			if (this.setRef) {
 				this.mr = this.mc;
 			}
@@ -507,8 +487,8 @@ test("model ref is NOT restored when model is re-mounted to a another tree root"
 		}
 	}
 
-	const m1 = mount(new M(true));
-	const m2 = mount(new M());
+	const m1 = new M(true);
+	const m2 = new M();
 
 	m1.clearModel();
 	expect(m1.mr).toBe(undefined);
@@ -526,7 +506,7 @@ test("can get the parent of a model", () => {
 		@children mcs: MC[] = [new MC(), new MC()];
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	expect(m.parent).toBe(null);
 	expect(m.mc.parent).toBe(m);
 	expect(m.mcs.length).toBe(2);
@@ -551,7 +531,7 @@ test("model refs can be an array", () => {
 		@modelRefs mr: MC[] = [];
 		_temp: MC;
 
-		modelDidMount() {
+		@action setRef() {
 			this.mr = [this.mc1, this.mc2];
 		}
 
@@ -569,7 +549,8 @@ test("model refs can be an array", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
+	m.setRef();
 	expect(m.mr).toEqual([m.mc1, m.mc2]);
 	m.clearModel1();
 	expect(m.mr).toEqual([m.mc2]);
@@ -580,10 +561,10 @@ test("model refs can be an array", () => {
 });
 
 test("children models can be set with Object.defineProperty", () => {
-	let childMountedCount = 0;
+	let childAttachedCount = 0;
 	class MC extends Model {
-		modelDidMount() {
-			childMountedCount++;
+		modelDidAttach() {
+			childAttachedCount++;
 		}
 	}
 
@@ -604,9 +585,9 @@ test("children models can be set with Object.defineProperty", () => {
 		}
 	}
 
-	const m = mount(new M());
+	const m = new M();
 	m.addChild();
-	expect(childMountedCount).toBe(1);
+	expect(childAttachedCount).toBe(1);
 	m.addChild();
-	expect(childMountedCount).toBe(2);
+	expect(childAttachedCount).toBe(2);
 });

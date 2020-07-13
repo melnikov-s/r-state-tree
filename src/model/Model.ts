@@ -19,8 +19,8 @@ export default class Model {
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	modelDidMount(): void {}
+	modelDidAttach(): void {}
 
 	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	modelWillUnmount(): void {}
+	modelWillDetach(): void {}
 }

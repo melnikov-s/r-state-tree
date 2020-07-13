@@ -17,7 +17,7 @@ export function createContainer<
 		return new Container();
 	}
 
-	return createStore(Container);
+	return mount(createStore(Container));
 }
 
 [Model, Store].forEach((c) => {
@@ -44,7 +44,7 @@ export function createContainer<
 				}
 			}
 
-			const c = mount(createContainer(C));
+			const c = createContainer(C);
 			c.setA(obj);
 			c.setB(obj);
 
@@ -76,7 +76,7 @@ export function createContainer<
 				}
 			}
 
-			const c = mount(createContainer(C));
+			const c = createContainer(C);
 			c.setA(array);
 			c.setB(array);
 
@@ -108,7 +108,7 @@ export function createContainer<
 				}
 			}
 
-			const c = mount(createContainer(C));
+			const c = createContainer(C);
 			c.setA(map);
 			c.setB(map);
 
@@ -143,7 +143,7 @@ export function createContainer<
 				}
 			}
 
-			const c = mount(createContainer(C));
+			const c = createContainer(C);
 			c.setA(set);
 			c.setB(set);
 
@@ -167,7 +167,7 @@ export function createContainer<
 			}
 		}
 
-		const m = mount(createContainer(M));
+		const m = createContainer(M);
 		reaction(
 			() => m.state,
 			() => count++
@@ -192,7 +192,7 @@ export function createContainer<
 			}
 		}
 
-		const m = mount(createContainer(M));
+		const m = createContainer(M);
 		reaction(
 			() => m.twiceState,
 			() => count++
@@ -209,7 +209,7 @@ export function createContainer<
 			@observable state = 0;
 		}
 
-		const m = mount(createContainer(M));
+		const m = createContainer(M);
 		autorun(() => m.state);
 		expect(() => m.state++).toThrow();
 	});
@@ -235,7 +235,7 @@ export function createContainer<
 			}
 		}
 
-		const s = mount(createContainer(S));
+		const s = createContainer(S);
 		expect(s.value).toBe(0);
 		const w = s.inc();
 		expect(s.value).toBe(1);

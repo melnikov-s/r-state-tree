@@ -26,8 +26,8 @@ export function setIdentifier(
 
 	if (id !== undefined) {
 		idMap.set(model, id);
-		if (getModelAdm(model).isMounted) {
-			onModelMounted(model);
+		if (getModelAdm(model).parent) {
+			onModelAttached(model);
 		}
 	}
 }
@@ -49,7 +49,7 @@ export function getModelById(
 	return model;
 }
 
-export function onModelMounted(model: Model): void {
+export function onModelAttached(model: Model): void {
 	if (idMap.has(model)) {
 		const root = getRootModel(model);
 		let map = mountedIdMap.get(root);
@@ -67,7 +67,7 @@ export function onModelMounted(model: Model): void {
 }
 
 // TODO: clean up if not observed
-export function onModelUnmounted(model: Model): void {
+export function onModelDetached(model: Model): void {
 	if (idMap.has(model)) {
 		const root = getRootModel(model);
 		const map = mountedIdMap.get(root);
