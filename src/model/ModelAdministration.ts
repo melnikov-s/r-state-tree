@@ -7,9 +7,20 @@ import {
 	getAdministration,
 	MutationEvent,
 	trace,
+	type,
+	Configuration as LobxConfiguration,
+	getObservableSource,
+	reaction,
 } from "lobx";
-import Model from "../model/Model";
-import { ModelConfiguration, IdType } from "../types";
+import Model, { isModelInitialized } from "../model/Model";
+import {
+	ModelConfiguration,
+	IdType,
+	ModelCfgTypes,
+	CommonCfgTypes,
+	Snapshot,
+	SnapshotChange,
+} from "../types";
 import {
 	getIdentifier,
 	getModelById,
@@ -17,8 +28,8 @@ import {
 	onModelDetached,
 	setIdentifier,
 } from "./idMap";
-import { mapConfigure } from "../utils";
 import { graph, graphOptions } from "../lobx";
+import { Configuration } from "..";
 
 const administrationMap: WeakMap<Model, ModelAdministration> = new WeakMap();
 
@@ -26,13 +37,20 @@ export function getModelAdm(model: Model): ModelAdministration {
 	return administrationMap.get(model)!;
 }
 
-export const modelPropertyType = {
-	child: "child",
-	children: "children",
-	modelRef: "modelRef",
-	modelRefs: "modelRefs",
-	id: "id",
-} as const;
+function mapConfigure(
+	config: Configuration<unknown>
+): LobxConfiguration<unknown> {
+	const mappedConfigure = {};
+	Object.keys(config).forEach((key) => {
+		if (ModelCfgTypes[config[key].type] || CommonCfgTypes[config[key].type]) {
+			mappedConfigure[key] = type.observable;
+		} else {
+			mappedConfigure[key] = config[key];
+		}
+	});
+
+	return mappedConfigure;
+}
 
 export class ModelAdministration<T extends Model = Model> {
 	proxy: T;
@@ -47,12 +65,13 @@ export class ModelAdministration<T extends Model = Model> {
 	private observableProxyGet: ProxyHandler<T>["get"];
 	private observableProxySet: ProxyHandler<T>["set"];
 	private writeInProgress: Set<PropertyKey> = new Set();
+	private computedSnapshot: Computed<Snapshot> | undefined;
 
 	constructor(source: T, configuration: ModelConfiguration<T>) {
 		this.source = source;
 		this.configuration = configuration;
 		this.proxy = observable.configure(
-			mapConfigure(configuration, modelPropertyType),
+			mapConfigure(configuration),
 			source,
 			graphOptions
 		);
@@ -68,10 +87,10 @@ export class ModelAdministration<T extends Model = Model> {
 	}
 
 	private proxyGet(name: PropertyKey): unknown {
-		switch (this.configuration[name]) {
-			case modelPropertyType.modelRef:
+		switch (this.configuration[name as string]?.type) {
+			case ModelCfgTypes.modelRef:
 				return this.getModelRef(name);
-			case modelPropertyType.modelRefs:
+			case ModelCfgTypes.modelRefs:
 				return this.getModelRefs(name);
 			default:
 				return this.observableProxyGet!(this.source, name, this.proxy);
@@ -81,25 +100,29 @@ export class ModelAdministration<T extends Model = Model> {
 	private proxySet(name: PropertyKey, value: unknown): boolean {
 		this.writeInProgress.add(name);
 		try {
-			switch (this.configuration[name]) {
-				case modelPropertyType.modelRef: {
+			switch (this.configuration[name as string]?.type) {
+				case ModelCfgTypes.modelRef: {
 					this.setModelRef(name, value as Model | undefined);
 					return true;
 				}
-				case modelPropertyType.modelRefs: {
+				case ModelCfgTypes.modelRefs: {
 					this.setModelRefs(name, value as Model[]);
 					return true;
 				}
-				case modelPropertyType.children: {
+				case CommonCfgTypes.children: {
 					this.setModels(name, value as Model[]);
 					return true;
 				}
-				case modelPropertyType.child: {
+				case CommonCfgTypes.child: {
 					this.setModel(name, value as Model | null);
 					break;
 				}
-				case modelPropertyType.id: {
+				case ModelCfgTypes.id: {
 					this.setId(name as string, value as IdType);
+					break;
+				}
+				case ModelCfgTypes.state: {
+					this.setState(name as string, value);
 					break;
 				}
 			}
@@ -117,12 +140,12 @@ export class ModelAdministration<T extends Model = Model> {
 		// if we don't check for writeInProgress we will blow the stack
 		// as Reflect.set will eventually trigger defineProperty proxy handler
 		if (desc && "value" in desc && !this.writeInProgress.has(name)) {
-			switch (this.configuration[name]) {
-				case modelPropertyType.modelRef:
-				case modelPropertyType.modelRefs:
-				case modelPropertyType.children:
-				case modelPropertyType.child:
-				case modelPropertyType.id: {
+			switch (this.configuration[name as string]?.type) {
+				case ModelCfgTypes.modelRef:
+				case ModelCfgTypes.modelRefs:
+				case CommonCfgTypes.children:
+				case CommonCfgTypes.child:
+				case ModelCfgTypes.id: {
 					this.proxySet(name, desc.value);
 				}
 			}
@@ -142,23 +165,31 @@ export class ModelAdministration<T extends Model = Model> {
 		return a;
 	}
 
-	getId(): IdType | undefined {
-		return getIdentifier(this.proxy);
+	private setState(name: string, value: unknown): void {
+		const oldValue = this.source[name];
+		if (value !== oldValue) {
+			this.observableProxySet!(this.source, name, value, this.proxy);
+		}
 	}
 
-	setId(name: string, v: IdType): void {
+	private setId(name: string, v: IdType): void {
 		const id = getIdentifier(this.proxy);
 
-		if (id !== undefined) {
+		if (id === v) {
+			return;
+		}
+
+		if (id !== undefined && isModelInitialized(this.proxy)) {
 			throw new Error("r-state-tree identifier already set.");
 		}
 
 		if (v !== undefined) {
+			this.source[name] = v;
 			setIdentifier(this.proxy, v, name);
 		}
 	}
 
-	setModel(name: PropertyKey, newModel: Model | null): void {
+	private setModel(name: PropertyKey, newModel: Model | null): void {
 		const oldModel = this.getModel(name) as Model | null;
 
 		if (oldModel === newModel) {
@@ -176,7 +207,7 @@ export class ModelAdministration<T extends Model = Model> {
 		}
 	}
 
-	setModels(name: PropertyKey, newModels: Model[]): void {
+	private setModels(name: PropertyKey, newModels: Model[]): void {
 		const oldModels = this.getModels(name) ?? [];
 
 		if (oldModels === newModels) {
@@ -221,19 +252,19 @@ export class ModelAdministration<T extends Model = Model> {
 		});
 	}
 
-	getModel(name: PropertyKey): Model | undefined {
+	private getModel(name: PropertyKey): Model | undefined {
 		const model = this.proxy[name];
 
 		return (model as Model) ?? null;
 	}
 
-	getModels(name: PropertyKey): Model[] {
+	private getModels(name: PropertyKey): Model[] {
 		const model = this.proxy[name];
 
 		return (model ?? []) as Model[];
 	}
 
-	getModelRef(name: PropertyKey): Model | undefined {
+	private getModelRef(name: PropertyKey): Model | undefined {
 		const a = this.getReferencedAtom(name);
 
 		a.reportObserved();
@@ -242,7 +273,7 @@ export class ModelAdministration<T extends Model = Model> {
 			: undefined;
 	}
 
-	getModelRefs(name: PropertyKey): Model[] {
+	private getModelRefs(name: PropertyKey): Model[] {
 		const a = this.getReferencedAtom(name);
 
 		let c = this.referencedModels?.get(name);
@@ -265,7 +296,7 @@ export class ModelAdministration<T extends Model = Model> {
 		return c.get();
 	}
 
-	setModelRef(name: PropertyKey, modelValue: Model | undefined): void {
+	private setModelRef(name: PropertyKey, modelValue: Model | undefined): void {
 		let id = undefined;
 
 		if (modelValue) {
@@ -282,7 +313,7 @@ export class ModelAdministration<T extends Model = Model> {
 		this.referencedAtoms?.get(name)?.reportChanged();
 	}
 
-	setModelRefs(name: PropertyKey, modelValue: Model[]): void {
+	private setModelRefs(name: PropertyKey, modelValue: Model[]): void {
 		const ids = modelValue.map((model) => {
 			const id = getIdentifier(model);
 			if (id == null) {
@@ -299,7 +330,7 @@ export class ModelAdministration<T extends Model = Model> {
 		this.referencedAtoms?.get(name)?.reportChanged();
 	}
 
-	attach(parent: ModelAdministration | null = null): void {
+	private attach(parent: ModelAdministration | null = null): void {
 		if (this.parent) {
 			throw new Error(
 				"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
@@ -317,11 +348,125 @@ export class ModelAdministration<T extends Model = Model> {
 		});
 	}
 
-	detach(): void {
-		this.parent = null;
+	private detach(): void {
 		graph.runInAction(() => {
 			this.proxy.modelWillDetach();
 			onModelDetached(this.proxy);
 		});
+
+		this.parent = null;
+	}
+
+	private toJSON(): Snapshot {
+		return Object.keys(this.configuration).reduce<Snapshot>((json, key) => {
+			switch (this.configuration[key].type) {
+				case ModelCfgTypes.state:
+				case ModelCfgTypes.id:
+					json[key] = getObservableSource(this.proxy[key]);
+					break;
+				case ModelCfgTypes.modelRef:
+					const model: Model | undefined = this.proxy[key];
+					json[key] = model && getIdentifier(model);
+					break;
+				case ModelCfgTypes.modelRefs:
+					const models: Model[] = this.proxy[key] ?? [];
+					json[key] = models.map((m) => getIdentifier(m));
+					break;
+				case CommonCfgTypes.child:
+					json[key] = getModelAdm(this.proxy[key])?.getSnapshot();
+					break;
+				case CommonCfgTypes.children:
+					json[key] = getObservableSource(
+						(this.proxy[key] ?? []).map((model: Model) =>
+							getModelAdm(model).getSnapshot()
+						)
+					);
+					break;
+			}
+			return json;
+		}, {});
+	}
+
+	onSnapshotChange(onChange: SnapshotChange): () => void {
+		return reaction(
+			() => this.getSnapshot(),
+			(snapshot) => onChange(snapshot, this.proxy),
+			graphOptions
+		);
+	}
+
+	loadSnapshot(snapshot: Snapshot): void {
+		const ensureChildTypes = (key: string): true => {
+			if (!this.configuration[key].childType) {
+				throw new Error(
+					"r-state-tree: `static childTypes` is required on Model to load snapshots with child/children"
+				);
+			}
+
+			return true;
+		};
+
+		Object.keys(snapshot).forEach((key) => {
+			const { type, childType } = this.configuration[key] ?? {};
+			const value = snapshot[key];
+
+			switch (type) {
+				case ModelCfgTypes.state:
+					this.source[key] = value;
+					break;
+				case ModelCfgTypes.modelRef:
+					if (value instanceof Model) {
+						this.proxy[key] = value;
+					} else {
+						this.source[key] = value;
+					}
+					break;
+				case ModelCfgTypes.modelRefs:
+					if ((value as unknown[])?.[0] instanceof Model) {
+						this.proxy[key] = value;
+					} else {
+						this.source[key] = value;
+					}
+					break;
+				case ModelCfgTypes.id:
+					this.setId(key, value as IdType);
+					break;
+				case CommonCfgTypes.child:
+					this.proxy[key] =
+						value instanceof Model
+							? value
+							: ensureChildTypes(key) &&
+							  (childType as typeof Model).create(value as Snapshot);
+					break;
+				case CommonCfgTypes.children:
+					const Ctor = childType as typeof Model;
+					this.proxy[key] = (value as Record<
+						string,
+						unknown
+					>[])?.map((snapshot) =>
+						getObservableSource(
+							snapshot instanceof Model
+								? snapshot
+								: ensureChildTypes(key) && Ctor.create(snapshot as Snapshot)
+						)
+					);
+					break;
+				default:
+					console.warn(
+						`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
+					);
+			}
+		});
+	}
+
+	getSnapshot(): Snapshot {
+		if (!this.computedSnapshot) {
+			this.computedSnapshot = computed(() => this.toJSON(), {
+				graph,
+				keepAlive: true,
+			});
+		}
+
+		return this.computedSnapshot.get();
 	}
 }

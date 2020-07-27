@@ -5,6 +5,7 @@ import {
 	observable,
 	Observable,
 	reaction,
+	Configuration as LobxConfiguration,
 } from "lobx";
 import Store, { allowNewStore } from "./Store";
 import Model from "../model/Model";
@@ -14,6 +15,8 @@ import {
 	Props,
 	ReactionParams,
 	ReactionReturn,
+	CommonCfgTypes,
+	StoreCfgTypes,
 } from "../types";
 import { getPropertyDescriptor } from "../utils";
 import computedProxy from "../computedProxy";
@@ -43,12 +46,6 @@ export function getStoreAdm(store: Store): StoreAdministration {
 	return administrationMap.get(store)!;
 }
 
-export const storePropertyType = {
-	child: "child",
-	children: "children",
-	model: "model",
-} as const;
-
 type ChildStoreData = {
 	value: Observable<Store | null | Store[]>;
 	computed: Computed<StoreElement | null | StoreElement[]>;
@@ -70,7 +67,11 @@ export class StoreAdministration<T extends Store = Store> {
 
 	constructor(source: T, configuration: StoreConfiguration<T>) {
 		this.source = source;
-		this.proxy = observable.configure(configuration, source, graphOptions);
+		this.proxy = observable.configure(
+			(configuration as unknown) as LobxConfiguration<T>,
+			source,
+			graphOptions
+		);
 		const proxyTraps = getAdministration(this.proxy)!.proxyTraps;
 		this.observableProxyGet = proxyTraps.get;
 		this.observableProxySet = proxyTraps.set;
@@ -83,12 +84,12 @@ export class StoreAdministration<T extends Store = Store> {
 	}
 
 	private proxyGet(name: PropertyKey): unknown {
-		switch (this.configuration[name]) {
-			case storePropertyType.child:
+		switch (this.configuration[name as string]?.type) {
+			case CommonCfgTypes.child:
 				return this.getStore(name);
-			case storePropertyType.children:
+			case CommonCfgTypes.children:
 				return this.getStores(name);
-			case storePropertyType.model:
+			case StoreCfgTypes.model:
 				return this.getModelRef(name);
 			default:
 				return this.observableProxyGet!(this.source, name, this.proxy);
@@ -100,7 +101,7 @@ export class StoreAdministration<T extends Store = Store> {
 			throw new Error(`r-state-tree: ${name} is read-only`);
 		}
 
-		if (this.configuration[name] === storePropertyType.model) {
+		if (this.configuration[name as string]?.type === StoreCfgTypes.model) {
 			throw new Error(`r-state-tree: model ${String(name)} is read-only`);
 		}
 
@@ -127,7 +128,7 @@ export class StoreAdministration<T extends Store = Store> {
 		let keyedIndexChanged = false;
 
 		if (!oldStores) {
-			elements.forEach((e, index) => {
+			elements.forEach((e) => {
 				if (e) {
 					const childStore = this.createChildStore(e);
 

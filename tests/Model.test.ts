@@ -8,123 +8,183 @@ import {
 	modelRefs,
 	child,
 	children,
+	state,
 	autorun,
 	reaction,
+	onSnapshot,
+	toSnapshot,
 } from "../src/index";
 
 test("can create a model", () => {
 	class M extends Model {}
 
-	const model = new M();
+	const model = M.create();
 
 	expect(model instanceof Model).toBe(true);
 });
 
-test("modelDidAttach is executed in an action", () => {
-	class M extends Model {
-		@observable count = 0;
-		modelDidAttach() {
-			this.count++;
-		}
-	}
-
-	expect(() => new M()).not.toThrow();
+test("direct new calls are disallowed", () => {
+	class M extends Model {}
+	expect(() => new M()).toThrowError();
 });
 
-test("will call modelDidAttach when children are attached", () => {
-	let count = 0;
-
-	class CM extends Model {
-		modelDidAttach() {
-			count++;
+describe("model lifecylce", () => {
+	test("modelDidInit is executed when a model is created", () => {
+		class M extends Model {
+			count = 0;
+			@state prop = 0;
+			modelDidInit() {
+				expect(this.prop).toBe(1);
+				this.count++;
+			}
 		}
-	}
 
-	class M extends Model {
-		@child cm: CM;
+		const m = M.create({ prop: 1 });
+		expect(m.count).toBe(1);
+	});
 
-		@action setCM() {
-			this.cm = new CM();
+	test("modelDidInit has the initial paramters passed into create", () => {
+		const snapshot = { prop: 1 };
+		const paramA = {};
+		const paramB = {};
+		class M extends Model {
+			count = 0;
+			@state prop = 0;
+			modelDidInit(s, a, b) {
+				expect(s).toBe(snapshot);
+				expect(a).toBe(paramA);
+				expect(b).toBe(paramB);
+				expect(this.prop).toBe(1);
+				this.count++;
+			}
 		}
-	}
 
-	const m = new M();
-	expect(count).toBe(0);
-	m.setCM();
-	expect(count).toBe(1);
-});
+		const m = M.create(snapshot, paramA, paramB);
+		expect(m.count).toBe(1);
+	});
 
-test("will call modelDidAttach on children that are attached (delayed list)", () => {
-	let count = 0;
+	test("will call modelDidAttach when children are attached", () => {
+		let count = 0;
 
-	class CM extends Model {
-		modelDidAttach() {
-			count++;
+		class CM extends Model {
+			modelDidAttach() {
+				count++;
+			}
 		}
-	}
 
-	class M extends Model {
-		@children cms: CM[] = [];
+		class M extends Model {
+			@child cm: CM;
 
-		@action addCM() {
-			this.cms.push(new CM());
+			@action setCM() {
+				this.cm = CM.create();
+			}
 		}
-	}
 
-	const m = new M();
-	expect(count).toBe(0);
-	m.addCM();
-	expect(count).toBe(1);
-	m.addCM();
-	expect(count).toBe(2);
-});
+		const m = M.create();
+		expect(count).toBe(0);
+		m.setCM();
+		expect(count).toBe(1);
+	});
 
-test("will call modelWillDetach when children are detached", () => {
-	let count = 0;
+	test("will call modelDidAttach on children that are attached (delayed list)", () => {
+		let count = 0;
 
-	class CM extends Model {
-		modelWillDetach() {
-			count++;
+		class CM extends Model {
+			modelDidAttach() {
+				count++;
+			}
 		}
-	}
 
-	class M extends Model {
-		@child cm: CM = new CM();
+		class M extends Model {
+			@children cms: CM[] = [];
 
-		@action clearCM() {
-			this.cm = null;
+			@action addCM() {
+				this.cms.push(CM.create());
+			}
 		}
-	}
 
-	const m = new M();
-	expect(count).toBe(0);
-	m.clearCM();
-	expect(count).toBe(1);
-});
+		const m = M.create();
+		expect(count).toBe(0);
+		m.addCM();
+		expect(count).toBe(1);
+		m.addCM();
+		expect(count).toBe(2);
+	});
 
-test("will call modelWillDetach when children are detached (delayed list)", () => {
-	let count = 0;
+	test("will call modelWillDetach when children are detached", () => {
+		let count = 0;
 
-	class CM extends Model {
-		modelWillDetach() {
-			count++;
+		class CM extends Model {
+			modelWillDetach() {
+				count++;
+			}
 		}
-	}
 
-	class M extends Model {
-		@children cms: CM[] = [new CM(), new CM()];
+		class M extends Model {
+			@child cm: CM = CM.create();
 
-		@action popCM() {
-			this.cms.pop();
+			@action clearCM() {
+				this.cm = null;
+			}
 		}
-	}
 
-	const m = new M();
-	expect(count).toBe(0);
-	m.popCM();
-	expect(count).toBe(1);
-	m.popCM();
-	expect(count).toBe(2);
+		const m = M.create();
+		expect(count).toBe(0);
+		m.clearCM();
+		expect(count).toBe(1);
+	});
+
+	test("will call modelWillDetach when children are detached (delayed list)", () => {
+		let count = 0;
+
+		class CM extends Model {
+			modelWillDetach() {
+				count++;
+			}
+		}
+
+		class M extends Model {
+			@children cms: CM[] = [CM.create(), CM.create()];
+
+			@action popCM() {
+				this.cms.pop();
+			}
+		}
+
+		const m = M.create();
+		expect(count).toBe(0);
+		m.popCM();
+		expect(count).toBe(1);
+		m.popCM();
+		expect(count).toBe(2);
+	});
+
+	test("will not trigger lifecycle methods when re-ordering", () => {
+		let count = 0;
+
+		class CM extends Model {
+			modelWillDetach() {
+				count++;
+			}
+
+			modelDidAttach() {
+				count++;
+			}
+		}
+
+		class M extends Model {
+			@children cms: CM[] = [CM.create(), CM.create()];
+
+			@action reverse() {
+				this.cms = this.cms.slice().reverse();
+			}
+		}
+
+		const m = M.create();
+		expect(count).toBe(2);
+		m.reverse();
+		expect(count).toBe(2);
+	});
 });
 
 test("can re-attach an detached model", () => {
@@ -160,12 +220,12 @@ test("can re-attach an detached model", () => {
 		}
 
 		@action setCM() {
-			this.cm = this._cm || new CM();
+			this.cm = this._cm || CM.create();
 			this._cm = null;
 		}
 	}
 
-	const m = new M();
+	const m = M.create();
 	m.setCM();
 	m.cm.incState();
 	expect(m.cm.computed).toBe(2);
@@ -184,23 +244,18 @@ test("can re-attach an detached model", () => {
 
 test("can have a child model", () => {
 	class MC extends Model {
-		@observable state = 0;
-
-		constructor(state) {
-			super();
-			this.state = state;
-		}
+		@state state = 0;
 	}
 
 	class M extends Model {
 		@child mc: MC | null = null;
 
 		@action addModel(state: number) {
-			this.mc = new MC(state);
+			this.mc = MC.create({ state });
 		}
 	}
 
-	const m = new M();
+	const m = M.create();
 	expect(m.mc).toBe(null);
 	m.addModel(1);
 	expect(m.mc).toBeInstanceOf(MC);
@@ -212,11 +267,11 @@ test("child models are reactive properties", () => {
 		@child mc: M | null = null;
 
 		@action setModel() {
-			this.mc = new M();
+			this.mc = M.create();
 		}
 	}
 
-	const m = new M();
+	const m = M.create();
 	let count = 0;
 	reaction(
 		() => m.mc,
@@ -231,10 +286,10 @@ test("child models are reactive properties", () => {
 test("model can initialzie child model", () => {
 	class MC extends Model {}
 	class M extends Model {
-		@child mc: MC = new MC();
+		@child mc: MC = MC.create();
 	}
 
-	const m = new M();
+	const m = M.create();
 	expect(m.mc).toBeInstanceOf(MC);
 });
 
@@ -247,317 +302,86 @@ test("child model can't be placed in multiple locations in the tree", () => {
 		}
 	}
 
-	const mc = new MC();
-	const m1 = new M();
-	const m2 = new M();
+	const mc = MC.create();
+	const m1 = M.create();
+	const m2 = M.create();
 	m1.setModel(mc);
 	expect(() => m2.setModel(mc)).toThrow();
 });
 
-test("identifiers can only be assigned once", () => {
-	class M1 extends Model {
-		@identifier id = 0;
+describe("model identifiers", () => {
+	test("identifiers can only be assigned once after init", () => {
+		class M1 extends Model {
+			@identifier id = 0;
 
-		constructor() {
-			super();
-			this.id = 1;
-		}
-	}
-
-	class M2 extends Model {
-		@identifier id;
-
-		constructor() {
-			super();
-			this.id = 1;
-		}
-
-		@action setId() {
-			this.id = 2;
-		}
-	}
-
-	expect(() => new M1()).toThrow();
-	const m = new M2();
-	expect(() => m.setId()).toThrow();
-});
-
-test("can assing a model to a reference", () => {
-	class MC extends Model {
-		@identifier id = 0;
-	}
-
-	class M extends Model {
-		@child mc: MC = new MC();
-		@modelRef mr: MC;
-
-		@action setRef() {
-			this.mr = this.mc;
-		}
-	}
-
-	const m = new M();
-	m.setRef();
-	expect(m.mc).toBe(m.mr);
-});
-
-test("can't assing a model without an identifier to a reference", () => {
-	class MC extends Model {}
-	class M extends Model {
-		@child mc: MC = new MC();
-		@modelRef mr: MC;
-
-		@action setRef() {
-			this.mr = this.mc;
-		}
-	}
-
-	const m = new M();
-	expect(() => m.setRef()).toThrow();
-});
-
-test("model ref is not available until the referenced model is attached", () => {
-	class MC extends Model {
-		@identifier id = 0;
-	}
-
-	class M extends Model {
-		mctemp = new MC();
-		@child mc: MC | null = null;
-		@modelRef mr: MC = this.mctemp;
-
-		@action setChild() {
-			this.mc = this.mctemp;
-		}
-	}
-
-	const m = new M();
-	expect(m.mr).toBe(undefined);
-	m.setChild();
-	expect(m.mr).toBe(m.mc);
-});
-
-test("model ref will become undefined when model is detached", () => {
-	class MC extends Model {
-		@identifier id = 0;
-	}
-	class M extends Model {
-		@child mc: MC = new MC();
-		@modelRef mr: MC;
-
-		@action setRef() {
-			this.mr = this.mc;
-		}
-
-		@action clearModel() {
-			this.mc = null;
-		}
-	}
-
-	const m = new M();
-	expect(m.mr).toBe(undefined);
-	m.setRef();
-	expect(m.mc).toBe(m.mr);
-	m.clearModel();
-	expect(m.mr).toBe(undefined);
-});
-
-test("model ref will become undefined when model is detached (array)", () => {
-	class MC extends Model {
-		@identifier id;
-		constructor(id) {
-			super();
-			this.id = id;
-		}
-	}
-
-	class M extends Model {
-		@children mc: MC[] = [new MC(0), new MC(1)];
-		@modelRef mr: MC;
-
-		@action setRef() {
-			this.mr = this.mc[0];
-		}
-
-		@action clearModel() {
-			this.mc = [];
-		}
-	}
-
-	const m = new M();
-	m.setRef();
-	expect(m.mc[0]).toBe(m.mr);
-	m.clearModel();
-	expect(m.mr).toBe(undefined);
-});
-
-test("model ref is reactive", () => {
-	class MC extends Model {
-		@identifier id;
-		constructor(id) {
-			super();
-			this.id = id;
-		}
-	}
-	class M extends Model {
-		@children mc: MC[] = [new MC(0), new MC(1)];
-		@modelRef mr: MC;
-
-		@action setModel(index: number) {
-			this.mr = index >= 0 ? this.mc[index] : undefined;
-		}
-	}
-
-	const m = new M();
-	let current;
-
-	autorun(() => (current = m.mr));
-
-	expect(current).toBe(undefined);
-	m.setModel(0);
-	expect(current).toBe(m.mc[0]);
-	m.setModel(1);
-	expect(current).toBe(m.mc[1]);
-	m.setModel(-1);
-	expect(current).toBe(undefined);
-});
-
-test("model ref is restored when model is re-attached", () => {
-	class MC extends Model {
-		@identifier id = 0;
-	}
-	class M extends Model {
-		@child mc: MC = new MC();
-		@modelRef mr: MC;
-		_temp: MC;
-
-		@action setRef() {
-			this.mr = this.mc;
-		}
-
-		@action clearModel() {
-			this._temp = this.mc;
-			this.mc = null;
-		}
-
-		@action resetModel() {
-			this.mc = this._temp;
-		}
-	}
-
-	const m = new M();
-	m.setRef();
-	m.clearModel();
-	expect(m.mr).toBe(undefined);
-	expect(m.mc).toBe(null);
-	m.resetModel();
-	expect(m.mc).not.toBe(null);
-	expect(m.mr).toBe(m.mc);
-});
-
-test("model ref is NOT restored when model is re-attached to a another tree root", () => {
-	let temp: MC | null = null;
-
-	class MC extends Model {
-		@identifier id = 0;
-	}
-	class M extends Model {
-		@child mc: MC = new MC();
-		@modelRef mr: MC;
-		private setRef: boolean = false;
-
-		constructor(setRef = false) {
-			super();
-			this.setRef = setRef;
-		}
-
-		modelDidAttach() {
-			if (this.setRef) {
-				this.mr = this.mc;
+			constructor() {
+				super();
+				this.id = 1;
 			}
 		}
 
-		@action clearModel() {
-			temp = this.mc;
-			this.mc = null;
+		class M2 extends Model {
+			@identifier id;
+
+			constructor() {
+				super();
+				this.id = 1;
+			}
+
+			@action setId() {
+				this.id = 2;
+			}
 		}
 
-		@action resetModel() {
-			this.mc = temp;
+		expect(() => M1.create()).not.toThrowError();
+		const m = M2.create();
+		expect(() => m.setId()).toThrowError();
+	});
+
+	test("identifiers can be assigned in modelDidInit", () => {
+		class M extends Model {
+			@identifier id;
+
+			modelDidInit() {
+				this.id = 1;
+			}
 		}
-	}
 
-	const m1 = new M(true);
-	const m2 = new M();
+		const m = M.create();
+		expect(m.id).toBe(1);
+	});
 
-	m1.clearModel();
-	expect(m1.mr).toBe(undefined);
-	expect(m1.mc).toBe(null);
-	m2.resetModel();
-	expect(m1.mr).toBe(undefined);
-	expect(m1.mc).toBe(null);
+	test("identifiers can be re-assigned in a snapshot", () => {
+		class M extends Model {
+			@identifier id = 1;
+			@action badAction() {
+				this.id++;
+			}
+		}
+
+		expect(() => M.create({ id: 1 })).not.toThrowError();
+		expect(() => M.create({ id: 2 })).not.toThrowError();
+		expect(() => M.create().badAction()).toThrowError();
+	});
 });
 
 test("can get the parent of a model", () => {
 	class MC extends Model {}
 	class M extends Model {
-		@child mc: MC = new MC();
+		@child mc: MC = MC.create();
 		@child mc2: MC | null = null;
-		@children mcs: MC[] = [new MC(), new MC()];
+		@children mcs: MC[] = [MC.create(), MC.create()];
 	}
 
-	const m = new M();
+	const m = M.create();
 	expect(m.parent).toBe(null);
 	expect(m.mc.parent).toBe(m);
 	expect(m.mcs.length).toBe(2);
 	m.mcs.forEach((mc) => expect(mc.parent).toBe(m));
-	m.mc2 = new MC();
+	m.mc2 = MC.create();
 	expect(m.mc2.parent).toBe(m);
-	m.mcs.push(new M());
+	m.mcs.push(MC.create());
 	expect(m.mcs[m.mcs.length - 1].parent).toBe(m);
-});
-
-test("model refs can be an array", () => {
-	class MC extends Model {
-		@identifier id;
-		constructor(id) {
-			super();
-			this.id = id;
-		}
-	}
-	class M extends Model {
-		@child mc1: MC = new MC(1);
-		@child mc2: MC = new MC(2);
-		@modelRefs mr: MC[] = [];
-		_temp: MC;
-
-		@action setRef() {
-			this.mr = [this.mc1, this.mc2];
-		}
-
-		@action clearModel1() {
-			this.mc1 = null;
-		}
-
-		@action clearModel2() {
-			this._temp = this.mc2;
-			this.mc2 = null;
-		}
-
-		@action restoreModel2() {
-			this.mc2 = this._temp;
-		}
-	}
-
-	const m = new M();
-	m.setRef();
-	expect(m.mr).toEqual([m.mc1, m.mc2]);
-	m.clearModel1();
-	expect(m.mr).toEqual([m.mc2]);
-	m.clearModel2();
-	expect(m.mr).toEqual([]);
-	m.restoreModel2();
-	expect(m.mr).toEqual([m.mc2]);
 });
 
 test("children models can be set with Object.defineProperty", () => {
@@ -581,13 +405,542 @@ test("children models can be set with Object.defineProperty", () => {
 		}
 
 		@action addChild() {
-			this.mcs.push(new MC());
+			this.mcs.push(MC.create());
 		}
 	}
 
-	const m = new M();
+	const m = M.create();
 	m.addChild();
 	expect(childAttachedCount).toBe(1);
 	m.addChild();
 	expect(childAttachedCount).toBe(2);
+});
+
+describe("model references", () => {
+	test("can assing a model to a reference", () => {
+		class MC extends Model {
+			@identifier id = 0;
+		}
+
+		class M extends Model {
+			@child mc: MC = MC.create();
+			@modelRef mr: MC;
+
+			@action setRef() {
+				this.mr = this.mc;
+			}
+		}
+
+		const m = M.create();
+		m.setRef();
+		expect(m.mc).toBe(m.mr);
+	});
+
+	test("can't assing a model without an identifier to a reference", () => {
+		class MC extends Model {}
+		class M extends Model {
+			@child mc: MC = MC.create();
+			@modelRef mr: MC;
+
+			@action setRef() {
+				this.mr = this.mc;
+			}
+		}
+
+		const m = M.create();
+		expect(() => m.setRef()).toThrow();
+	});
+
+	test("model ref is not available until the referenced model is attached", () => {
+		class MC extends Model {
+			@identifier id = 0;
+		}
+
+		class M extends Model {
+			mctemp = MC.create();
+			@child mc: MC | null = null;
+			@modelRef mr: MC = this.mctemp;
+
+			@action setChild() {
+				this.mc = this.mctemp;
+			}
+		}
+
+		const m = M.create();
+		expect(m.mr).toBe(undefined);
+		m.setChild();
+		expect(m.mr).toBe(m.mc);
+	});
+
+	test("model ref will become undefined when model is detached", () => {
+		class MC extends Model {
+			@identifier id = 0;
+		}
+		class M extends Model {
+			@child mc: MC = MC.create();
+			@modelRef mr: MC;
+
+			@action setRef() {
+				this.mr = this.mc;
+			}
+
+			@action clearModel() {
+				this.mc = null;
+			}
+		}
+
+		const m = M.create();
+		expect(m.mr).toBe(undefined);
+		m.setRef();
+		expect(m.mc).toBe(m.mr);
+		m.clearModel();
+		expect(m.mr).toBe(undefined);
+	});
+
+	test("model ref will become undefined when model is detached (array)", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+
+		class M extends Model {
+			@children mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@modelRef mr: MC;
+
+			@action setRef() {
+				this.mr = this.mc[0];
+			}
+
+			@action clearModel() {
+				this.mc = [];
+			}
+		}
+
+		const m = M.create();
+		m.setRef();
+		expect(m.mc[0]).toBe(m.mr);
+		m.clearModel();
+		expect(m.mr).toBe(undefined);
+	});
+
+	test("model ref is reactive", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+		class M extends Model {
+			@children mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@modelRef mr: MC;
+
+			@action setModel(index: number) {
+				this.mr = index >= 0 ? this.mc[index] : undefined;
+			}
+		}
+
+		const m = M.create();
+		let current;
+
+		autorun(() => (current = m.mr));
+
+		expect(current).toBe(undefined);
+		m.setModel(0);
+		expect(current).toBe(m.mc[0]);
+		m.setModel(1);
+		expect(current).toBe(m.mc[1]);
+		m.setModel(-1);
+		expect(current).toBe(undefined);
+	});
+
+	test("model ref is restored when model is re-attached", () => {
+		class MC extends Model {
+			@identifier id = 0;
+		}
+		class M extends Model {
+			@child mc: MC = MC.create();
+			@modelRef mr: MC;
+			_temp: MC;
+
+			@action setRef() {
+				this.mr = this.mc;
+			}
+
+			@action clearModel() {
+				this._temp = this.mc;
+				this.mc = null;
+			}
+
+			@action resetModel() {
+				this.mc = this._temp;
+			}
+		}
+
+		const m = M.create();
+		m.setRef();
+		m.clearModel();
+		expect(m.mr).toBe(undefined);
+		expect(m.mc).toBe(null);
+		m.resetModel();
+		expect(m.mc).not.toBe(null);
+		expect(m.mr).toBe(m.mc);
+	});
+
+	test("model ref is NOT restored when model is re-attached to a another tree root", () => {
+		let temp: MC | null = null;
+
+		class MC extends Model {
+			@identifier id = 0;
+		}
+		class M extends Model {
+			@child mc: MC = MC.create();
+			@modelRef mr: MC;
+			@state setRef: boolean = false;
+
+			modelDidAttach() {
+				if (this.setRef) {
+					this.mr = this.mc;
+				}
+			}
+
+			@action clearModel() {
+				temp = this.mc;
+				this.mc = null;
+			}
+
+			@action resetModel() {
+				this.mc = temp;
+			}
+		}
+
+		const m1 = M.create({ setRef: true });
+		const m2 = M.create();
+
+		m1.clearModel();
+		expect(m1.mr).toBe(undefined);
+		expect(m1.mc).toBe(null);
+		m2.resetModel();
+		expect(m1.mr).toBe(undefined);
+		expect(m1.mc).toBe(null);
+	});
+	test("model refs can be an array", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+		class M extends Model {
+			@child mc1 = MC.create({ id: 1 });
+			@child mc2: MC = MC.create({ id: 2 });
+			@modelRefs mr: MC[] = [];
+			_temp: MC;
+
+			@action setRef() {
+				this.mr = [this.mc1, this.mc2];
+			}
+
+			@action clearModel1() {
+				this.mc1 = null;
+			}
+
+			@action clearModel2() {
+				this._temp = this.mc2;
+				this.mc2 = null;
+			}
+
+			@action restoreModel2() {
+				this.mc2 = this._temp;
+			}
+		}
+
+		const m = M.create();
+		m.setRef();
+		expect(m.mr).toEqual([m.mc1, m.mc2]);
+		m.clearModel1();
+		expect(m.mr).toEqual([m.mc2]);
+		m.clearModel2();
+		expect(m.mr).toEqual([]);
+		m.restoreModel2();
+		expect(m.mr).toEqual([m.mc2]);
+	});
+
+	test("model state will resolve references in the same snapshot (mst-example)", () => {
+		class Todo extends Model {
+			@identifier id: string;
+			@state title: string;
+		}
+
+		class Todos extends Model {
+			@children(Todo) todos = [];
+			@modelRef selectedTodo: Todo | undefined;
+			@action empty() {
+				this.todos = [];
+			}
+			@action swap() {
+				this.todos = [Todo.create({ id: "47", title: "Get tea" })];
+			}
+		}
+
+		const storeInstance = Todos.create({
+			todos: [
+				{
+					id: "47",
+					title: "Get coffee",
+				},
+			],
+			selectedTodo: "47",
+		});
+
+		expect(storeInstance.selectedTodo.title).toBe("Get coffee");
+		storeInstance.swap();
+		expect(storeInstance.selectedTodo.title).toBe("Get tea");
+		storeInstance.empty();
+		expect(storeInstance.selectedTodo).toBe(undefined);
+	});
+});
+
+describe("model state", () => {
+	let id = 0;
+
+	class MCA extends Model {
+		@identifier id;
+		@state propA = 0;
+		@state propB = 0;
+		@observable ignored = 0;
+
+		modelDidInit() {
+			if (this.id == null) {
+				this.id = id++;
+			}
+		}
+	}
+
+	class MCB extends Model {
+		@identifier id;
+		@state prop = 0;
+		@observable ignored = 0;
+		@children(MCA) mcas: MCA[] = [MCA.create(), MCA.create()];
+		@modelRef mcaRef: MCA = this.mcas[0];
+
+		modelDidInit() {
+			if (this.id == null) {
+				this.id = id++;
+			}
+		}
+	}
+
+	class M extends Model {
+		@state prop = 0;
+		@observable ignored = 0;
+		@children(MCA) mcas: MCA[] = [];
+		@children(MCB) mcbs: MCB[] = [MCB.create(), MCB.create()];
+		@child(MCA) mca: MCA = MCA.create();
+		anotherIgnored = 0;
+		@action inc() {
+			this.prop++;
+		}
+	}
+
+	const modelJSON = {
+		prop: 0,
+		mcas: [],
+		mcbs: [
+			{
+				id: 2,
+				prop: 0,
+				mcas: [
+					{
+						id: 0,
+						propA: 0,
+						propB: 0,
+					},
+					{
+						id: 1,
+						propA: 0,
+						propB: 0,
+					},
+				],
+				mcaRef: 0,
+			},
+			{
+				id: 5,
+				prop: 0,
+				mcas: [
+					{
+						id: 3,
+						propA: 0,
+						propB: 0,
+					},
+					{
+						id: 4,
+						propA: 0,
+						propB: 0,
+					},
+				],
+				mcaRef: 3,
+			},
+		],
+		mca: {
+			id: 6,
+			propA: 0,
+			propB: 0,
+		},
+	};
+
+	beforeEach(() => {
+		id = 0;
+	});
+
+	test("model state is observable", () => {
+		let count = 0;
+
+		const m = M.create();
+		autorun(() => {
+			count++;
+			m.prop;
+		});
+
+		m.inc();
+		expect(count).toBe(2);
+		expect(m.prop).toBe(1);
+	});
+
+	test("model state is serializable", () => {
+		const m = M.create();
+		expect(toSnapshot(m)).toEqual(modelJSON);
+	});
+
+	test("model state can be loaded from snapshot", () => {
+		const m = M.create(modelJSON);
+		expect(toSnapshot(m)).toEqual(modelJSON);
+	});
+
+	test("model state loaded from snapshot preserves references", () => {
+		const m = M.create(modelJSON);
+		expect(m.mcbs[0].mcaRef).toBe(m.mcbs[0].mcas[0]);
+	});
+
+	test("can clone model state with Model.create(toSnapshot(model))", () => {
+		const m = M.create();
+		m.ignored++;
+		m.anotherIgnored++;
+		const mClone = M.create(toSnapshot(m));
+		expect(mClone.ignored).toBe(0);
+		expect(mClone.anotherIgnored).toBe(0);
+		expect(m).not.toEqual(mClone);
+
+		expect(toSnapshot(m)).toEqual(modelJSON);
+		expect(toSnapshot(m)).toEqual(toSnapshot(mClone));
+	});
+
+	test("model snapshot produces the same reference if nothing is changed", () => {
+		const m = M.create();
+		expect(toSnapshot(m)).toBe(toSnapshot(m));
+		const oldSnapshot = toSnapshot(m);
+		m.inc();
+		expect(toSnapshot(m)).not.toBe(oldSnapshot);
+	});
+
+	test("model snapshots accept real model referecens", () => {
+		class MC extends Model {
+			@identifier prop;
+		}
+		class M extends Model {
+			@child mc: MC;
+			@children mcs: MC[];
+			@modelRef mr: MC;
+			@modelRefs mrs: MC[];
+		}
+
+		const mca = MC.create({ prop: 0 });
+		const mcb = MC.create({ prop: 1 });
+		const mcc = MC.create({ prop: 2 });
+
+		const m = M.create({ mc: mca, mcs: [mcb, mcc], mr: mca, mrs: [mcb] });
+
+		expect(m.mc).toBe(mca);
+		expect(m.mcs[0]).toBe(mcb);
+		expect(m.mcs[1]).toBe(mcc);
+		expect(m.mr).toBe(mca);
+		expect(m.mrs[0]).toBe(mcb);
+	});
+
+	test("onSnapshotChange", () => {
+		let count = 0;
+		class MC extends Model {
+			@state prop = 0;
+
+			@action action() {
+				this.prop++;
+			}
+		}
+
+		class M extends Model {
+			@state propA = 0;
+			@state propB = 0;
+			@observable obs = 0;
+			@child mc: MC = MC.create();
+
+			@action action() {
+				this.propA++;
+				this.propB++;
+
+				this.mc.action();
+			}
+		}
+
+		const m = M.create();
+		const unsub = onSnapshot(m, (snapshot, model) => {
+			expect(model).toBe(m);
+			expect(snapshot).toEqual(toSnapshot(m));
+			count++;
+		});
+
+		m.action();
+		expect(count).toBe(1);
+		m.mc.action();
+		expect(count).toBe(2);
+		unsub();
+		m.action();
+		expect(count).toBe(2);
+	});
+
+	test("changing referenced models trigger a snapshot change", () => {
+		let id = 0;
+		class MC extends Model {
+			@identifier id = id++;
+		}
+
+		class M extends Model {
+			@child mca: MC;
+			@child mcb: MC;
+			@modelRefs mcrs: MC[];
+			@modelRef mcr: MC;
+
+			@action setRef(m: MC) {
+				this.mcr = m;
+			}
+			@action setRefs(ms: MC[]) {
+				this.mcrs = ms;
+			}
+			@action clearMCB() {
+				this.mcb = null;
+			}
+		}
+
+		let count = 0;
+		const mca = MC.create();
+		const mcb = MC.create();
+		const m = M.create({ mc: mca, mcb: mcb, mcrs: [mca], mcr: mca });
+		onSnapshot(m, () => {
+			count++;
+		});
+		expect(count).toBe(0);
+		m.setRef(m.mcb);
+		expect(count).toBe(1);
+		m.setRefs([m.mcb]);
+		expect(count).toBe(2);
+		m.clearMCB();
+		expect(count).toBe(3);
+		expect(toSnapshot(m)).toEqual({
+			mca: undefined,
+			mcb: undefined,
+			mcr: undefined,
+			mcrs: [],
+		});
+	});
 });

@@ -14,7 +14,7 @@ export function createContainer<
 	T extends new (...args: unknown[]) => InstanceType<T>
 >(Container: T): InstanceType<T> {
 	if (Model.isPrototypeOf(Container)) {
-		return new Container();
+		return ((Container as unknown) as typeof Model).create() as InstanceType<T>;
 	}
 
 	return mount(createStore(Container));

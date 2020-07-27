@@ -516,7 +516,7 @@ test("models on the store can be accessed", () => {
 		@model m: M;
 	}
 
-	const m = new M();
+	const m = M.create();
 	const s = mount(createStore(S, { models: { m } }));
 	expect(s.m).toBe(m);
 });
@@ -538,13 +538,13 @@ test("models on the store are read only", () => {
 	}
 
 	const s = mount(createStore(S));
-	expect(() => (s.m = new M())).toThrow();
+	expect(() => (s.m = M.create())).toThrow();
 });
 
 test("models on the store can't have an initializer", () => {
 	class M extends Model {}
 	class S extends Store {
-		@model m: M = new M();
+		@model m: M = M.create();
 	}
 
 	expect(() => mount(createStore(S))).toThrow();
@@ -556,7 +556,7 @@ test("models on the store can be an array", () => {
 		@model ms: M[];
 	}
 
-	const models = [new M(), new M()];
+	const models = [M.create(), M.create()];
 	const s = mount(createStore(S, { models: { ms: models } }));
 	expect(s.ms).toEqual(models);
 });
@@ -587,8 +587,8 @@ test("models on the store can be updated", () => {
 		}
 	}
 
-	const m1 = new M1();
-	const m2 = new M2();
+	const m1 = M1.create();
+	const m2 = M2.create();
 	const s = mount(createStore(S, { models: { m1, m2 } }));
 	expect(s.cs.m).toBe(m1);
 	s.switchModel();
@@ -629,8 +629,8 @@ test("models on the store are reactive", () => {
 		}
 	}
 
-	const m1 = new M1();
-	const m2 = new M2();
+	const m1 = M1.create();
+	const m2 = M2.create();
 	const s = mount(createStore(S, { models: { m1, m2 } }));
 
 	reaction(

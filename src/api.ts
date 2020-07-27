@@ -1,8 +1,8 @@
-import { type } from "lobx";
-import { StoreElement } from "./types";
+import { StoreElement, Snapshot } from "./types";
 import Store, { allowNewStore } from "./store/Store";
-import { getStoreAdm, storePropertyType } from "./store/StoreAdministration";
-import { modelPropertyType } from "./model/ModelAdministration";
+import { getStoreAdm } from "./store/StoreAdministration";
+import Model from "./model/Model";
+import { getModelAdm } from "./model/ModelAdministration";
 
 export function mount<T extends Store>(container: T): T {
 	return allowNewStore(() => {
@@ -25,8 +25,13 @@ export function unmount<S extends Store>(container: S): void {
 	internalStore.unmount();
 }
 
-export const rStateTypes = {
-	...type,
-	...storePropertyType,
-	...modelPropertyType,
-};
+export function toSnapshot(model: Model): Snapshot {
+	return getModelAdm(model).getSnapshot();
+}
+
+export function onSnapshot(
+	model: Model,
+	callback: (snapshot: Snapshot, model: Model) => void
+): () => void {
+	return getModelAdm(model).onSnapshotChange(callback);
+}

@@ -1,10 +1,44 @@
 import { ModelAdministration, getModelAdm } from "./ModelAdministration";
-import { Configuration } from "../types";
+import { Configuration, Snapshot } from "../types";
+
+let initEnabled = false;
+// can use WeakSet here but browser support is worse
+const initializedModels: WeakMap<Model, true> = new WeakMap();
+export function isModelInitialized(model: Model): boolean {
+	return initializedModels.has(model) ? initializedModels.get(model)! : false;
+}
 
 export default class Model {
 	static types: unknown = {};
+	static childTypes: unknown = {};
+
+	static create<T extends Model = Model>(
+		this: { new (...args: unknown[]): T },
+		snapshot?: Snapshot,
+		...args: unknown[]
+	): T {
+		let instance: T;
+		try {
+			initEnabled = true;
+			instance = new this();
+		} finally {
+			initEnabled = false;
+		}
+		const adm = getModelAdm(instance);
+		snapshot && adm.loadSnapshot(snapshot);
+		initializedModels.set(instance, true);
+		instance.modelDidInit(snapshot, ...args);
+
+		return instance;
+	}
 
 	constructor() {
+		if (!initEnabled) {
+			throw new Error(
+				"r-state-tree: Can't initialize model directly, use `YourModel.create()` instead"
+			);
+		}
+
 		const config = (this.constructor as typeof Model).types as Configuration<
 			this
 		>;
@@ -17,6 +51,9 @@ export default class Model {
 	get parent(): Model | null {
 		return getModelAdm(this).parent?.proxy ?? null;
 	}
+
+	// eslint-disable-next-line @typescript-eslint/no-empty-function
+	modelDidInit(snapshot?: Snapshot, ...args: unknown[]): void {}
 
 	// eslint-disable-next-line @typescript-eslint/no-empty-function
 	modelDidAttach(): void {}

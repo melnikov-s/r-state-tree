@@ -1,32 +1,23 @@
 import { observable } from "lobx";
 import { IdType } from "../types";
 import Model from "./Model";
-import { getModelAdm } from "./ModelAdministration";
 import { graphOptions } from "../lobx";
 
-const mountedIdMap: WeakMap<
+const attachedIdMap: WeakMap<
 	Model,
 	Map<IdType, Model | undefined>
 > = new WeakMap();
 
 const idMap: WeakMap<Model, IdType> = new WeakMap();
 
-function getRootModel(model: Model): Model {
-	return getModelAdm(model).root!.proxy;
-}
-
 export function setIdentifier(
 	model: Model,
 	id: string | number,
 	name: string
 ): void {
-	if (idMap.has(model)) {
-		throw new Error("r-state-tree identifier already set.");
-	}
-
 	if (id !== undefined) {
 		idMap.set(model, id);
-		if (getModelAdm(model).parent) {
+		if (model.parent) {
 			onModelAttached(model);
 		}
 	}
@@ -36,26 +27,37 @@ export function getIdentifier(model: Model): IdType | undefined {
 	return idMap.get(model);
 }
 
-export function getModelById(
-	root: Model | undefined,
-	id: IdType
-): Model | undefined {
-	if (!root) {
-		return undefined;
-	}
-
-	const model = mountedIdMap?.get(root)?.get(id);
-
-	return model;
+export function getModelById(root: Model, id: IdType): Model | undefined {
+	return attachedIdMap.get(root)?.get(id);
 }
 
 export function onModelAttached(model: Model): void {
+	// merge id map with parents id map
+	if (attachedIdMap.has(model)) {
+		const attachedMap = attachedIdMap.get(model);
+		let node = model.parent;
+
+		while (node) {
+			let map = attachedIdMap.get(node);
+
+			if (!map) {
+				map = observable(new Map(), graphOptions);
+				attachedIdMap.set(node, map);
+			}
+
+			attachedMap!.forEach((value, key) => {
+				map!.set(key, value);
+			});
+
+			node = node.parent;
+		}
+	}
+
 	if (idMap.has(model)) {
-		const root = getRootModel(model);
-		let map = mountedIdMap.get(root);
+		let map = attachedIdMap.get(model.parent!);
 		if (!map) {
 			map = observable(new Map(), graphOptions);
-			mountedIdMap.set(root, map);
+			attachedIdMap.set(model.parent!, map);
 		}
 		const id = idMap.get(model)!;
 		if (map.has(id)) {
@@ -68,9 +70,25 @@ export function onModelAttached(model: Model): void {
 
 // TODO: clean up if not observed
 export function onModelDetached(model: Model): void {
+	if (attachedIdMap.has(model)) {
+		const attachedMap = attachedIdMap.get(model);
+		let node = model.parent;
+
+		while (node) {
+			const map = attachedIdMap.get(node);
+
+			if (map) {
+				attachedMap!.forEach((value, key) => {
+					map!.delete(key);
+				});
+			}
+
+			node = node.parent;
+		}
+	}
+
 	if (idMap.has(model)) {
-		const root = getRootModel(model);
-		const map = mountedIdMap.get(root);
+		const map = attachedIdMap.get(model.parent!);
 		if (map) {
 			const id = idMap.get(model)!;
 			if (map.has(id)) {
