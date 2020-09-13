@@ -11,10 +11,10 @@ import {
 	modelRefsType,
 } from "./types";
 
-function makeDecorator(type: unknown): any {
+function makeDecorator(type: unknown, optType: unknown = type): any {
 	return function (...args: unknown[]) {
 		if (args.length === 1) {
-			return makeDecorator((type as Function)(args[0]));
+			return makeDecorator((optType as Function)(args[0]));
 		} else {
 			const [target, propertyKey, descriptor] = args as [
 				object,
@@ -33,7 +33,7 @@ function makeDecorator(type: unknown): any {
 	};
 }
 
-export const action = makeDecorator(type.action({ async: true }));
+export const action = makeDecorator(type.action({ async: true }), type.action);
 export const computed = makeDecorator(type.computed);
 export const observable = makeDecorator(type.observable);
 export const child = makeDecorator(childType);
