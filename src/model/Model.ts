@@ -9,12 +9,12 @@ export function isModelInitialized(model: Model): boolean {
 }
 
 export default class Model {
-	static types: unknown = {};
-	static childTypes: unknown = {};
+	static types: object = {};
+	static childTypes: object = {};
 
 	static create<T extends Model = Model>(
 		this: { new (...args: unknown[]): T },
-		snapshot?: Snapshot,
+		snapshot?: Snapshot<T>,
 		...args: unknown[]
 	): T {
 		let instance: T;
@@ -35,7 +35,7 @@ export default class Model {
 	constructor() {
 		if (!initEnabled) {
 			throw new Error(
-				"r-state-tree: Can't initialize model directly, use `YourModel.create()` instead"
+				`r-state-tree: Can't initialize model directly, use \`${this.constructor.name}.create()\` instead`
 			);
 		}
 
@@ -53,7 +53,7 @@ export default class Model {
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	modelDidInit(snapshot?: Snapshot, ...args: unknown[]): void {}
+	modelDidInit(snapshot?: Snapshot<this>, ...args: unknown[]): void {}
 
 	// eslint-disable-next-line @typescript-eslint/no-empty-function
 	modelDidAttach(): void {}

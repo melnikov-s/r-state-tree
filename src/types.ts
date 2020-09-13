@@ -1,12 +1,5 @@
 import Store from "./store/Store";
 import Model from "./model/Model";
-import { reaction } from "lobx";
-
-export type ReactionParams = [
-	Parameters<typeof reaction>[0],
-	Parameters<typeof reaction>[1]
-];
-export type ReactionReturn = ReturnType<typeof reaction>;
 
 export type StoreElement = {
 	Type: new (...args: unknown[]) => Store;
@@ -55,8 +48,43 @@ export type ConfigurationType = {
 export type ModelConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type StoreConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type Configuration<T> = ModelConfiguration<T> | StoreConfiguration<T>;
-export type Snapshot<T = Model> = Record<string, unknown>;
-export type SnapshotChange<T = Model> = (
+
+type NonFunctionPropertyNames<T> = {
+	[K in keyof T]: T[K] extends Function ? never : K;
+}[keyof T];
+
+enum ModelRefBrand {
+	_ = "",
+}
+export type ModelRef<T extends Model> = ModelRefBrand & T;
+
+export function toRef<T extends Model>(model: T): ModelRef<T> {
+	return model as ModelRef<T>;
+}
+
+type ChildrenToSnapshot<T> = {
+	[K in keyof T]: T[K] extends ModelRef<Model>
+		? IdType
+		: T[K] extends Model
+		? Snapshot<T[K]>
+		: T[K] extends Array<infer R>
+		? R extends ModelRef<Model>
+			? Array<IdType>
+			: R extends Model
+			? Array<Snapshot<R>>
+			: T[K]
+		: T[K];
+};
+
+type Nullable<T> = {
+	[K in keyof T]: T[K] | null;
+};
+
+export type Snapshot<T extends Model = Model> = Nullable<
+	Partial<ChildrenToSnapshot<Pick<T, NonFunctionPropertyNames<T>>>>
+>;
+
+export type SnapshotChange<T extends Model = Model> = (
 	snapshot: Snapshot<T>,
 	model: T
 ) => void;

@@ -13,10 +13,9 @@ import {
 	StoreConfiguration,
 	StoreElement,
 	Props,
-	ReactionParams,
-	ReactionReturn,
 	CommonCfgTypes,
 	StoreCfgTypes,
+	Context,
 } from "../types";
 import { getPropertyDescriptor } from "../utils";
 import computedProxy from "../computedProxy";
@@ -52,23 +51,23 @@ type ChildStoreData = {
 	listener: Listener;
 };
 
-export class StoreAdministration<T extends Store = Store> {
-	proxy: T;
-	source: T;
-	configuration: StoreConfiguration<T>;
+export class StoreAdministration<StoreType extends Store = Store> {
+	proxy: StoreType;
+	source: StoreType;
+	configuration: StoreConfiguration<StoreType>;
 	parent: StoreAdministration | null = null;
 	mounted: boolean = false;
-	computedContext!: T extends Store<Props, infer C> ? C : never;
+	computedContext!: Context;
 	private contextReactionUnsub: (() => void) | null = null;
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData>;
-	private observableProxyGet: ProxyHandler<T>["get"];
-	private observableProxySet: ProxyHandler<T>["set"];
-	private reactionsUnsub: ReactionReturn[] = [];
+	private observableProxyGet: ProxyHandler<StoreType>["get"];
+	private observableProxySet: ProxyHandler<StoreType>["set"];
+	private reactionsUnsub: (() => void)[] = [];
 
-	constructor(source: T, configuration: StoreConfiguration<T>) {
+	constructor(source: StoreType, configuration: StoreConfiguration<StoreType>) {
 		this.source = source;
 		this.proxy = observable.configure(
-			(configuration as unknown) as LobxConfiguration<T>,
+			(configuration as unknown) as LobxConfiguration<StoreType>,
 			source,
 			graphOptions
 		);
@@ -331,15 +330,15 @@ export class StoreAdministration<T extends Store = Store> {
 	}
 
 	private getModelRef(name: PropertyKey): Model | Model[] | null {
-		return this.proxy.props.models?.[name] ?? null;
+		return this.proxy.props.models?.[name as string] ?? null;
 	}
 
 	isRoot(): boolean {
 		return !this.parent;
 	}
 
-	reaction(...args: ReactionParams): ReactionReturn {
-		const unsub = reaction(args[0], args[1], graphOptions);
+	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
+		const unsub = reaction(track, callback, graphOptions);
 		this.reactionsUnsub.push(unsub);
 		return unsub;
 	}
@@ -356,7 +355,7 @@ export class StoreAdministration<T extends Store = Store> {
 					}),
 					graphOptions
 				)
-			);
+			)
 		}
 
 		this.childStoreDataMap.forEach((data) => {

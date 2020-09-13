@@ -13,6 +13,9 @@ import {
 	reaction,
 	onSnapshot,
 	toSnapshot,
+	applySnapshot,
+	ModelRef,
+	toRef,
 } from "../src/index";
 
 test("can create a model", () => {
@@ -25,7 +28,9 @@ test("can create a model", () => {
 
 test("direct new calls are disallowed", () => {
 	class M extends Model {}
-	expect(() => new M()).toThrowError();
+	expect(() => new M()).toThrowErrorMatchingInlineSnapshot(
+		`"r-state-tree: Can't initialize model directly, use \`M.create()\` instead"`
+	);
 });
 
 describe("model lifecylce", () => {
@@ -335,7 +340,9 @@ describe("model identifiers", () => {
 
 		expect(() => M1.create()).not.toThrowError();
 		const m = M2.create();
-		expect(() => m.setId()).toThrowError();
+		expect(() => m.setId()).toThrowErrorMatchingInlineSnapshot(
+			`"r-state-tree identifier already set."`
+		);
 	});
 
 	test("identifiers can be assigned in modelDidInit", () => {
@@ -361,7 +368,9 @@ describe("model identifiers", () => {
 
 		expect(() => M.create({ id: 1 })).not.toThrowError();
 		expect(() => M.create({ id: 2 })).not.toThrowError();
-		expect(() => M.create().badAction()).toThrowError();
+		expect(() => M.create().badAction()).toThrowErrorMatchingInlineSnapshot(
+			`"r-state-tree identifier already set."`
+		);
 	});
 });
 
@@ -666,7 +675,7 @@ describe("model references", () => {
 
 		class Todos extends Model {
 			@children(Todo) todos = [];
-			@modelRef selectedTodo: Todo | undefined;
+			@modelRef selectedTodo: ModelRef<Todo> | undefined;
 			@action empty() {
 				this.todos = [];
 			}
@@ -714,7 +723,7 @@ describe("model state", () => {
 		@state prop = 0;
 		@observable ignored = 0;
 		@children(MCA) mcas: MCA[] = [MCA.create(), MCA.create()];
-		@modelRef mcaRef: MCA = this.mcas[0];
+		@modelRef mcaRef: ModelRef<MCA> = toRef(this.mcas[0]);
 
 		modelDidInit() {
 			if (this.id == null) {
@@ -835,6 +844,89 @@ describe("model state", () => {
 		expect(toSnapshot(m)).not.toBe(oldSnapshot);
 	});
 
+	test("can apply snapshot to existing model", () => {
+		class M extends Model {
+			@state propA = 0;
+			@state propB = 0;
+		}
+
+		const m = M.create();
+		expect(applySnapshot(m, { propA: 1, propB: 1 })).toBe(m);
+		expect(m.propA).toBe(1);
+		expect(m.propB).toBe(1);
+	});
+
+	test("snapshot ids get reconciled for single child model", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+
+		class M extends Model {
+			@child(MC) mc: MC;
+		}
+
+		const m = M.create();
+
+		applySnapshot(m, { mc: { id: 1 } });
+		const mc = m.mc;
+		applySnapshot(m, { mc: { id: 1 } });
+		expect(mc).toBe(m.mc);
+		applySnapshot(m, { mc: { id: 2 } });
+		expect(mc).not.toBe(m.mc);
+	});
+
+	test("snapshot ids get reconciled for child models", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+
+		class M extends Model {
+			@children(MC) mcs: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+		}
+
+		const m = M.create();
+		const mcs = m.mcs.slice();
+		applySnapshot(m, { mcs: [{ id: 1 }, { id: 0 }, { id: 2 }] });
+		expect(m.mcs.length).toBe(3);
+		expect(m.mcs[0].id).toBe(1);
+		expect(m.mcs[1].id).toBe(0);
+		expect(m.mcs[2].id).toBe(2);
+		expect(m.mcs[0]).toBe(mcs[1]);
+		expect(m.mcs[1]).toBe(mcs[0]);
+		applySnapshot(m, { mcs: [{ id: 0 }, { id: 2 }] });
+		expect(m.mcs.length).toBe(2);
+		expect(m.mcs[0].id).toBe(0);
+		expect(m.mcs[1].id).toBe(2);
+		expect(m.mcs[0]).toBe(mcs[0]);
+		expect(m.mcs[1]).not.toBe(mcs[0]);
+		expect(m.mcs[1]).not.toBe(mcs[1]);
+	});
+
+	test("will throw if reconciled child id exists on another parent", () => {
+		let id = 0;
+		class MC extends Model {
+			@identifier id;
+		}
+
+		class M extends Model {
+			@children(MC) mcs: MC[] = [
+				MC.create({ id: id++ }),
+				MC.create({ id: id++ }),
+			];
+		}
+
+		class MP extends Model {
+			@children(M) ms: M[] = [M.create(), M.create()];
+		}
+
+		const mp = MP.create();
+		expect(() =>
+			applySnapshot(mp.ms[1], { mcs: [{ id: 0 }] })
+		).toThrowErrorMatchingInlineSnapshot(
+			`"r-state-tree: model with this id already exists on another parent"`
+		);
+	});
+
 	test("model snapshots accept real model referecens", () => {
 		class MC extends Model {
 			@identifier prop;
@@ -925,7 +1017,7 @@ describe("model state", () => {
 		let count = 0;
 		const mca = MC.create();
 		const mcb = MC.create();
-		const m = M.create({ mc: mca, mcb: mcb, mcrs: [mca], mcr: mca });
+		const m = M.create({ mcb: mcb, mcrs: [mca], mcr: mca });
 		onSnapshot(m, () => {
 			count++;
 		});

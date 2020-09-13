@@ -1,11 +1,4 @@
-import {
-	Props,
-	Context,
-	StoreConfiguration,
-	Configuration,
-	ReactionParams,
-	ReactionReturn,
-} from "../types";
+import { Props, Context, StoreConfiguration, Configuration } from "../types";
 import { observable } from "lobx";
 import {
 	StoreAdministration,
@@ -50,10 +43,12 @@ export function types<T extends Store>(
 	return config;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export default class Store<T extends Props = any, S extends Context = any> {
+export default class Store<
+	PropsType extends Props = Props,
+	ContextType extends Context = Context
+> {
 	static types: unknown = {};
-	props: T = observable({}, graphOptions) as T;
+	props: PropsType = observable({}, graphOptions) as PropsType;
 
 	constructor() {
 		if (!initEnabled) {
@@ -73,12 +68,12 @@ export default class Store<T extends Props = any, S extends Context = any> {
 		return this.props.key;
 	}
 
-	get context(): S {
-		return getStoreAdm(this).computedContext;
+	get context(): ContextType {
+		return getStoreAdm(this).computedContext as ContextType;
 	}
 
-	reaction(...args: ReactionParams): ReactionReturn {
-		return getStoreAdm(this).reaction(...args);
+	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
+		return getStoreAdm(this).reaction(track, callback);
 	}
 
 	provideContext(): null | Record<string, unknown> {

@@ -32,9 +32,29 @@ import { graph, graphOptions } from "../lobx";
 import { Configuration } from "..";
 
 const administrationMap: WeakMap<Model, ModelAdministration> = new WeakMap();
+const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 
-export function getModelAdm(model: Model): ModelAdministration {
+export function getModelAdm<T extends Model>(model: T): ModelAdministration<T> {
 	return administrationMap.get(model)!;
+}
+
+function getSnapshotId(snapshot: Snapshot, Ctor: typeof Model): IdType | null {
+	if (!ctorIdKeyMap.has(Ctor)) {
+		const key =
+			Object.keys(Ctor.types).find(
+				(prop) => Ctor.types[prop].type === ModelCfgTypes.id
+			) ?? null;
+
+		ctorIdKeyMap.set(Ctor, key);
+	}
+
+	const idKey = ctorIdKeyMap.get(Ctor);
+
+	if (idKey) {
+		return snapshot[idKey] as IdType;
+	}
+
+	return null;
 }
 
 function mapConfigure(
@@ -52,22 +72,22 @@ function mapConfigure(
 	return mappedConfigure;
 }
 
-export class ModelAdministration<T extends Model = Model> {
-	proxy: T;
-	source: T;
-	configuration: ModelConfiguration<T>;
+export class ModelAdministration<ModelType extends Model = any> {
+	proxy: ModelType;
+	source: ModelType;
+	configuration: ModelConfiguration<ModelType>;
 	parent: ModelAdministration | null = null;
 	referencedAtoms!: Map<PropertyKey, Atom>;
 	referencedModels!: Map<PropertyKey, Computed<Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
 	root: ModelAdministration = this;
 	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
-	private observableProxyGet: ProxyHandler<T>["get"];
-	private observableProxySet: ProxyHandler<T>["set"];
+	private observableProxyGet: ProxyHandler<ModelType>["get"];
+	private observableProxySet: ProxyHandler<ModelType>["set"];
 	private writeInProgress: Set<PropertyKey> = new Set();
-	private computedSnapshot: Computed<Snapshot> | undefined;
+	private computedSnapshot: Computed<Snapshot<ModelType>> | undefined;
 
-	constructor(source: T, configuration: ModelConfiguration<T>) {
+	constructor(source: ModelType, configuration: ModelConfiguration<ModelType>) {
 		this.source = source;
 		this.configuration = configuration;
 		this.proxy = observable.configure(
@@ -357,8 +377,8 @@ export class ModelAdministration<T extends Model = Model> {
 		this.parent = null;
 	}
 
-	private toJSON(): Snapshot {
-		return Object.keys(this.configuration).reduce<Snapshot>((json, key) => {
+	private toJSON(): Snapshot<ModelType> {
+		return Object.keys(this.configuration).reduce((json, key) => {
 			switch (this.configuration[key].type) {
 				case ModelCfgTypes.state:
 				case ModelCfgTypes.id:
@@ -384,10 +404,10 @@ export class ModelAdministration<T extends Model = Model> {
 					break;
 			}
 			return json;
-		}, {});
+		}, {}) as Snapshot<ModelType>;
 	}
 
-	onSnapshotChange(onChange: SnapshotChange): () => void {
+	onSnapshotChange(onChange: SnapshotChange<ModelType>): () => void {
 		return reaction(
 			() => this.getSnapshot(),
 			(snapshot) => onChange(snapshot, this.proxy),
@@ -395,11 +415,11 @@ export class ModelAdministration<T extends Model = Model> {
 		);
 	}
 
-	loadSnapshot(snapshot: Snapshot): void {
+	loadSnapshot(snapshot: Snapshot<ModelType>): void {
 		const ensureChildTypes = (key: string): true => {
 			if (!this.configuration[key].childType) {
 				throw new Error(
-					"r-state-tree: `static childTypes` is required on Model to load snapshots with child/children"
+					"r-state-tree: child constructor must be specified to load snapshots with child/children. eg: `@child(ChildCtor) MyChild`"
 				);
 			}
 
@@ -432,24 +452,61 @@ export class ModelAdministration<T extends Model = Model> {
 					this.setId(key, value as IdType);
 					break;
 				case CommonCfgTypes.child:
-					this.proxy[key] =
-						value instanceof Model
-							? value
-							: ensureChildTypes(key) &&
-							  (childType as typeof Model).create(value as Snapshot);
+					let model: Model;
+
+					if (value instanceof Model) {
+						model = value;
+					} else {
+						ensureChildTypes(key);
+
+						const id =
+							childType &&
+							getSnapshotId(value as Snapshot, childType as typeof Model);
+
+						if (
+							id != null &&
+							this.proxy[key] &&
+							id === getIdentifier(this.proxy[key])
+						) {
+							const adm = getModelAdm(this.proxy[key]);
+							adm.loadSnapshot(value as Snapshot);
+							model = this.proxy[key];
+						} else {
+							model = (childType as typeof Model).create(value as Snapshot);
+						}
+					}
+
+					this.proxy[key] = model;
 					break;
 				case CommonCfgTypes.children:
 					const Ctor = childType as typeof Model;
-					this.proxy[key] = (value as Record<
-						string,
-						unknown
-					>[])?.map((snapshot) =>
-						getObservableSource(
-							snapshot instanceof Model
-								? snapshot
-								: ensureChildTypes(key) && Ctor.create(snapshot as Snapshot)
-						)
-					);
+					this.proxy[key] = (value as Snapshot[])?.map((snapshot) => {
+						let model: Model;
+						if (snapshot instanceof Model) {
+							model = snapshot;
+						} else {
+							ensureChildTypes(key);
+
+							const id = childType && getSnapshotId(snapshot, Ctor);
+							const foundModel =
+								id != null ? getModelById(this.root.proxy, id) : null;
+
+							if (foundModel) {
+								if (foundModel.parent !== this.proxy) {
+									throw new Error(
+										"r-state-tree: model with this id already exists on another parent"
+									);
+								}
+								const adm = getModelAdm(foundModel);
+								adm.loadSnapshot(snapshot);
+								model = foundModel;
+							} else {
+								model = Ctor.create(snapshot);
+							}
+						}
+
+						return model && getObservableSource(model);
+					});
 					break;
 				default:
 					console.warn(
@@ -459,7 +516,7 @@ export class ModelAdministration<T extends Model = Model> {
 		});
 	}
 
-	getSnapshot(): Snapshot {
+	getSnapshot(): Snapshot<ModelType> {
 		if (!this.computedSnapshot) {
 			this.computedSnapshot = computed(() => this.toJSON(), {
 				graph,

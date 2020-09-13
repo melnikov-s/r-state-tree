@@ -25,13 +25,23 @@ export function unmount<S extends Store>(container: S): void {
 	internalStore.unmount();
 }
 
-export function toSnapshot(model: Model): Snapshot {
+export function toSnapshot<T extends Model>(model: T): Snapshot<T> {
 	return getModelAdm(model).getSnapshot();
 }
 
-export function onSnapshot(
-	model: Model,
-	callback: (snapshot: Snapshot, model: Model) => void
+export function onSnapshot<T extends Model>(
+	model: T,
+	callback: (snapshot: Snapshot<T>, model: T) => void
 ): () => void {
 	return getModelAdm(model).onSnapshotChange(callback);
+}
+
+export function applySnapshot<T extends Model>(
+	model: T,
+	snapshot: Snapshot<T>
+): T {
+	const adm = getModelAdm(model);
+	adm.loadSnapshot(snapshot);
+
+	return model;
 }
