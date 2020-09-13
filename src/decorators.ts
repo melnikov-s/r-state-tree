@@ -33,7 +33,7 @@ function makeDecorator(type: unknown): any {
 	};
 }
 
-export const action = makeDecorator(type.action);
+export const action = makeDecorator(type.action({ async: true }));
 export const computed = makeDecorator(type.computed);
 export const observable = makeDecorator(type.observable);
 export const child = makeDecorator(childType);

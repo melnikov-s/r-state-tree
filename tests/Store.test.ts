@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
 	observable,
 	action,
@@ -15,7 +16,7 @@ import {
 } from "../src/index";
 
 test("can mount a store", () => {
-	class S extends Store {}
+	class S extends Store<any> {}
 
 	const store = mount(createStore(S, { myProp: 1 }));
 
@@ -24,7 +25,7 @@ test("can mount a store", () => {
 });
 
 test("can update store props with updateStore", () => {
-	class S extends Store {}
+	class S extends Store<any> {}
 
 	const store = mount(createStore(S, { myProp: 1 }));
 	expect(store.props.myProp).toBe(1);
@@ -33,13 +34,13 @@ test("can update store props with updateStore", () => {
 });
 
 test("can create a child store", () => {
-	class S extends Store {
+	class S extends Store<any> {
 		@child
 		get c() {
 			return createStore(C, { prop: 0 });
 		}
 	}
-	class C extends Store {}
+	class C extends Store<any> {}
 
 	const s = mount(createStore(S));
 
@@ -48,7 +49,7 @@ test("can create a child store", () => {
 });
 
 test("child store can be null", () => {
-	class S extends Store {
+	class S extends Store<any> {
 		@observable mounted = true;
 		@child
 		get c() {
@@ -59,7 +60,7 @@ test("child store can be null", () => {
 			this.mounted = false;
 		}
 	}
-	class C extends Store {}
+	class C extends Store<any> {}
 	const s = mount(createStore(S));
 	expect(s.c).toBeInstanceOf(C);
 	s.unmountChild();
@@ -67,15 +68,15 @@ test("child store can be null", () => {
 });
 
 test("can create an array of child stores", () => {
-	class S extends Store {
+	class S extends Store<any> {
 		@children
 		get cs() {
 			return types.map((Type, i) => createStore(Type, { prop: i }));
 		}
 	}
-	class C extends Store {}
-	class C1 extends Store {}
-	class C2 extends Store {}
+	class C extends Store<any> {}
+	class C1 extends Store<any> {}
+	class C2 extends Store<any> {}
 
 	const types = [C, C1, C2];
 
@@ -88,7 +89,7 @@ test("can create an array of child stores", () => {
 });
 
 test("updates an array of stores", () => {
-	class S extends Store {
+	class S extends Store<any> {
 		@observable
 		value = 0;
 
@@ -104,9 +105,9 @@ test("updates an array of stores", () => {
 			);
 		}
 	}
-	class C extends Store {}
-	class C1 extends Store {}
-	class C2 extends Store {}
+	class C extends Store<any> {}
+	class C1 extends Store<any> {}
+	class C2 extends Store<any> {}
 
 	const types = [C, C1, C2];
 
@@ -120,12 +121,12 @@ test("updates an array of stores", () => {
 });
 
 test("child stores are reactive", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed get value() {
 			return this.props.value;
 		}
 	}
-	class S extends Store {
+	class S extends Store<any> {
 		@observable values = [];
 		@action add() {
 			this.values.push(this.values.length);
@@ -150,12 +151,12 @@ test("child stores are reactive", () => {
 });
 
 test("child store can be retrieved during an action", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed get value() {
 			return this.props.value;
 		}
 	}
-	class S extends Store {
+	class S extends Store<any> {
 		@observable value = false;
 		@action add() {
 			count++;
@@ -179,12 +180,12 @@ test("child store can be retrieved during an action", () => {
 });
 
 test("children stores can be retrieved during an action", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed get value() {
 			return this.props.value;
 		}
 	}
-	class S extends Store {
+	class S extends Store<any> {
 		@observable values = [];
 		@action add() {
 			count++;
@@ -208,12 +209,12 @@ test("children stores can be retrieved during an action", () => {
 });
 
 test("child stores do not trigger listeners when only props change", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed get value() {
 			return this.props.value;
 		}
 	}
-	class S extends Store {
+	class S extends Store<any> {
 		@observable values = [1, 2];
 		@action changeValues() {
 			this.values = this.values.map((v) => v + 1);
@@ -238,12 +239,12 @@ test("child stores do not trigger listeners when only props change", () => {
 });
 
 test("child stores are reactive", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed get value() {
 			return this.props.value;
 		}
 	}
-	class S extends Store {
+	class S extends Store<any> {
 		@observable values = [];
 		@action add() {
 			this.values.push(this.values.length);
@@ -268,12 +269,12 @@ test("child stores are reactive", () => {
 });
 
 test("child stores with keys", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed get value() {
 			return this.props.value;
 		}
 	}
-	class S extends Store {
+	class S extends Store<any> {
 		@observable keys = [1, 2, 3];
 		@children get cs() {
 			return this.keys.map((value) => createStore(C, { value, key: value }));
@@ -302,7 +303,7 @@ test("child stores with keys", () => {
 test("props are reactive", () => {
 	let propsCounter = 0;
 
-	class S extends Store {
+	class S extends Store<any> {
 		@observable
 		value = 0;
 
@@ -335,7 +336,7 @@ test("props are reactive", () => {
 test("will call `storeDidMount` when a root store mounts", () => {
 	let count = 0;
 
-	class S extends Store {
+	class S extends Store<any> {
 		storeDidMount() {
 			count++;
 		}
@@ -346,7 +347,7 @@ test("will call `storeDidMount` when a root store mounts", () => {
 });
 
 test("storeDidMount is executed in an action", () => {
-	class S extends Store {
+	class S extends Store<any> {
 		@observable count = 0;
 		storeDidMount() {
 			this.count++;
@@ -359,7 +360,7 @@ test("storeDidMount is executed in an action", () => {
 });
 
 test("when props change only those computed methods that are directly affected are triggered", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed
 		get value() {
 			return this.props.value;
@@ -371,7 +372,7 @@ test("when props change only those computed methods that are directly affected a
 		}
 	}
 
-	class S extends Store {
+	class S extends Store<any> {
 		@observable value = 0;
 		@observable values = [0];
 
@@ -402,7 +403,7 @@ test("when props change only those computed methods that are directly affected a
 });
 
 test("context test", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		@computed
 		get value() {
 			const context = this.context;
@@ -417,7 +418,7 @@ test("context test", () => {
 
 	let provideCount = 0;
 
-	class S extends Store {
+	class S extends Store<any> {
 		@observable value = 0;
 		@observable values = [0];
 
@@ -459,12 +460,12 @@ test("context test", () => {
 });
 
 test("context can use child store values", () => {
-	class CS1 extends Store {
+	class CS1 extends Store<any> {
 		@observable value = {};
 	}
-	class CS2 extends Store {}
+	class CS2 extends Store<any> {}
 
-	class S extends Store {
+	class S extends Store<any> {
 		provideContext() {
 			return {
 				value: this.cs1.value,
@@ -485,12 +486,12 @@ test("context can use child store values", () => {
 });
 
 test("context can use child store values (children)", () => {
-	class CS1 extends Store {
+	class CS1 extends Store<any> {
 		@observable value = {};
 	}
-	class CS2 extends Store {}
+	class CS2 extends Store<any> {}
 
-	class S extends Store {
+	class S extends Store<any> {
 		provideContext() {
 			return {
 				value: this.css[0].value,
@@ -512,7 +513,7 @@ test("context can use child store values (children)", () => {
 
 test("models on the store can be accessed", () => {
 	class M extends Model {}
-	class S extends Store {
+	class S extends Store<any> {
 		@model m: M;
 	}
 
@@ -523,7 +524,7 @@ test("models on the store can be accessed", () => {
 
 test("models on the store default to null", () => {
 	class M extends Model {}
-	class S extends Store {
+	class S extends Store<any> {
 		@model m: M;
 	}
 
@@ -533,7 +534,7 @@ test("models on the store default to null", () => {
 
 test("models on the store are read only", () => {
 	class M extends Model {}
-	class S extends Store {
+	class S extends Store<any> {
 		@model m: M;
 	}
 
@@ -543,7 +544,7 @@ test("models on the store are read only", () => {
 
 test("models on the store can't have an initializer", () => {
 	class M extends Model {}
-	class S extends Store {
+	class S extends Store<any> {
 		@model m: M = M.create();
 	}
 
@@ -552,7 +553,7 @@ test("models on the store can't have an initializer", () => {
 
 test("models on the store can be an array", () => {
 	class M extends Model {}
-	class S extends Store {
+	class S extends Store<any> {
 		@model ms: M[];
 	}
 
@@ -569,11 +570,11 @@ test("models on the store can be updated", () => {
 		@observable state = 0;
 	}
 
-	class CS extends Store {
+	class CS extends Store<any> {
 		@model m: M1 | M2;
 	}
 
-	class S extends Store {
+	class S extends Store<any> {
 		@observable state = false;
 		@model m1: M1;
 		@model m2: M2;
@@ -604,7 +605,7 @@ test("models on the store are reactive", () => {
 		@observable state = 0;
 	}
 
-	class CS extends Store {
+	class CS extends Store<any> {
 		@model m: M1 | M2;
 		@model m1: M1;
 
@@ -613,7 +614,7 @@ test("models on the store are reactive", () => {
 		}
 	}
 
-	class S extends Store {
+	class S extends Store<any> {
 		@observable state = false;
 		@model m1: M1;
 		@model m2: M2;
@@ -652,13 +653,13 @@ test("models on the store are reactive", () => {
 });
 
 test("can't initianialize store directly", () => {
-	class S extends Store {}
+	class S extends Store<any> {}
 
 	expect(() => new S()).toThrow();
 });
 
 test("can setup a reaction in a store", () => {
-	class S extends Store {
+	class S extends Store<any> {
 		@observable prop = 0;
 		count = 0;
 		unsub;
@@ -686,7 +687,7 @@ test("can setup a reaction in a store", () => {
 });
 
 test("reaction in a store will auto unsub after store is unmounted ", () => {
-	class C extends Store {
+	class C extends Store<any> {
 		storeDidMount() {
 			this.reaction(
 				() => this.props.prop,
@@ -695,7 +696,7 @@ test("reaction in a store will auto unsub after store is unmounted ", () => {
 		}
 	}
 
-	class S extends Store {
+	class S extends Store<any> {
 		@observable mounted = true;
 		@observable prop = 0;
 		count = 0;
