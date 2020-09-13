@@ -20,6 +20,7 @@ import {
 	CommonCfgTypes,
 	Snapshot,
 	SnapshotChange,
+	RefSnapshot,
 } from "../types";
 import {
 	getIdentifier,
@@ -38,7 +39,7 @@ export function getModelAdm<T extends Model>(model: T): ModelAdministration<T> {
 	return administrationMap.get(model)!;
 }
 
-function getSnapshotId(snapshot: Snapshot, Ctor: typeof Model): IdType | null {
+function getIdKey(Ctor: typeof Model): string | number | null {
 	if (!ctorIdKeyMap.has(Ctor)) {
 		const key =
 			Object.keys(Ctor.types).find(
@@ -48,13 +49,31 @@ function getSnapshotId(snapshot: Snapshot, Ctor: typeof Model): IdType | null {
 		ctorIdKeyMap.set(Ctor, key);
 	}
 
-	const idKey = ctorIdKeyMap.get(Ctor);
+	return ctorIdKeyMap.get(Ctor) ?? null;
+}
 
-	if (idKey) {
-		return snapshot[idKey] as IdType;
+function getModelRefSnapshot<T extends Model>(modelRef: T): RefSnapshot | null {
+	const Ctor = Object.getPrototypeOf(modelRef).constructor as typeof Model;
+	const idKey = getIdKey(Ctor);
+
+	return idKey ? { [idKey]: getIdentifier(modelRef)! } : null;
+}
+
+function getSnapshotId(snapshot: Snapshot, Ctor: typeof Model): IdType | null {
+	const idKey = getIdKey(Ctor);
+
+	return idKey ? (snapshot[idKey] as IdType) : null;
+}
+
+function getSnapshotRefId(snapshot: RefSnapshot): IdType {
+	const keys = Object.keys(snapshot);
+	if (keys.length !== 1) {
+		throw new Error(
+			"r-state-tree: ref snapshot can only contain one property which is the id key"
+		);
 	}
 
-	return null;
+	return snapshot[keys[0]];
 }
 
 function mapConfigure(
@@ -386,11 +405,11 @@ export class ModelAdministration<ModelType extends Model = any> {
 					break;
 				case ModelCfgTypes.modelRef:
 					const model: Model | undefined = this.proxy[key];
-					json[key] = model && getIdentifier(model);
+					json[key] = model && getModelRefSnapshot(model);
 					break;
 				case ModelCfgTypes.modelRefs:
 					const models: Model[] = this.proxy[key] ?? [];
-					json[key] = models.map((m) => getIdentifier(m));
+					json[key] = models.map((m) => getModelRefSnapshot(m));
 					break;
 				case CommonCfgTypes.child:
 					json[key] = getModelAdm(this.proxy[key])?.getSnapshot();
@@ -438,14 +457,14 @@ export class ModelAdministration<ModelType extends Model = any> {
 					if (value instanceof Model) {
 						this.proxy[key] = value;
 					} else {
-						this.source[key] = value;
+						this.source[key] = getSnapshotRefId(value);
 					}
 					break;
 				case ModelCfgTypes.modelRefs:
 					if ((value as unknown[])?.[0] instanceof Model) {
 						this.proxy[key] = value;
 					} else {
-						this.source[key] = value;
+						this.source[key] = getSnapshotRefId(value);
 					}
 					break;
 				case ModelCfgTypes.id:

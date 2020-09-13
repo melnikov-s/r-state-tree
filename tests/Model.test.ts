@@ -14,8 +14,6 @@ import {
 	onSnapshot,
 	toSnapshot,
 	applySnapshot,
-	ModelRef,
-	toRef,
 } from "../src/index";
 
 test("can create a model", () => {
@@ -675,7 +673,7 @@ describe("model references", () => {
 
 		class Todos extends Model {
 			@children(Todo) todos = [];
-			@modelRef selectedTodo: ModelRef<Todo> | undefined;
+			@modelRef selectedTodo: Todo | undefined;
 			@action empty() {
 				this.todos = [];
 			}
@@ -691,7 +689,7 @@ describe("model references", () => {
 					title: "Get coffee",
 				},
 			],
-			selectedTodo: "47",
+			selectedTodo: { id: "47" },
 		});
 
 		expect(storeInstance.selectedTodo.title).toBe("Get coffee");
@@ -723,7 +721,7 @@ describe("model state", () => {
 		@state prop = 0;
 		@observable ignored = 0;
 		@children(MCA) mcas: MCA[] = [MCA.create(), MCA.create()];
-		@modelRef mcaRef: ModelRef<MCA> = toRef(this.mcas[0]);
+		@modelRef mcaRef: MCA = this.mcas[0];
 
 		modelDidInit() {
 			if (this.id == null) {
@@ -763,7 +761,7 @@ describe("model state", () => {
 						propB: 0,
 					},
 				],
-				mcaRef: 0,
+				mcaRef: { id: 0 },
 			},
 			{
 				id: 5,
@@ -780,7 +778,7 @@ describe("model state", () => {
 						propB: 0,
 					},
 				],
-				mcaRef: 3,
+				mcaRef: { id: 3 },
 			},
 		],
 		mca: {

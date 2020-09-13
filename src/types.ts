@@ -53,24 +53,11 @@ type NonFunctionPropertyNames<T> = {
 	[K in keyof T]: T[K] extends Function ? never : K;
 }[keyof T];
 
-enum ModelRefBrand {
-	_ = "",
-}
-export type ModelRef<T extends Model> = ModelRefBrand & T;
-
-export function toRef<T extends Model>(model: T): ModelRef<T> {
-	return model as ModelRef<T>;
-}
-
 type ChildrenToSnapshot<T> = {
-	[K in keyof T]: T[K] extends ModelRef<Model>
-		? IdType
-		: T[K] extends Model
+	[K in keyof T]: T[K] extends Model
 		? Snapshot<T[K]>
 		: T[K] extends Array<infer R>
-		? R extends ModelRef<Model>
-			? Array<IdType>
-			: R extends Model
+		? R extends Model
 			? Array<Snapshot<R>>
 			: T[K]
 		: T[K];
@@ -88,6 +75,8 @@ export type SnapshotChange<T extends Model = Model> = (
 	snapshot: Snapshot<T>,
 	model: T
 ) => void;
+
+export type RefSnapshot = { [key: string]: IdType; [key: number]: IdType };
 
 export const childType = Object.assign(
 	function (childType: Function): ConfigurationType {
