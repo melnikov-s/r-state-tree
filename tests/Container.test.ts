@@ -8,6 +8,7 @@ import {
 	autorun,
 	reaction,
 	createStore,
+	task,
 } from "../src/index";
 
 export function createContainer<
@@ -214,42 +215,20 @@ export function createContainer<
 		expect(() => m.state++).toThrow();
 	});
 
-	test(`(${Container.name}) supports sync actions`, () => {
-		const result = {};
-		const globalPromise = Promise;
-
-		class S extends Container {
-			@observable
-			value = 0;
-
-			@action({ async: false }) inc() {
-				this.value++;
-				expect(Promise).toBe(globalPromise);
-				return this.value;
-			}
-		}
-
-		const s = createContainer(S);
-		expect(s.value).toBe(0);
-		const w = s.inc();
-		expect(s.value).toBe(1);
-	});
-
 	test(`(${Container.name}) supports async actions`, async () => {
 		const result = {};
 
 		class S extends Container {
-			@observable
-			value = 0;
+			@observable value = 0;
 
-			@observable({ ref: true })
-			result = null;
+			@observable({ ref: true }) result = null;
 
 			@action async inc() {
 				this.value++;
-				this.result = await new Promise((resolve) =>
-					setTimeout(() => resolve(result), 0)
+				this.result = await task(
+					new Promise((resolve) => setTimeout(() => resolve(result), 0))
 				);
+
 				this.value++;
 				return this.value;
 			}
@@ -257,6 +236,7 @@ export function createContainer<
 
 		const s = createContainer(S);
 		expect(s.value).toBe(0);
+		autorun(() => s.value);
 		const w = s.inc();
 		expect(s.value).toBe(1);
 		expect(s.result).toBe(null);
