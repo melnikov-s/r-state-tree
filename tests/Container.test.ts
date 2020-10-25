@@ -223,7 +223,7 @@ export function createContainer<
 
 			@observable({ ref: true }) result = null;
 
-			@action async inc() {
+			@task async inc() {
 				this.value++;
 				this.result = await task(
 					new Promise((resolve) => setTimeout(() => resolve(result), 0))

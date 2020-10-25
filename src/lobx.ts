@@ -26,6 +26,3 @@ export function listener(
 
 export type Listener = lobx.Listener;
 export const isObservable = lobx.isObservable;
-export function task<T>(p: Promise<T>): Promise<T> {
-	return lobx.task(p, graphOptions);
-}
