@@ -24,5 +24,11 @@ export function listener(
 	return lobx.listener(callback, graphOptions);
 }
 
+export function task(
+	p: Parameters<typeof lobx.task>[0]
+): ReturnType<typeof lobx.task> {
+	return graph.task(p);
+}
+
 export type Listener = lobx.Listener;
 export const isObservable = lobx.isObservable;

@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Store from "./store/Store";
 import { type } from "lobx";
-import { graph } from "./lobx";
 import Model from "./model/Model";
 import {
 	childType,
@@ -49,12 +48,3 @@ export const modelRef = makeDecorator(modelRefType);
 export const modelRefs = makeDecorator(modelRefsType);
 export const identifier = makeDecorator(idType);
 export const state = makeDecorator(stateType);
-
-const taskMethod = makeDecorator(type.task, (fn) =>
-	graph.task(fn as Promise<unknown>)
-);
-export function task<T>(val: T): T;
-export function task(...args: any[]): any;
-export function task(...args: unknown[]) {
-	return taskMethod(...args);
-}
