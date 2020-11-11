@@ -5,29 +5,23 @@ export const graphOptions = { graph };
 
 graph.enforceActions(true);
 
-export function autorun(
-	fn: Parameters<typeof lobx.autorun>[0]
-): ReturnType<typeof lobx.autorun> {
+export function autorun(fn: (listener: Listener) => void): () => void {
 	return lobx.autorun(fn, graphOptions);
 }
 
-export function reaction(
-	track: Parameters<typeof lobx.reaction>[0],
-	callback: Parameters<typeof lobx.reaction>[1]
-): ReturnType<typeof lobx.autorun> {
+export function reaction<T>(
+	track: () => T,
+	callback: (a: T, listener: Listener) => void
+): () => void {
 	return lobx.reaction(track, callback, graphOptions);
 }
 
-export function listener(
-	callback: Parameters<typeof lobx.listener>[0]
-): ReturnType<typeof lobx.listener> {
+export function listener(callback: () => void): lobx.Listener {
 	return lobx.listener(callback, graphOptions);
 }
 
-export function task(
-	p: Parameters<typeof lobx.task>[0]
-): ReturnType<typeof lobx.task> {
-	return graph.task(p);
+export function task<T>(promise: Promise<T>): Promise<T> {
+	return graph.task(promise);
 }
 
 export type Listener = lobx.Listener;
