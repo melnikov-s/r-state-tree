@@ -78,7 +78,7 @@ export function getModelById(root: Model, id: IdType): Model | undefined {
 function updateIdentifier(model: Model): void {
 	const id = idMap.get(model)!;
 
-	let node: Model | null = model;
+	let node: Model | null = model.parent;
 
 	while (node) {
 		const map = attachedIdMap.get(node);
