@@ -25,7 +25,7 @@ const administrationMap: WeakMap<Store, StoreAdministration> = new WeakMap();
 
 export function updateProps(props: Props, newProps: Props): void {
 	graph.untracked(() => {
-		graph.transaction(() => {
+		graph.batch(() => {
 			const propKeys = Object.keys(newProps);
 			propKeys.forEach((k) => {
 				if (k !== "models") {
@@ -355,7 +355,7 @@ export class StoreAdministration<StoreType extends Store = Store> {
 					}),
 					graphOptions
 				)
-			)
+			);
 		}
 
 		this.childStoreDataMap.forEach((data) => {

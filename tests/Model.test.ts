@@ -313,34 +313,86 @@ test("child model can't be placed in multiple locations in the tree", () => {
 });
 
 describe("model identifiers", () => {
-	test("identifiers can only be assigned once after init", () => {
-		class M1 extends Model {
-			@identifier id = 0;
+	test("identifiers can't be set to undefined once assigned", () => {
+		class M extends Model {
+			@identifier id = 1;
 
-			constructor() {
-				super();
-				this.id = 1;
+			@action clearId() {
+				this.id = undefined;
 			}
 		}
 
-		class M2 extends Model {
-			@identifier id;
+		class MP extends Model {
+			@child m = M.create();
+			@modelRef mr = this.m;
+		}
 
-			constructor() {
-				super();
-				this.id = 1;
+		const mp = MP.create();
+		expect(() => mp.m.clearId()).toThrowErrorMatchingInlineSnapshot(
+			`"r-state-tree can't clear an identifier once it has already been set."`
+		);
+	});
+
+	test("same identifier can't be assigned to different models", () => {
+		class M extends Model {
+			@identifier id = 0;
+		}
+
+		class MP extends Model {
+			@children ms = [M.create()];
+
+			@action add() {
+				this.ms.push(M.create());
 			}
+		}
+
+		const mp = MP.create();
+		expect(() => mp.add()).toThrowErrorMatchingInlineSnapshot(
+			`"r-state-tree: id: 0 is already assigned to another model"`
+		);
+	});
+
+	test("identifiers can be re-assigned after init", () => {
+		class M extends Model {
+			@identifier id = 1;
 
 			@action setId() {
 				this.id = 2;
 			}
 		}
 
-		expect(() => M1.create()).not.toThrowError();
-		const m = M2.create();
-		expect(() => m.setId()).toThrowErrorMatchingInlineSnapshot(
-			`"r-state-tree identifier already set."`
-		);
+		class MP extends Model {
+			@child m = M.create();
+			@modelRef mr = this.m;
+		}
+
+		const mp = MP.create();
+		expect(mp.m).toBe(mp.mr);
+		mp.m.setId();
+		expect(mp.m).toBe(mp.mr);
+	});
+
+	test("correct identifier shows up in snapshot after being re-assigned", () => {
+		class M extends Model {
+			@identifier myId = 1;
+			@state test = "me";
+
+			@action setId() {
+				this.myId = 2;
+			}
+		}
+
+		class MP extends Model {
+			@child m = M.create();
+			@modelRef mr = this.m;
+		}
+
+		const mp = MP.create();
+		mp.m.setId();
+		expect(toSnapshot(mp)).toStrictEqual({
+			m: { myId: 2, test: "me" },
+			mr: { myId: 2 },
+		});
 	});
 
 	test("identifiers can be assigned in modelDidInit", () => {
@@ -366,9 +418,6 @@ describe("model identifiers", () => {
 
 		expect(() => M.create({ id: 1 })).not.toThrowError();
 		expect(() => M.create({ id: 2 })).not.toThrowError();
-		expect(() => M.create().badAction()).toThrowErrorMatchingInlineSnapshot(
-			`"r-state-tree identifier already set."`
-		);
 	});
 });
 
@@ -901,28 +950,62 @@ describe("model state", () => {
 	});
 
 	test("will throw if reconciled child id exists on another parent", () => {
-		let id = 0;
 		class MC extends Model {
 			@identifier id;
 		}
 
 		class M extends Model {
-			@children(MC) mcs: MC[] = [
-				MC.create({ id: id++ }),
-				MC.create({ id: id++ }),
-			];
+			@children(MC) mcs: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
 		}
 
 		class MP extends Model {
 			@children(M) ms: M[] = [M.create(), M.create()];
 		}
 
-		const mp = MP.create();
-		expect(() =>
-			applySnapshot(mp.ms[1], { mcs: [{ id: 0 }] })
-		).toThrowErrorMatchingInlineSnapshot(
-			`"r-state-tree: model with this id already exists on another parent"`
+		expect(() => MP.create()).toThrowErrorMatchingInlineSnapshot(
+			`"r-state-tree: id: 0 is already assigned to another model"`
 		);
+	});
+
+	test("will throw if reconciled child id exists on same parent but differnt child models", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+
+		class M extends Model {
+			@children(MC) ms1: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@children(MC) ms2: MC[] = [MC.create({ id: 2 }), MC.create({ id: 3 })];
+		}
+
+		const m = M.create();
+		expect(() =>
+			applySnapshot(m, { ms2: [{ id: 0 }] })
+		).toThrowErrorMatchingInlineSnapshot(
+			`"r-state-tree duplicate ids detected after snapshot was loaded"`
+		);
+	});
+
+	test("can swap models with different positions", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+
+		class M extends Model {
+			@children(MC) ms1: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@children(MC) ms2: MC[] = [MC.create({ id: 2 }), MC.create({ id: 3 })];
+		}
+
+		const m = M.create();
+		expect(() =>
+			applySnapshot(m, {
+				ms1: [{ id: 2 }, { id: 3 }],
+				ms2: [{ id: 0 }, { id: 1 }],
+			})
+		).not.toThrowError();
+		expect(toSnapshot(m)).toStrictEqual({
+			ms1: [{ id: 2 }, { id: 3 }],
+			ms2: [{ id: 0 }, { id: 1 }],
+		});
 	});
 
 	test("model snapshots accept real model referecens", () => {

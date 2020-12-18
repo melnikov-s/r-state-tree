@@ -2,12 +2,6 @@ import { ModelAdministration, getModelAdm } from "./ModelAdministration";
 import { Configuration, Snapshot } from "../types";
 
 let initEnabled = false;
-// can use WeakSet here but browser support is worse
-const initializedModels: WeakMap<Model, true> = new WeakMap();
-export function isModelInitialized(model: Model): boolean {
-	return initializedModels.has(model) ? initializedModels.get(model)! : false;
-}
-
 export default class Model {
 	static types: object = {};
 	static childTypes: object = {};
@@ -26,7 +20,6 @@ export default class Model {
 		}
 		const adm = getModelAdm(instance);
 		snapshot && adm.loadSnapshot(snapshot);
-		initializedModels.set(instance, true);
 		instance.modelDidInit(snapshot, ...args);
 
 		return instance;
