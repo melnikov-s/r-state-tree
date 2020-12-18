@@ -142,7 +142,8 @@ export function onModelAttached(model: Model): void {
 
 // TODO: clean up if not observed
 export function onModelDetached(model: Model): void {
-	if (attachedIdMap.has(model)) {
+	const id = idMap.get(model);
+	if (attachedIdMap.has(model) || id != null) {
 		const attachedMap = attachedIdMap.get(model);
 		let node = model.parent;
 
@@ -150,22 +151,16 @@ export function onModelDetached(model: Model): void {
 			const map = attachedIdMap.get(node);
 
 			if (map) {
-				attachedMap!.forEach((value, key) => {
+				attachedMap?.forEach((value, key) => {
 					map!.delete(key);
 				});
+
+				if (id != null) {
+					map!.delete(id);
+				}
 			}
 
 			node = node.parent;
-		}
-	}
-
-	if (idMap.has(model)) {
-		const map = attachedIdMap.get(model.parent!);
-		if (map) {
-			const id = idMap.get(model)!;
-			if (map.has(id)) {
-				map.delete(id);
-			}
 		}
 	}
 }

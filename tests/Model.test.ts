@@ -1008,6 +1008,27 @@ describe("model state", () => {
 		});
 	});
 
+	test("can add and remove model with an id", () => {
+		class MC extends Model {
+			@identifier id;
+		}
+
+		class M extends Model {
+			@children(MC) ms: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@action act() {
+				const mc = this.ms.pop();
+				this.ms.unshift(mc);
+			}
+		}
+
+		class MS extends Model {
+			@child(M) m: M = M.create();
+		}
+
+		const ms = MS.create();
+		expect(() => ms.m.act()).not.toThrow();
+	});
+
 	test("model snapshots accept real model referecens", () => {
 		class MC extends Model {
 			@identifier prop;
