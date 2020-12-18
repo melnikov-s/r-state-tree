@@ -1,6 +1,6 @@
 {
 	"name": "r-state-tree",
-	"version": "0.1.0-rc16",
+	"version": "0.1.0-rc17",
 	"description": "reactive state management library",
 	"main": "lib/r-state-tree.js",
 	"module": "lib/r-state-tree.module.js",
@@ -13,7 +13,8 @@
 		"test:watch": "jest --watch",
 		"test:cover": "jest --coverage",
 		"build": "rollup -c rollup.config.js",
-		"lint": "eslint ./src ./tests --ext .ts"
+		"lint": "eslint ./src ./tests --ext .ts",
+		"prepublishOnly": "npm run build:prod"
 	},
 	"repository": {
 		"type": "git",
