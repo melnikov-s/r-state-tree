@@ -16,6 +16,10 @@ export function reaction<T>(
 	return lobx.reaction(track, callback, graphOptions);
 }
 
+export function runInAction<T>(fn: () => T): T {
+	return graph.runInAction(fn);
+}
+
 export function listener(callback: () => void): lobx.Listener {
 	return lobx.listener(callback, graphOptions);
 }
