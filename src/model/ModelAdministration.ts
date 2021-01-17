@@ -464,20 +464,24 @@ export class ModelAdministration<ModelType extends Model = Model> {
 
 				switch (type) {
 					case ModelCfgTypes.state:
-						this.source[key] = value;
+						this.proxy[key] = value;
 						break;
 					case ModelCfgTypes.modelRef:
 						if (value instanceof Model) {
 							this.proxy[key] = value;
 						} else {
 							this.source[key] = getSnapshotRefId(value);
+							this.referencedAtoms?.get(key)?.reportChanged();
 						}
 						break;
 					case ModelCfgTypes.modelRefs:
 						if ((value as unknown[])?.[0] instanceof Model) {
 							this.proxy[key] = value;
 						} else {
-							this.source[key] = getSnapshotRefId(value);
+							this.source[key] = value.map((snapshot: RefSnapshot) =>
+								getSnapshotRefId(snapshot)
+							);
+							this.referencedAtoms?.get(key)?.reportChanged();
 						}
 						break;
 					case ModelCfgTypes.id:

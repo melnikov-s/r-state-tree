@@ -883,6 +883,76 @@ describe("model state", () => {
 		expect(toSnapshot(m)).toEqual(toSnapshot(mClone));
 	});
 
+	test("loading snapshot for model property is observable", () => {
+		let count = 0;
+		class M extends Model {
+			@state prop = 0;
+			@action load() {
+				applySnapshot(m, { prop: 1 });
+			}
+		}
+
+		const m = M.create();
+
+		autorun(() => {
+			m.prop;
+			count++;
+		});
+
+		m.load();
+		expect(count).toBe(2);
+	});
+
+	test("loading snapshot for model ref is observable", () => {
+		let count = 0;
+		let id = 0;
+		class MC extends Model {
+			@identifier id = id++;
+		}
+		class M extends Model {
+			@children mcs = [MC.create(), MC.create()];
+			@modelRef mc = null;
+			@action load() {
+				applySnapshot(m, { mc: { id: 0 } });
+			}
+		}
+
+		const m = M.create();
+
+		autorun(() => {
+			m.mc;
+			count++;
+		});
+
+		m.load();
+		expect(count).toBe(2);
+	});
+
+	test("loading snapshot for model refs is observable", () => {
+		let count = 0;
+		let id = 0;
+		class MC extends Model {
+			@identifier id = id++;
+		}
+		class M extends Model {
+			@children mcs = [MC.create(), MC.create()];
+			@modelRefs mc = [];
+			@action load() {
+				applySnapshot(m, { mc: [{ id: 0 }, { id: 1 }] });
+			}
+		}
+
+		const m = M.create();
+
+		autorun(() => {
+			m.mc;
+			count++;
+		});
+
+		m.load();
+		expect(count).toBe(2);
+	});
+
 	test("model snapshot produces the same reference if nothing is changed", () => {
 		const m = M.create();
 		expect(toSnapshot(m)).toBe(toSnapshot(m));
