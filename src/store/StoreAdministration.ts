@@ -3,9 +3,9 @@ import {
 	computed,
 	getAdministration,
 	observable,
-	Observable,
+	ObservableBox,
 	reaction,
-	Configuration as LobxConfiguration,
+	getObservableSource,
 } from "lobx";
 import Store, { allowNewStore } from "./Store";
 import Model from "../model/Model";
@@ -46,7 +46,7 @@ export function getStoreAdm(store: Store): StoreAdministration {
 }
 
 type ChildStoreData = {
-	value: Observable<Store | null | Store[]>;
+	value: ObservableBox<Store | null | Store[]>;
 	computed: Computed<StoreElement | null | StoreElement[]>;
 	listener: Listener;
 };
@@ -64,14 +64,14 @@ export class StoreAdministration<StoreType extends Store = Store> {
 	private observableProxySet: ProxyHandler<StoreType>["set"];
 	private reactionsUnsub: (() => void)[] = [];
 
-	constructor(source: StoreType, configuration: StoreConfiguration<StoreType>) {
-		this.source = source;
-		this.proxy = observable.configure(
-			(configuration as unknown) as LobxConfiguration<StoreType>,
-			source,
-			graphOptions
+	constructor(store: StoreType, configuration: StoreConfiguration<StoreType>) {
+		this.source = getObservableSource(store);
+		this.proxy = store;
+		const adm = getAdministration(this.source)!;
+		Object.assign(
+			((adm as any).config = { ...configuration, props: observable })
 		);
-		const proxyTraps = getAdministration(this.proxy)!.proxyTraps;
+		const proxyTraps = adm.proxyTraps;
 		this.observableProxyGet = proxyTraps.get;
 		this.observableProxySet = proxyTraps.set;
 		proxyTraps.get = (_, name) => this.proxyGet(name);
@@ -279,7 +279,7 @@ export class StoreAdministration<StoreType extends Store = Store> {
 		const childStoreData: ChildStoreData = this.childStoreDataMap.get(name) ?? {
 			computed: this.getComputedGetter(name),
 			listener: listener(() => this.updateStore(name)),
-			value: observable.box(null, graphOptions) as Observable<
+			value: observable.box(null, graphOptions) as ObservableBox<
 				null | Store | Store[]
 			>,
 		};
@@ -296,7 +296,7 @@ export class StoreAdministration<StoreType extends Store = Store> {
 		const childStoreData: ChildStoreData = this.childStoreDataMap.get(name) ?? {
 			computed: this.getComputedGetter(name),
 			listener: listener(() => this.updateStores(name)),
-			value: observable.box([] as Store[], graphOptions) as Observable<
+			value: observable.box([] as Store[], graphOptions) as ObservableBox<
 				null | Store | Store[]
 			>,
 		};

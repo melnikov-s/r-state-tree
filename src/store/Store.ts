@@ -1,11 +1,11 @@
 import { Props, Context, StoreConfiguration, Configuration } from "../types";
-import { observable } from "lobx";
+import { Observable } from "lobx";
 import {
 	StoreAdministration,
 	getStoreAdm,
 	updateProps,
 } from "./StoreAdministration";
-import { graphOptions } from "../lobx";
+import {  graph } from "../lobx";
 
 let initEnabled = false;
 export function allowNewStore<T>(fn: () => T): T {
@@ -46,11 +46,12 @@ export function types<T extends Store>(
 export default class Store<
 	PropsType extends Props = Props,
 	ContextType extends Context = Context
-> {
+> extends Observable {
 	static types: unknown = {};
-	props: PropsType = observable({}, graphOptions) as PropsType;
+	props: PropsType = {} as PropsType;
 
 	constructor() {
+		super({ graph, configuration: {} });
 		if (!initEnabled) {
 			throw new Error("r-state-tree: Can't initialize store directly");
 		}
@@ -59,9 +60,7 @@ export default class Store<
 			this
 		>;
 
-		const adm = new StoreAdministration<this>(this, config);
-
-		return adm.proxy;
+		new StoreAdministration<this>(this, config);
 	}
 
 	get key(): string | number | undefined {

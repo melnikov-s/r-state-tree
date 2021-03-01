@@ -1,8 +1,10 @@
 import { ModelAdministration, getModelAdm } from "./ModelAdministration";
 import { Configuration, Snapshot } from "../types";
+import { Observable } from "lobx";
+import { graph } from "../lobx";
 
 let initEnabled = false;
-export default class Model {
+export default class Model extends Observable {
 	static types: object = {};
 	static childTypes: object = {};
 
@@ -26,6 +28,7 @@ export default class Model {
 	}
 
 	constructor() {
+		super({ graph, configuration: {} });
 		if (!initEnabled) {
 			throw new Error(
 				`r-state-tree: Can't initialize model directly, use \`${this.constructor.name}.create()\` instead`
@@ -36,9 +39,7 @@ export default class Model {
 			this
 		>;
 
-		const adm = new ModelAdministration(this, config);
-
-		return adm.proxy;
+		new ModelAdministration(this, config);
 	}
 
 	get parent(): Model | null {

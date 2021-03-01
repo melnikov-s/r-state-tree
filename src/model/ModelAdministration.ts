@@ -1,13 +1,12 @@
 import {
 	Atom,
 	atom,
-	observable,
 	Computed,
 	computed,
+	observable,
 	getAdministration,
 	MutationEvent,
-	trace,
-	type,
+	observe,
 	Configuration as LobxConfiguration,
 	getObservableSource,
 	reaction,
@@ -86,7 +85,7 @@ function mapConfigure(
 	const mappedConfigure = {};
 	Object.keys(config).forEach((key) => {
 		if (ModelCfgTypes[config[key].type] || CommonCfgTypes[config[key].type]) {
-			mappedConfigure[key] = type.observable;
+			mappedConfigure[key] = observable;
 		} else {
 			mappedConfigure[key] = config[key];
 		}
@@ -111,15 +110,13 @@ export class ModelAdministration<ModelType extends Model = Model> {
 	private computedSnapshot: Computed<Snapshot<Model>> | undefined;
 	private parentName: PropertyKey | null = null;
 
-	constructor(source: ModelType, configuration: ModelConfiguration<ModelType>) {
-		this.source = source;
+	constructor(model: ModelType, configuration: ModelConfiguration<ModelType>) {
+		this.source = getObservableSource(model);
 		this.configuration = configuration;
-		this.proxy = observable.configure(
-			mapConfigure(configuration),
-			source,
-			graphOptions
-		);
-		const proxyTraps = getAdministration(this.proxy)!.proxyTraps;
+		this.proxy = model;
+		const adm = getAdministration(this.source)!;
+		const proxyTraps = adm.proxyTraps;
+		Object.assign(((adm as any).config = mapConfigure(configuration)));
 		this.observableProxyGet = proxyTraps.get;
 		this.observableProxySet = proxyTraps.set;
 		proxyTraps.get = (_, name) => this.proxyGet(name);
@@ -279,7 +276,7 @@ export class ModelAdministration<ModelType extends Model = Model> {
 		// on the observable proxy.
 		this.modelsTraceUnsub.set(
 			name,
-			trace(this.proxy[name], (event: MutationEvent<Model>) => {
+			observe(this.proxy[name], (event: MutationEvent<Model>) => {
 				if (event.type === "updateArray") {
 					getModelAdm(event.oldValue).detach();
 					getModelAdm(event.newValue).attach(this, name);

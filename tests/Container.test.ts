@@ -221,7 +221,7 @@ export function createContainer<
 		class S extends Container {
 			@observable value = 0;
 
-			@observable({ ref: true }) result = null;
+			result = null;
 
 			@action async inc() {
 				this.value++;
