@@ -2,7 +2,7 @@
 	"compilerOptions": {
 		"experimentalDecorators": true,
 		"rootDir": "src",
-		"target": "es5",
+		"target": "es2015",
 		"alwaysStrict": true,
 		"sourceMap": false,
 		"removeComments": true,
@@ -11,13 +11,14 @@
 		"noUnusedLocals": true,
 		"noImplicitAny": true,
 		"noImplicitThis": true,
-		"lib": ["es6"],
+		"lib": ["es2015"],
 		"strictNullChecks": true,
 		"strictFunctionTypes": true,
 		"declaration": true,
 		"suppressImplicitAnyIndexErrors": true,
 		"declarationDir": "./lib",
-		"outDir": "./dist"
+		"outDir": "./dist",
+		"moduleResolution": "Node"
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules"]
