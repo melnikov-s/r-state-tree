@@ -71,6 +71,11 @@ export type Snapshot<T extends Model = Model> = Nullable<
 	Partial<ChildrenToSnapshot<Pick<T, NonFunctionPropertyNames<T>>>>
 >;
 
+export type SnapshotDiff<T extends Model = Model> = {
+	undo: Snapshot<T>;
+	redo: Snapshot<T>;
+};
+
 export type SnapshotChange<T extends Model = Model> = (
 	snapshot: Snapshot<T>,
 	model: T

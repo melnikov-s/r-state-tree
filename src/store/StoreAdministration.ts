@@ -68,9 +68,7 @@ export class StoreAdministration<StoreType extends Store = Store> {
 		this.source = getObservableSource(store);
 		this.proxy = store;
 		const adm = getAdministration(this.source)!;
-		Object.assign(
-			((adm as any).config = { ...configuration, props: observable })
-		);
+		Object.assign((adm.config = { ...configuration, props: observable }));
 		const proxyTraps = adm.proxyTraps;
 		this.observableProxyGet = proxyTraps.get;
 		this.observableProxySet = proxyTraps.set;

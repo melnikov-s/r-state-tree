@@ -1,8 +1,12 @@
-import { StoreElement, Snapshot } from "./types";
+import { StoreElement, Snapshot, SnapshotDiff } from "./types";
+import { getDiff } from "./utils";
 import Store, { allowNewStore } from "./store/Store";
 import { getStoreAdm } from "./store/StoreAdministration";
 import Model from "./model/Model";
-import { getModelAdm } from "./model/ModelAdministration";
+import {
+	getModelAdm,
+	getConfigurationFromSnapshot,
+} from "./model/ModelAdministration";
 
 export function mount<T extends Store>(container: T): T {
 	return allowNewStore(() => {
@@ -31,6 +35,26 @@ export function onSnapshot<T extends Model>(
 	callback: (snapshot: Snapshot<T>, model: T) => void
 ): () => void {
 	return getModelAdm(model).onSnapshotChange(callback);
+}
+
+export function onSnapshotDiff<T extends Model>(
+	model: T,
+	callback: (snapshotDiff: SnapshotDiff<T>, model: T) => void
+): () => void {
+	let prev = getModelAdm(model).getSnapshot();
+
+	return getModelAdm(model).onSnapshotChange(function (
+		next: Snapshot<T>,
+		model: T
+	) {
+		const diff = {
+			undo: getDiff(next, prev, getConfigurationFromSnapshot)!,
+			redo: getDiff(prev, next, getConfigurationFromSnapshot)!,
+		};
+
+		callback(diff, model);
+		prev = next;
+	});
 }
 
 export function applySnapshot<T extends Model>(

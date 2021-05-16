@@ -31,12 +31,20 @@ import {
 } from "./idMap";
 import { graph, graphOptions } from "../lobx";
 import { Configuration } from "..";
+import { clone } from "../utils";
 
 const administrationMap: WeakMap<
 	Model,
 	ModelAdministration<Model>
 > = new WeakMap();
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
+const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
+
+export function getConfigurationFromSnapshot(
+	snapshot: object
+): ModelConfiguration<unknown> | undefined {
+	return configMap.get(snapshot);
+}
 
 export function getModelAdm<T extends Model>(model: T): ModelAdministration<T> {
 	return administrationMap.get(model)! as ModelAdministration<T>;
@@ -108,6 +116,7 @@ export class ModelAdministration<ModelType extends Model = Model> {
 	private observableProxySet: ProxyHandler<ModelType>["set"];
 	private writeInProgress: Set<PropertyKey> = new Set();
 	private computedSnapshot: Computed<Snapshot<Model>> | undefined;
+	private snapshotMap: Map<string, Computed<unknown[]>> = new Map();
 	private parentName: PropertyKey | null = null;
 
 	constructor(model: ModelType, configuration: ModelConfiguration<ModelType>) {
@@ -116,7 +125,7 @@ export class ModelAdministration<ModelType extends Model = Model> {
 		this.proxy = model;
 		const adm = getAdministration(this.source)!;
 		const proxyTraps = adm.proxyTraps;
-		Object.assign(((adm as any).config = mapConfigure(configuration)));
+		Object.assign((adm.config = mapConfigure(configuration)));
 		this.observableProxyGet = proxyTraps.get;
 		this.observableProxySet = proxyTraps.set;
 		proxyTraps.get = (_, name) => this.proxyGet(name);
@@ -410,25 +419,48 @@ export class ModelAdministration<ModelType extends Model = Model> {
 			switch (this.configuration[key].type) {
 				case ModelCfgTypes.state:
 				case ModelCfgTypes.id:
-					json[key] = getObservableSource(this.proxy[key]);
+					json[key] = clone(getObservableSource(this.proxy[key]));
 					break;
 				case ModelCfgTypes.modelRef:
 					const model: Model | undefined = this.proxy[key];
 					json[key] = model && getModelRefSnapshot(model);
 					break;
 				case ModelCfgTypes.modelRefs:
-					const models: Model[] = this.proxy[key] ?? [];
-					json[key] = models.map((m) => getModelRefSnapshot(m));
+					if (!this.snapshotMap.has(key)) {
+						this.snapshotMap.set(
+							key,
+							computed(
+								() => {
+									const models: Model[] = this.proxy[key] ?? [];
+									return models.map((m) => getModelRefSnapshot(m)) as unknown[];
+								},
+								{ graph, keepAlive: true }
+							)
+						);
+					}
+
+					json[key] = this.snapshotMap.get(key)!.get();
 					break;
 				case CommonCfgTypes.child:
 					json[key] = getModelAdm(this.proxy[key])?.getSnapshot();
 					break;
 				case CommonCfgTypes.children:
-					json[key] = getObservableSource(
-						(this.proxy[key] ?? []).map((model: Model) =>
-							getModelAdm(model).getSnapshot()
-						)
-					);
+					if (!this.snapshotMap.has(key)) {
+						this.snapshotMap.set(
+							key,
+							computed(
+								() => {
+									return getObservableSource(
+										(this.proxy[key] ?? []).map((model: Model) =>
+											getModelAdm(model).getSnapshot()
+										)
+									);
+								},
+								{ graph, keepAlive: true }
+							)
+						);
+					}
+					json[key] = this.snapshotMap.get(key)!.get();
 					break;
 			}
 			return json;
@@ -513,7 +545,8 @@ export class ModelAdministration<ModelType extends Model = Model> {
 						break;
 					case CommonCfgTypes.children:
 						const Ctor = childType as typeof Model;
-						this.proxy[key] = (value as Snapshot[])?.map((snapshot) => {
+						this.proxy[key] = (value as Snapshot[])?.map((snapshot, index) => {
+							snapshot = snapshot ?? {};
 							let model: Model;
 							if (snapshot instanceof Model) {
 								model = snapshot;
@@ -522,7 +555,9 @@ export class ModelAdministration<ModelType extends Model = Model> {
 
 								const id = childType && getSnapshotId(snapshot, Ctor);
 								const foundModel =
-									id != null ? getModelById(this.root.proxy, id) : null;
+									id != null
+										? getModelById(this.root.proxy, id)
+										: this.proxy[key][index];
 								const adm = foundModel && getModelAdm(foundModel);
 
 								if (
@@ -551,10 +586,18 @@ export class ModelAdministration<ModelType extends Model = Model> {
 
 	getSnapshot(): Snapshot<ModelType> {
 		if (!this.computedSnapshot) {
-			this.computedSnapshot = computed(() => this.toJSON(), {
-				graph,
-				keepAlive: true,
-			});
+			this.computedSnapshot = computed(
+				() => {
+					const json = this.toJSON();
+					configMap.set(json, this.configuration);
+
+					return json;
+				},
+				{
+					graph,
+					keepAlive: true,
+				}
+			);
 		}
 
 		return this.computedSnapshot.get() as Snapshot<ModelType>;

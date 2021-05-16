@@ -35,9 +35,8 @@ export default class Model extends Observable {
 			);
 		}
 
-		const config = (this.constructor as typeof Model).types as Configuration<
-			this
-		>;
+		const config = (this.constructor as typeof Model)
+			.types as Configuration<this>;
 
 		new ModelAdministration(this, config);
 	}

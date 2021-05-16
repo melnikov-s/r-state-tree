@@ -1,7 +1,7 @@
 import Store, { createStore, updateStore } from "./store/Store";
 import Model from "./model/Model";
 import { mount, unmount, onSnapshot, toSnapshot, applySnapshot } from "./api";
-import { Configuration, Snapshot, IdType } from "./types";
+import { Configuration, Snapshot, IdType, SnapshotDiff } from "./types";
 import { getGraph } from "./graph";
 
 export {
@@ -16,6 +16,7 @@ export {
 	onSnapshot,
 	toSnapshot,
 	applySnapshot,
+	SnapshotDiff,
 	Snapshot,
 	IdType,
 };

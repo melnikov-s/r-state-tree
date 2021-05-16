@@ -14,7 +14,10 @@ import {
 	onSnapshot,
 	toSnapshot,
 	applySnapshot,
+	runInAction,
+	SnapshotDiff,
 } from "../src/index";
+import { onSnapshotDiff } from "../src/api";
 
 test("can create a model", () => {
 	class M extends Model {}
@@ -1205,6 +1208,129 @@ describe("model state", () => {
 			mcb: undefined,
 			mcr: undefined,
 			mcrs: [],
+		});
+	});
+
+	describe("Snapshot diffs", () => {
+		test("onSnapshotDiff applying undo/redo", () => {
+			class MC extends Model {
+				@state prop = 0;
+
+				@action action() {
+					this.prop++;
+				}
+			}
+
+			class M extends Model {
+				@state propA = 0;
+				@state propB = 0;
+				@observable obs = 0;
+				@child(MC) mc: MC = MC.create();
+				@children(MC) mcs: MC[] = [MC.create(), MC.create({ prop: 1 })];
+
+				@action action() {
+					this.propA++;
+					this.propB++;
+
+					this.mc.action();
+				}
+
+				@action action2() {
+					this.mcs.push(MC.create({ prop: 2 }));
+				}
+
+				@action action3() {
+					const [first, middle, last] = this.mcs;
+					this.mcs = [last, middle, first];
+				}
+			}
+
+			const snapshots: SnapshotDiff[] = [];
+			const m = M.create();
+			onSnapshotDiff(m, (snapshot, model) => {
+				expect(model).toBe(m);
+				snapshots.push(snapshot);
+			});
+
+			const originalSnapshot = toSnapshot(m);
+
+			m.action();
+			m.mc.action();
+			m.action2();
+			m.action3();
+
+			const modifiedSnapshot = toSnapshot(m);
+
+			runInAction(() =>
+				snapshots.reverse().forEach((snapshot) => {
+					applySnapshot(m, snapshot.undo);
+				})
+			);
+
+			expect(toSnapshot(m)).toStrictEqual(originalSnapshot);
+
+			runInAction(() =>
+				snapshots.reverse().forEach((snapshot) => {
+					applySnapshot(m, snapshot.redo);
+				})
+			);
+
+			expect(toSnapshot(m)).toStrictEqual(modifiedSnapshot);
+		});
+
+		test("onSnapshotDiff with child using identifiers", () => {
+			class MC extends Model {
+				@identifier id = 0;
+				@state prop = 0;
+				@state anotherProp = 0;
+			}
+
+			class M extends Model {
+				@child(MC) mc: MC = MC.create();
+
+				@action action() {
+					this.mc = MC.create({ id: 1 });
+					this.mc.prop = 1;
+				}
+			}
+
+			const snapshots: SnapshotDiff[] = [];
+
+			const m = M.create();
+
+			onSnapshotDiff(m, (snapshot, model) => {
+				expect(model).toBe(m);
+				snapshots.push(snapshot);
+			});
+
+			m.action();
+			expect(snapshots).toStrictEqual([
+				{
+					undo: {
+						mc: {
+							id: 0,
+							prop: 0,
+						},
+					},
+					redo: {
+						mc: {
+							id: 1,
+							prop: 1,
+						},
+					},
+				},
+			]);
+
+			const oldRef = m.mc;
+			runInAction(() => applySnapshot(m, snapshots[0].undo));
+			expect(m.mc.id).toBe(0);
+			expect(m.mc).not.toBe(oldRef);
+			expect(oldRef.parent).toBe(null);
+			expect(toSnapshot(m.mc)).toStrictEqual({
+				anotherProp: 0,
+				id: 0,
+				prop: 0,
+			});
 		});
 	});
 });
