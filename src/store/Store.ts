@@ -5,7 +5,7 @@ import {
 	getStoreAdm,
 	updateProps,
 } from "./StoreAdministration";
-import {  graph } from "../lobx";
+import { graph } from "../lobx";
 
 let initEnabled = false;
 export function allowNewStore<T>(fn: () => T): T {
@@ -23,7 +23,7 @@ export function createStore<K extends Store<T>, T extends Props>(
 ): K {
 	return ({
 		Type,
-		props: props || {},
+		props: props ?? {},
 		key: props && props.key,
 	} as unknown) as K;
 }
@@ -50,17 +50,17 @@ export default class Store<
 	static types: unknown = {};
 	props: PropsType = {} as PropsType;
 
-	constructor() {
+	constructor(props: PropsType) {
 		super({ graph, configuration: {} });
 		if (!initEnabled) {
 			throw new Error("r-state-tree: Can't initialize store directly");
 		}
 
-		const config = (this.constructor as typeof Store).types as Configuration<
-			this
-		>;
+		const config = (this.constructor as typeof Store)
+			.types as Configuration<this>;
 
 		new StoreAdministration<this>(this, config);
+		updateProps(this.props, props);
 	}
 
 	get key(): string | number | undefined {

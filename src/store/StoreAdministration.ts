@@ -108,11 +108,7 @@ export class StoreAdministration<StoreType extends Store = Store> {
 	}
 
 	private createChildStore(element: StoreElement): Store {
-		return allowNewStore(() => {
-			const store = new element.Type();
-			updateProps(store.props, element.props);
-			return store;
-		});
+		return allowNewStore(() => new element.Type(element.props));
 	}
 
 	private setStoreList(

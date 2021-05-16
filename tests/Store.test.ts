@@ -67,6 +67,38 @@ test("child store can be null", () => {
 	expect(s.c).toBe(null);
 });
 
+test("can access props in constructor", () => {
+	class S extends Store<any> {
+		@observable prop = {};
+		@child get child() {
+			return createStore(C, { prop: this.prop });
+		}
+	}
+	class C extends Store<any> {
+		@observable prop = this.props.prop;
+	}
+
+	const s = mount(createStore(S));
+	expect(s.child.prop).toBe(s.prop);
+});
+
+test("can access models from props in constructor", () => {
+	class M extends Model {}
+	class S extends Store<any> {
+		@observable model = M.create();
+		@child get child() {
+			return createStore(C, { models: { model: this.model } });
+		}
+	}
+	class C extends Store<any> {
+		@model model;
+		@observable prop = this.model;
+	}
+
+	const s = mount(createStore(S));
+	expect(s.child.prop).toBe(s.model);
+});
+
 test("can create an array of child stores", () => {
 	class S extends Store<any> {
 		@children
@@ -361,13 +393,11 @@ test("storeDidMount is executed in an action", () => {
 
 test("when props change only those computed methods that are directly affected are triggered", () => {
 	class C extends Store<any> {
-		@computed
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 
-		@computed
-		get values() {
+		@computed get values() {
 			return [this.props.values];
 		}
 	}
@@ -380,8 +410,7 @@ test("when props change only those computed methods that are directly affected a
 			return createStore(C, { value: this.value, values: this.values });
 		}
 
-		@action
-		inc() {
+		@action inc() {
 			this.value++;
 		}
 	}
@@ -655,7 +684,7 @@ test("models on the store are reactive", () => {
 test("can't initianialize store directly", () => {
 	class S extends Store<any> {}
 
-	expect(() => new S()).toThrow();
+	expect(() => new S({})).toThrow();
 });
 
 test("can setup a reaction in a store", () => {

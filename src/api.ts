@@ -7,10 +7,7 @@ import { getModelAdm } from "./model/ModelAdministration";
 export function mount<T extends Store>(container: T): T {
 	return allowNewStore(() => {
 		const element = (container as unknown) as StoreElement;
-		const s = new element.Type();
-		if (element.props) {
-			Object.assign(s.props, element.props);
-		}
+		const s = new element.Type(element.props);
 		getStoreAdm(s).mount();
 		return s;
 	}) as T;
