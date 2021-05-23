@@ -18,7 +18,7 @@ export function allowNewStore<T>(fn: () => T): T {
 }
 
 export function createStore<K extends Store<T>, T extends Props>(
-	Type: new (...args: unknown[]) => K,
+	Type: new (props: T) => K,
 	props?: T
 ): K {
 	return ({
