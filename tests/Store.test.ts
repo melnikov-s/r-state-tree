@@ -92,7 +92,11 @@ test("can access models from props in constructor", () => {
 	}
 	class C extends Store<any> {
 		@model model;
-		@observable prop = this.model;
+		@observable prop;
+		constructor(props) {
+			super(props);
+			this.prop = this.model;
+		}
 	}
 
 	const s = mount(createStore(S));

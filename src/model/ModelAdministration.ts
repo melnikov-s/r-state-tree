@@ -143,7 +143,11 @@ export class ModelAdministration<ModelType extends Model = Model> {
 			case ModelCfgTypes.modelRefs:
 				return this.getModelRefs(name);
 			default:
-				return this.observableProxyGet!(this.source, name, this.proxy);
+				return this.observableProxyGet!(
+					this.source,
+					name as string,
+					this.proxy
+				);
 		}
 	}
 
@@ -177,7 +181,12 @@ export class ModelAdministration<ModelType extends Model = Model> {
 				}
 			}
 
-			return this.observableProxySet!(this.source, name, value, this.proxy);
+			return this.observableProxySet!(
+				this.source,
+				name as string,
+				value,
+				this.proxy
+			);
 		} finally {
 			this.writeInProgress.delete(name);
 		}
@@ -279,7 +288,12 @@ export class ModelAdministration<ModelType extends Model = Model> {
 		this.modelsTraceUnsub.get(name)?.();
 
 		// set the model on the observable proxy
-		this.observableProxySet!(this.source, name, newModels, this.proxy);
+		this.observableProxySet!(
+			this.source,
+			name as string,
+			newModels,
+			this.proxy
+		);
 
 		// sub to new model trace so that we mount/unmount models as they change
 		// on the observable proxy.

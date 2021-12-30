@@ -1,6 +1,6 @@
 {
 	"compilerOptions": {
-		"rootDir": "src",
+		"rootDir": "../",
 		"target": "es6",
 		"alwaysStrict": false,
 		"noImplicitReturns": false,
@@ -10,7 +10,8 @@
 		"lib": ["es6"],
 		"strictNullChecks": false,
 		"experimentalDecorators": true,
-		"downlevelIteration": true
+		"downlevelIteration": true,
+		"esModuleInterop": true,
 	},
 	"include": ["*"],
 	"exclude": ["node_modules"]

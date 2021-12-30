@@ -89,7 +89,11 @@ export class StoreAdministration<StoreType extends Store = Store> {
 			case StoreCfgTypes.model:
 				return this.getModelRef(name);
 			default:
-				return this.observableProxyGet!(this.source, name, this.proxy);
+				return this.observableProxyGet!(
+					this.source,
+					name as string,
+					this.proxy
+				);
 		}
 	}
 
@@ -102,7 +106,12 @@ export class StoreAdministration<StoreType extends Store = Store> {
 			throw new Error(`r-state-tree: model ${String(name)} is read-only`);
 		}
 
-		return this.observableProxySet!(this.source, name, value, this.proxy);
+		return this.observableProxySet!(
+			this.source,
+			name as string,
+			value,
+			this.proxy
+		);
 	}
 
 	private createChildStore(element: StoreElement): Store {
