@@ -1,7 +1,7 @@
-import { observable } from "lobx";
+import { getObservable } from "nu-observables";
+import { graph } from "../graph";
 import { IdType } from "../types";
 import Model from "./Model";
-import { graphOptions } from "../lobx";
 import { getModelAdm } from "./ModelAdministration";
 
 const attachedIdMap: WeakMap<
@@ -103,7 +103,7 @@ export function onModelAttached(model: Model): void {
 			let map = attachedIdMap.get(node);
 
 			if (!map) {
-				map = observable(new Map(), graphOptions);
+				map = getObservable(new Map(), graph);
 				attachedIdMap.set(node, map);
 			}
 

@@ -1,18 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
-	observable,
-	action,
-	computed,
 	Store,
 	child,
 	children,
 	createStore,
 	mount,
-	autorun,
 	Model,
 	model,
-	reaction,
 	updateStore,
+	reaction,
+	effect,
 } from "../src/index";
 
 test("can mount a store", () => {
@@ -50,13 +47,13 @@ test("can create a child store", () => {
 
 test("child store can be null", () => {
 	class S extends Store<any> {
-		@observable mounted = true;
+		mounted = true;
 		@child
 		get c() {
 			return this.mounted ? createStore(C, { prop: 0 }) : null;
 		}
 
-		@action unmountChild() {
+		unmountChild() {
 			this.mounted = false;
 		}
 	}
@@ -69,13 +66,13 @@ test("child store can be null", () => {
 
 test("can access props in constructor", () => {
 	class S extends Store<any> {
-		@observable prop = {};
+		prop = {};
 		@child get child() {
 			return createStore(C, { prop: this.prop });
 		}
 	}
 	class C extends Store<any> {
-		@observable prop = this.props.prop;
+		prop = this.props.prop;
 	}
 
 	const s = mount(createStore(S));
@@ -85,14 +82,14 @@ test("can access props in constructor", () => {
 test("can access models from props in constructor", () => {
 	class M extends Model {}
 	class S extends Store<any> {
-		@observable model = M.create();
+		model = M.create();
 		@child get child() {
 			return createStore(C, { models: { model: this.model } });
 		}
 	}
 	class C extends Store<any> {
 		@model model;
-		@observable prop;
+		prop;
 		constructor(props) {
 			super(props);
 			this.prop = this.model;
@@ -126,10 +123,8 @@ test("can create an array of child stores", () => {
 
 test("updates an array of stores", () => {
 	class S extends Store<any> {
-		@observable
 		value = 0;
 
-		@action
 		inc() {
 			this.value++;
 		}
@@ -158,13 +153,13 @@ test("updates an array of stores", () => {
 
 test("child stores are reactive", () => {
 	class C extends Store<any> {
-		@computed get value() {
+		get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		@observable values = [];
-		@action add() {
+		values = [];
+		add() {
 			this.values.push(this.values.length);
 		}
 		@children get c() {
@@ -175,7 +170,7 @@ test("child stores are reactive", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	autorun(() => {
+	effect(() => {
 		s.c.length;
 		count++;
 	});
@@ -188,13 +183,13 @@ test("child stores are reactive", () => {
 
 test("child store can be retrieved during an action", () => {
 	class C extends Store<any> {
-		@computed get value() {
+		get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		@observable value = false;
-		@action add() {
+		value = false;
+		add() {
 			count++;
 			this.value = true;
 			expect(this.c).toBeInstanceOf(C);
@@ -207,7 +202,7 @@ test("child store can be retrieved during an action", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	autorun(() => {
+	effect(() => {
 		s.c;
 	});
 
@@ -217,13 +212,13 @@ test("child store can be retrieved during an action", () => {
 
 test("children stores can be retrieved during an action", () => {
 	class C extends Store<any> {
-		@computed get value() {
+		get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		@observable values = [];
-		@action add() {
+		values = [];
+		add() {
 			count++;
 			this.values.push(this.values.length);
 			expect(this.c.length).toBe(this.values.length);
@@ -236,7 +231,7 @@ test("children stores can be retrieved during an action", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	autorun(() => {
+	effect(() => {
 		s.c.length;
 	});
 
@@ -246,13 +241,13 @@ test("children stores can be retrieved during an action", () => {
 
 test("child stores do not trigger listeners when only props change", () => {
 	class C extends Store<any> {
-		@computed get value() {
+		get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		@observable values = [1, 2];
-		@action changeValues() {
+		values = [1, 2];
+		changeValues() {
 			this.values = this.values.map((v) => v + 1);
 		}
 		@children get c() {
@@ -263,7 +258,7 @@ test("child stores do not trigger listeners when only props change", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	autorun(() => {
+	effect(() => {
 		s.c.length;
 		count++;
 	});
@@ -276,13 +271,13 @@ test("child stores do not trigger listeners when only props change", () => {
 
 test("child stores are reactive", () => {
 	class C extends Store<any> {
-		@computed get value() {
+		get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		@observable values = [];
-		@action add() {
+		values = [];
+		add() {
 			this.values.push(this.values.length);
 		}
 		@children get c() {
@@ -293,7 +288,7 @@ test("child stores are reactive", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	autorun(() => {
+	effect(() => {
 		s.c.length;
 		count++;
 	});
@@ -306,16 +301,16 @@ test("child stores are reactive", () => {
 
 test("child stores with keys", () => {
 	class C extends Store<any> {
-		@computed get value() {
+		get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		@observable keys = [1, 2, 3];
+		keys = [1, 2, 3];
 		@children get cs() {
 			return this.keys.map((value) => createStore(C, { value, key: value }));
 		}
-		@action reverse() {
+		reverse() {
 			this.keys.reverse();
 		}
 	}
@@ -324,7 +319,7 @@ test("child stores with keys", () => {
 	const stores = s.cs.slice();
 	expect(stores.length).toBe(3);
 	let count = 0;
-	autorun(() => {
+	effect(() => {
 		count++;
 		s.cs;
 	});
@@ -340,10 +335,8 @@ test("props are reactive", () => {
 	let propsCounter = 0;
 
 	class S extends Store<any> {
-		@observable
 		value = 0;
 
-		@action
 		inc() {
 			this.value++;
 		}
@@ -384,7 +377,7 @@ test("will call `storeDidMount` when a root store mounts", () => {
 
 test("storeDidMount is executed in an action", () => {
 	class S extends Store<any> {
-		@observable count = 0;
+		count = 0;
 		storeDidMount() {
 			this.count++;
 		}
@@ -397,24 +390,24 @@ test("storeDidMount is executed in an action", () => {
 
 test("when props change only those computed methods that are directly affected are triggered", () => {
 	class C extends Store<any> {
-		@computed get value() {
+		get value() {
 			return this.props.value;
 		}
 
-		@computed get values() {
+		get values() {
 			return [this.props.values];
 		}
 	}
 
 	class S extends Store<any> {
-		@observable value = 0;
-		@observable values = [0];
+		value = 0;
+		values = [0];
 
 		@child get c() {
 			return createStore(C, { value: this.value, values: this.values });
 		}
 
-		@action inc() {
+		inc() {
 			this.value++;
 		}
 	}
@@ -422,8 +415,8 @@ test("when props change only those computed methods that are directly affected a
 	let count = 0;
 	const s = mount(createStore(S));
 	let result;
-	autorun(() => (result = s.c.value));
-	autorun(() => {
+	effect(() => (result = s.c.value));
+	effect(() => {
 		s.c.values;
 		count++;
 	});
@@ -437,13 +430,11 @@ test("when props change only those computed methods that are directly affected a
 
 test("context test", () => {
 	class C extends Store<any> {
-		@computed
 		get value() {
 			const context = this.context;
 			return context.value;
 		}
 
-		@computed
 		get values() {
 			return [this.context.values];
 		}
@@ -452,8 +443,8 @@ test("context test", () => {
 	let provideCount = 0;
 
 	class S extends Store<any> {
-		@observable value = 0;
-		@observable values = [0];
+		value = 0;
+		values = [0];
 
 		provideContext() {
 			provideCount++;
@@ -467,7 +458,6 @@ test("context test", () => {
 			return createStore(C);
 		}
 
-		@action
 		inc() {
 			this.value++;
 		}
@@ -476,8 +466,8 @@ test("context test", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 	let result;
-	autorun(() => (result = s.c.value));
-	autorun(() => {
+	effect(() => (result = s.c.value));
+	effect(() => {
 		s.c.values;
 		count++;
 	});
@@ -494,7 +484,7 @@ test("context test", () => {
 
 test("context can use child store values", () => {
 	class CS1 extends Store<any> {
-		@observable value = {};
+		value = {};
 	}
 	class CS2 extends Store<any> {}
 
@@ -520,7 +510,7 @@ test("context can use child store values", () => {
 
 test("context can use child store values (children)", () => {
 	class CS1 extends Store<any> {
-		@observable value = {};
+		value = {};
 	}
 	class CS2 extends Store<any> {}
 
@@ -597,10 +587,10 @@ test("models on the store can be an array", () => {
 
 test("models on the store can be updated", () => {
 	class M1 extends Model {
-		@observable state = 0;
+		state = 0;
 	}
 	class M2 extends Model {
-		@observable state = 0;
+		state = 0;
 	}
 
 	class CS extends Store<any> {
@@ -608,11 +598,11 @@ test("models on the store can be updated", () => {
 	}
 
 	class S extends Store<any> {
-		@observable state = false;
+		state = false;
 		@model m1: M1;
 		@model m2: M2;
 
-		@action switchModel() {
+		switchModel() {
 			this.state = !this.state;
 		}
 
@@ -632,27 +622,27 @@ test("models on the store are reactive", () => {
 	let count = 0;
 
 	class M1 extends Model {
-		@observable state = 0;
+		state = 0;
 	}
 	class M2 extends Model {
-		@observable state = 0;
+		state = 0;
 	}
 
 	class CS extends Store<any> {
 		@model m: M1 | M2;
 		@model m1: M1;
 
-		@computed get models() {
+		get models() {
 			return [this.m1];
 		}
 	}
 
 	class S extends Store<any> {
-		@observable state = false;
+		state = false;
 		@model m1: M1;
 		@model m2: M2;
 
-		@action switchModel() {
+		switchModel() {
 			this.state = !this.state;
 		}
 
@@ -693,7 +683,7 @@ test("can't initianialize store directly", () => {
 
 test("can setup a reaction in a store", () => {
 	class S extends Store<any> {
-		@observable prop = 0;
+		prop = 0;
 		count = 0;
 		unsub;
 
@@ -703,7 +693,7 @@ test("can setup a reaction in a store", () => {
 				() => this.count++
 			);
 		}
-		@action inc() {
+		inc() {
 			this.prop++;
 		}
 	}
@@ -730,8 +720,8 @@ test("reaction in a store will auto unsub after store is unmounted ", () => {
 	}
 
 	class S extends Store<any> {
-		@observable mounted = true;
-		@observable prop = 0;
+		mounted = true;
+		prop = 0;
 		count = 0;
 
 		@child get c() {
@@ -744,11 +734,11 @@ test("reaction in a store will auto unsub after store is unmounted ", () => {
 				: null;
 		}
 
-		@action inc() {
+		inc() {
 			this.prop++;
 		}
 
-		@action unMountChild() {
+		unMountChild() {
 			this.mounted = false;
 		}
 	}

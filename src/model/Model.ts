@@ -1,10 +1,10 @@
-import { ModelAdministration, getModelAdm } from "./ModelAdministration";
+import { getModelAdm, ModelAdministration } from "./ModelAdministration";
 import { Configuration, Snapshot } from "../types";
-import { Observable } from "lobx";
-import { graph } from "../lobx";
+import { createObservableWithCustomAdministration } from "nu-observables";
+import { graph } from "../graph";
 
 let initEnabled = false;
-export default class Model extends Observable {
+export default class Model {
 	static types: object = {};
 	static childTypes: object = {};
 
@@ -28,17 +28,23 @@ export default class Model extends Observable {
 	}
 
 	constructor() {
-		super({ graph, configuration: {} });
 		if (!initEnabled) {
 			throw new Error(
 				`r-state-tree: Can't initialize model directly, use \`${this.constructor.name}.create()\` instead`
 			);
 		}
 
+		const observable = createObservableWithCustomAdministration(
+			this,
+			graph,
+			ModelAdministration
+		);
+		const adm = getModelAdm(observable);
 		const config = (this.constructor as typeof Model)
 			.types as Configuration<this>;
+		adm.setConfiguration(config ?? {});
 
-		new ModelAdministration(this, config);
+		return observable;
 	}
 
 	get parent(): Model | null {

@@ -1,24 +1,21 @@
 import {
-	observable,
-	action,
-	computed,
 	Model,
 	Store,
 	mount,
-	autorun,
-	reaction,
 	createStore,
 	task,
+	reaction,
+	effect,
 } from "../src/index";
 
 export function createContainer<
 	T extends new (...args: unknown[]) => InstanceType<T>
 >(Container: T): InstanceType<T> {
 	if (Model.isPrototypeOf(Container)) {
-		return ((Container as unknown) as typeof Model).create() as InstanceType<T>;
+		return (Container as unknown as typeof Model).create() as InstanceType<T>;
 	}
 
-	return mount(createStore(Container));
+	return mount(createStore(Container as any)) as any;
 }
 
 [Model, Store].forEach((c) => {
@@ -29,18 +26,18 @@ export function createContainer<
 			const obj = { prop: "value" };
 
 			class C extends Container {
-				@observable stateA = null;
-				@observable stateB = null;
+				stateA = null;
+				stateB = null;
 
-				@action setA(obj) {
+				setA(obj) {
 					this.stateA = obj;
 				}
 
-				@action setB(obj) {
+				setB(obj) {
 					this.stateB = obj;
 				}
 
-				@action modObj(prop, value) {
+				modObj(prop, value) {
 					this.stateA[prop] = value;
 				}
 			}
@@ -61,18 +58,18 @@ export function createContainer<
 			const array = [0];
 
 			class C extends Container {
-				@observable stateA = null;
-				@observable stateB = null;
+				stateA = null;
+				stateB = null;
 
-				@action setA(array) {
+				setA(array) {
 					this.stateA = array;
 				}
 
-				@action setB(array) {
+				setB(array) {
 					this.stateB = array;
 				}
 
-				@action modArray(value) {
+				modArray(value) {
 					this.stateA.push(value);
 				}
 			}
@@ -93,18 +90,18 @@ export function createContainer<
 			const map = new Map([["prop", "value"]]);
 
 			class C extends Container {
-				@observable stateA = null;
-				@observable stateB = null;
+				stateA = null;
+				stateB = null;
 
-				@action setA(map) {
+				setA(map) {
 					this.stateA = map;
 				}
 
-				@action setB(map) {
+				setB(map) {
 					this.stateB = map;
 				}
 
-				@action modMap(prop, value) {
+				modMap(prop, value) {
 					this.stateA.set(prop, value);
 				}
 			}
@@ -128,18 +125,18 @@ export function createContainer<
 			const set = new Set([0]);
 
 			class C extends Container {
-				@observable stateA = null;
-				@observable stateB = null;
+				stateA = null;
+				stateB = null;
 
-				@action setA(set) {
+				setA(set) {
 					this.stateA = set;
 				}
 
-				@action setB(map) {
+				setB(map) {
 					this.stateB = map;
 				}
 
-				@action modSet(value) {
+				modSet(value) {
 					this.stateA.add(value);
 				}
 			}
@@ -161,9 +158,9 @@ export function createContainer<
 		let count = 0;
 
 		class M extends Container {
-			@observable state = 0;
+			state = 0;
 
-			@action incState() {
+			incState() {
 				this.state++;
 			}
 		}
@@ -182,13 +179,13 @@ export function createContainer<
 		let count = 0;
 
 		class M extends Container {
-			@observable state = 0;
+			state = 0;
 
-			@action incState() {
+			incState() {
 				this.state++;
 			}
 
-			@computed get twiceState() {
+			get twiceState() {
 				return this.state * 2;
 			}
 		}
@@ -207,11 +204,11 @@ export function createContainer<
 
 	test(`(${Container.name}) state can't be mutated directly`, () => {
 		class M extends Container {
-			@observable state = 0;
+			state = 0;
 		}
 
 		const m = createContainer(M);
-		autorun(() => m.state);
+		effect(() => m.state);
 		expect(() => m.state++).toThrow();
 	});
 
@@ -219,11 +216,11 @@ export function createContainer<
 		const result = {};
 
 		class S extends Container {
-			@observable value = 0;
+			value = 0;
 
 			result = null;
 
-			@action async inc() {
+			async inc() {
 				this.value++;
 				this.result = await task(
 					new Promise((resolve) => setTimeout(() => resolve(result), 0))
@@ -236,11 +233,11 @@ export function createContainer<
 
 		const s = createContainer(S);
 		expect(s.value).toBe(0);
-		autorun(() => s.value);
+		effect(() => s.value);
 		const w = s.inc();
 		expect(s.value).toBe(1);
 		expect(s.result).toBe(null);
 		expect(await w).toBe(2);
-		expect(s.result).toBe(result);
+		expect(s.result).toEqual(result);
 	});
 });

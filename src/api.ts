@@ -10,7 +10,7 @@ import {
 
 export function mount<T extends Store>(container: T): T {
 	return allowNewStore(() => {
-		const element = (container as unknown) as StoreElement;
+		const element = container as unknown as StoreElement;
 		const s = new element.Type(element.props);
 		getStoreAdm(s).mount();
 		return s;

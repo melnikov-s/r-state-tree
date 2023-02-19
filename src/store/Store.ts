@@ -1,11 +1,14 @@
 import { Props, Context, StoreConfiguration, Configuration } from "../types";
-import { Observable } from "lobx";
 import {
-	StoreAdministration,
 	getStoreAdm,
+	StoreAdministration,
 	updateProps,
 } from "./StoreAdministration";
-import { graph } from "../lobx";
+import {
+	createObservableWithCustomAdministration,
+	getObservable,
+} from "nu-observables";
+import { graph } from "../graph";
 
 let initEnabled = false;
 export function allowNewStore<T>(fn: () => T): T {
@@ -21,11 +24,11 @@ export function createStore<K extends Store<T>, T extends Props>(
 	Type: new (props: T) => K,
 	props?: T
 ): K {
-	return ({
+	return {
 		Type,
 		props: props ?? {},
 		key: props && props.key,
-	} as unknown) as K;
+	} as unknown as K;
 }
 
 export function updateStore<K extends Store<T>, T extends Props>(
@@ -46,12 +49,11 @@ export function types<T extends Store>(
 export default class Store<
 	PropsType extends Props = Props,
 	ContextType extends Context = Context
-> extends Observable {
+> {
 	static types: unknown = {};
-	props: PropsType = {} as PropsType;
+	props!: PropsType;
 
 	constructor(props: PropsType) {
-		super({ graph, configuration: {} });
 		if (!initEnabled) {
 			throw new Error("r-state-tree: Can't initialize store directly");
 		}
@@ -59,8 +61,17 @@ export default class Store<
 		const config = (this.constructor as typeof Store)
 			.types as Configuration<this>;
 
-		new StoreAdministration<this>(this, config);
-		updateProps(this.props, props);
+		const observable = createObservableWithCustomAdministration(
+			this,
+			graph,
+			StoreAdministration
+		);
+		const adm = getStoreAdm(observable);
+		adm.setConfiguration(config ?? {});
+		adm.write("props", getObservable({}, graph));
+		updateProps(observable.props, props);
+
+		return observable;
 	}
 
 	get key(): string | number | undefined {

@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import Store from "./store/Store";
-import * as lobx from "lobx";
 import Model from "./model/Model";
 import {
 	childType,
@@ -37,9 +36,6 @@ function makeDecorator(
 	};
 }
 
-export const action = makeDecorator(lobx.action);
-export const computed = makeDecorator(lobx.computed);
-export const observable = makeDecorator(lobx.observable);
 export const child = makeDecorator(childType);
 export const children = makeDecorator(childrenType);
 export const model = makeDecorator(modelType);

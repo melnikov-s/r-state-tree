@@ -9,12 +9,11 @@ import {
 	onSnapshotDiff,
 } from "./api";
 import { Configuration, Snapshot, IdType, SnapshotDiff } from "./types";
-import { getGraph } from "./graph";
+import { runInAction, effect, reaction, task, untracked } from "./graph";
 
 export {
 	createStore,
 	Configuration,
-	getGraph,
 	Store,
 	Model,
 	mount,
@@ -27,7 +26,11 @@ export {
 	SnapshotDiff,
 	Snapshot,
 	IdType,
+	runInAction,
+	effect,
+	reaction,
+	task,
+	untracked,
 };
 
-export * from "./lobx";
 export * from "./decorators";

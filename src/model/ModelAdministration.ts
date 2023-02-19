@@ -1,16 +1,9 @@
 import {
-	Atom,
-	atom,
-	Computed,
-	computed,
-	observable,
 	getAdministration,
-	MutationEvent,
-	observe,
-	Configuration as LobxConfiguration,
-	getObservableSource,
-	reaction,
-} from "lobx";
+	createObservableWithCustomAdministration,
+	ObjectAdministration,
+	getSource,
+} from "nu-observables";
 import Model from "../model/Model";
 import {
 	ModelConfiguration,
@@ -29,14 +22,21 @@ import {
 	setIdentifier,
 	onSnapshotLoad,
 } from "./idMap";
-import { graph, graphOptions } from "../lobx";
-import { Configuration } from "..";
 import { clone } from "../utils";
+import {
+	ChildModelsAdministration,
+	MutationEvent,
+	observe,
+} from "./ChildModelsAdministration";
+import {
+	AtomNode,
+	createComputed,
+	ComputedNode,
+	reaction,
+	runInAction,
+	graph,
+} from "../graph";
 
-const administrationMap: WeakMap<
-	Model,
-	ModelAdministration<Model>
-> = new WeakMap();
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
 
@@ -47,7 +47,7 @@ export function getConfigurationFromSnapshot(
 }
 
 export function getModelAdm<T extends Model>(model: T): ModelAdministration<T> {
-	return administrationMap.get(model)! as ModelAdministration<T>;
+	return getAdministration(model)! as unknown as ModelAdministration<T>;
 }
 
 function getIdKey(Ctor: typeof Model): string | number | null {
@@ -87,137 +87,113 @@ function getSnapshotRefId(snapshot: RefSnapshot): IdType {
 	return snapshot[keys[0]];
 }
 
-function mapConfigure(
-	config: Configuration<unknown>
-): LobxConfiguration<unknown> {
-	const mappedConfigure = {};
-	Object.keys(config).forEach((key) => {
-		if (ModelCfgTypes[config[key].type] || CommonCfgTypes[config[key].type]) {
-			mappedConfigure[key] = observable;
-		} else {
-			mappedConfigure[key] = config[key];
-		}
-	});
+export class ModelAdministration<
+	ModelType extends Model = Model
+> extends ObjectAdministration<ModelType> {
+	static proxyTraps: ProxyHandler<object> = Object.assign(
+		{},
+		ObjectAdministration.proxyTraps,
+		{
+			get(target, prop, proxy) {
+				const adm = getAdministration(target) as ModelAdministration;
+				if (prop === "parent") {
+					return (target as Model).parent;
+				}
+				switch (adm.configuration[prop as string]?.type) {
+					case ModelCfgTypes.modelRef:
+						return adm.getModelRef(prop);
+					case ModelCfgTypes.modelRefs:
+						return adm.getModelRefs(prop);
+					default:
+						return ObjectAdministration.proxyTraps.get?.apply(
+							null,
+							arguments as any
+						);
+				}
+			},
+			set(target, name, value) {
+				const adm = getAdministration(target) as ModelAdministration;
+				adm.writeInProgress.add(name);
+				try {
+					switch (adm.configuration[name as string]?.type) {
+						case ModelCfgTypes.modelRef: {
+							adm.setModelRef(name, value as Model | undefined);
+							return true;
+						}
+						case ModelCfgTypes.modelRefs: {
+							adm.setModelRefs(name, value as Model[]);
+							return true;
+						}
+						case CommonCfgTypes.children: {
+							adm.setModels(name, value as Model[]);
+							return true;
+						}
+						case CommonCfgTypes.child: {
+							adm.setModel(name, value as Model | null);
+							break;
+						}
+						case ModelCfgTypes.id: {
+							adm.setId(name as string, value as IdType);
+							break;
+						}
+						case ModelCfgTypes.state: {
+							adm.setState(name as string, value);
+							break;
+						}
+					}
 
-	return mappedConfigure;
-}
+					return ObjectAdministration.proxyTraps.set?.apply(
+						null,
+						arguments as any
+					);
+				} finally {
+					adm.writeInProgress.delete(name);
+				}
+			},
 
-export class ModelAdministration<ModelType extends Model = Model> {
-	proxy: ModelType;
-	source: ModelType;
-	configuration: ModelConfiguration<ModelType>;
+			defineProperty(target, name, desc) {
+				const adm = getAdministration(target) as ModelAdministration;
+				// if we don't check for writeInProgress we will blow the stack
+				// as Reflect.set will eventually trigger defineProperty proxy handler
+				if (desc && "value" in desc && !adm.writeInProgress.has(name)) {
+					switch (adm.configuration[name as string]?.type) {
+						case ModelCfgTypes.modelRef:
+						case ModelCfgTypes.modelRefs:
+						case CommonCfgTypes.children:
+						case CommonCfgTypes.child:
+						case ModelCfgTypes.id: {
+							adm.proxy[name] = desc.value;
+							return true;
+						}
+					}
+				}
+
+				return Reflect.defineProperty(target, name, desc);
+			},
+		} as ProxyHandler<object>
+	);
+
+	configuration!: ModelConfiguration<ModelType>;
 	parent: ModelAdministration<Model> | null = null;
-	referencedAtoms!: Map<PropertyKey, Atom>;
-	referencedModels!: Map<PropertyKey, Computed<Model[]>>;
+	referencedAtoms!: Map<PropertyKey, AtomNode>;
+	referencedModels!: Map<PropertyKey, ComputedNode<Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
-	root: ModelAdministration<Model> = this;
+	root: ModelAdministration<any> = this;
 	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
-	private observableProxyGet: ProxyHandler<ModelType>["get"];
-	private observableProxySet: ProxyHandler<ModelType>["set"];
 	private writeInProgress: Set<PropertyKey> = new Set();
-	private computedSnapshot: Computed<Snapshot<Model>> | undefined;
-	private snapshotMap: Map<string, Computed<unknown[]>> = new Map();
-	private parentName: PropertyKey | null = null;
+	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
+	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
+	parentName: PropertyKey | null = null;
 
-	constructor(model: ModelType, configuration: ModelConfiguration<ModelType>) {
-		this.source = getObservableSource(model);
+	setConfiguration(configuration: ModelConfiguration<ModelType>): void {
 		this.configuration = configuration;
-		this.proxy = model;
-		const adm = getAdministration(this.source)!;
-		const proxyTraps = adm.proxyTraps;
-		Object.assign((adm.config = mapConfigure(configuration)));
-		this.observableProxyGet = proxyTraps.get;
-		this.observableProxySet = proxyTraps.set;
-		proxyTraps.get = (_, name) => this.proxyGet(name);
-		proxyTraps.set = (_, name, value) => this.proxySet(name, value);
-		proxyTraps.defineProperty = (_, name, desc) =>
-			this.proxyDefineProperty(name, desc);
-		administrationMap.set(this.proxy, this);
-		administrationMap.set(this.source, this);
 	}
 
-	private proxyGet(name: PropertyKey): unknown {
-		switch (this.configuration[name as string]?.type) {
-			case ModelCfgTypes.modelRef:
-				return this.getModelRef(name);
-			case ModelCfgTypes.modelRefs:
-				return this.getModelRefs(name);
-			default:
-				return this.observableProxyGet!(
-					this.source,
-					name as string,
-					this.proxy
-				);
-		}
-	}
-
-	private proxySet(name: PropertyKey, value: unknown): boolean {
-		this.writeInProgress.add(name);
-		try {
-			switch (this.configuration[name as string]?.type) {
-				case ModelCfgTypes.modelRef: {
-					this.setModelRef(name, value as Model | undefined);
-					return true;
-				}
-				case ModelCfgTypes.modelRefs: {
-					this.setModelRefs(name, value as Model[]);
-					return true;
-				}
-				case CommonCfgTypes.children: {
-					this.setModels(name, value as Model[]);
-					return true;
-				}
-				case CommonCfgTypes.child: {
-					this.setModel(name, value as Model | null);
-					break;
-				}
-				case ModelCfgTypes.id: {
-					this.setId(name as string, value as IdType);
-					break;
-				}
-				case ModelCfgTypes.state: {
-					this.setState(name as string, value);
-					break;
-				}
-			}
-
-			return this.observableProxySet!(
-				this.source,
-				name as string,
-				value,
-				this.proxy
-			);
-		} finally {
-			this.writeInProgress.delete(name);
-		}
-	}
-
-	private proxyDefineProperty(
-		name: PropertyKey,
-		desc: PropertyDescriptor
-	): boolean {
-		// if we don't check for writeInProgress we will blow the stack
-		// as Reflect.set will eventually trigger defineProperty proxy handler
-		if (desc && "value" in desc && !this.writeInProgress.has(name)) {
-			switch (this.configuration[name as string]?.type) {
-				case ModelCfgTypes.modelRef:
-				case ModelCfgTypes.modelRefs:
-				case CommonCfgTypes.children:
-				case CommonCfgTypes.child:
-				case ModelCfgTypes.id: {
-					this.proxySet(name, desc.value);
-				}
-			}
-		}
-
-		return Reflect.defineProperty(this.source, name, desc);
-	}
-
-	private getReferencedAtom(name: PropertyKey): Atom {
+	private getReferencedAtom(name: PropertyKey): AtomNode {
 		let a = this.referencedAtoms?.get(name);
 		if (!a) {
 			if (!this.referencedAtoms) this.referencedAtoms = new Map();
-			a = atom(graphOptions);
+			a = new AtomNode();
 			this.referencedAtoms.set(name, a);
 		}
 
@@ -227,7 +203,12 @@ export class ModelAdministration<ModelType extends Model = Model> {
 	private setState(name: string, value: unknown): void {
 		const oldValue = this.source[name];
 		if (value !== oldValue) {
-			this.observableProxySet!(this.source, name, value, this.proxy);
+			ObjectAdministration.proxyTraps.set!(
+				this.source,
+				name,
+				value,
+				this.proxy
+			);
 		}
 	}
 
@@ -268,7 +249,15 @@ export class ModelAdministration<ModelType extends Model = Model> {
 		}
 	}
 
-	private setModels(name: PropertyKey, newModels: Model[]): void {
+	private setModels(name: PropertyKey, newModelsSource: Model[]): void {
+		const newModels = createObservableWithCustomAdministration(
+			[] as Model[],
+			graph,
+			ChildModelsAdministration
+		);
+
+		newModels.push(...newModelsSource);
+
 		const oldModels = this.getModels(name) ?? [];
 
 		if (oldModels === newModels) {
@@ -288,7 +277,7 @@ export class ModelAdministration<ModelType extends Model = Model> {
 		this.modelsTraceUnsub.get(name)?.();
 
 		// set the model on the observable proxy
-		this.observableProxySet!(
+		ObjectAdministration.proxyTraps.set!(
 			this.source,
 			name as string,
 			newModels,
@@ -346,14 +335,15 @@ export class ModelAdministration<ModelType extends Model = Model> {
 
 		if (!c) {
 			if (!this.referencedModels) this.referencedModels = new Map();
-			c = computed(
+			c = createComputed(
 				() => {
 					a.reportObserved();
 					return (this.source[name] || [])
 						.map((id: IdType) => getModelById(this.root.proxy, id))
 						.filter((m: Model | undefined) => !!m);
 				},
-				{ keepAlive: true, graph }
+				null,
+				true
 			);
 
 			this.referencedModels.set(name, c);
@@ -397,7 +387,7 @@ export class ModelAdministration<ModelType extends Model = Model> {
 	}
 
 	private attach(
-		parent: ModelAdministration<Model> | null = null,
+		parent: ModelAdministration<any> | null = null,
 		parentName: PropertyKey | null = null
 	): void {
 		if (this.parent) {
@@ -412,14 +402,14 @@ export class ModelAdministration<ModelType extends Model = Model> {
 			this.parentName = parentName;
 		}
 
-		graph.runInAction(() => {
+		runInAction(() => {
 			onModelAttached(this.proxy);
 			this.proxy.modelDidAttach();
 		});
 	}
 
 	private detach(): void {
-		graph.runInAction(() => {
+		runInAction(() => {
 			this.proxy.modelWillDetach();
 			onModelDetached(this.proxy);
 		});
@@ -433,7 +423,7 @@ export class ModelAdministration<ModelType extends Model = Model> {
 			switch (this.configuration[key].type) {
 				case ModelCfgTypes.state:
 				case ModelCfgTypes.id:
-					json[key] = clone(getObservableSource(this.proxy[key]));
+					json[key] = clone(getSource(this.proxy[key]));
 					break;
 				case ModelCfgTypes.modelRef:
 					const model: Model | undefined = this.proxy[key];
@@ -443,12 +433,13 @@ export class ModelAdministration<ModelType extends Model = Model> {
 					if (!this.snapshotMap.has(key)) {
 						this.snapshotMap.set(
 							key,
-							computed(
+							createComputed(
 								() => {
 									const models: Model[] = this.proxy[key] ?? [];
 									return models.map((m) => getModelRefSnapshot(m)) as unknown[];
 								},
-								{ graph, keepAlive: true }
+								null,
+								true
 							)
 						);
 					}
@@ -462,15 +453,16 @@ export class ModelAdministration<ModelType extends Model = Model> {
 					if (!this.snapshotMap.has(key)) {
 						this.snapshotMap.set(
 							key,
-							computed(
+							createComputed(
 								() => {
-									return getObservableSource(
+									return getSource(
 										(this.proxy[key] ?? []).map((model: Model) =>
 											getModelAdm(model).getSnapshot()
 										)
 									);
 								},
-								{ graph, keepAlive: true }
+								null,
+								true
 							)
 						);
 					}
@@ -484,8 +476,7 @@ export class ModelAdministration<ModelType extends Model = Model> {
 	onSnapshotChange(onChange: SnapshotChange<ModelType>): () => void {
 		return reaction(
 			() => this.getSnapshot(),
-			(snapshot) => onChange(snapshot, this.proxy),
-			graphOptions
+			(snapshot) => onChange(snapshot, this.proxy)
 		);
 	}
 
@@ -600,17 +591,15 @@ export class ModelAdministration<ModelType extends Model = Model> {
 
 	getSnapshot(): Snapshot<ModelType> {
 		if (!this.computedSnapshot) {
-			this.computedSnapshot = computed(
+			this.computedSnapshot = createComputed(
 				() => {
 					const json = this.toJSON();
 					configMap.set(json, this.configuration);
 
 					return json;
 				},
-				{
-					graph,
-					keepAlive: true,
-				}
+				null,
+				true
 			);
 		}
 
