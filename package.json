@@ -1,6 +1,6 @@
 {
 	"name": "r-state-tree",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "reactive state management library",
 	"main": "dist/r-state-tree.cjs",
 	"module": "dist/r-state-tree.js",
@@ -21,7 +21,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:cover": "vitest run --coverage",
-		"build": "pnpm run build:types && vite build",
+		"build": "vite build && pnpm run build:types",
 		"build:types": "tsc --emitDeclarationOnly",
 		"lint": "eslint ./src ./tests --ext .ts",
 		"format": "prettier --cache --write \"src/**/*.ts\" \"tests/**/*.ts\"",
