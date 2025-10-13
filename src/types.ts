@@ -16,8 +16,7 @@ export type Props = {
 };
 export type StoreCtor<S extends Store = Store> = (new (
 	...args: ConstructorParameters<typeof Store>
-) => S) &
-	{ [P in keyof Store]: Store[P] };
+) => S) & { [P in keyof Store]: Store[P] };
 
 export type ChildModel = Model | Model[] | null;
 export type IdType = string | number;

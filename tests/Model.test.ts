@@ -10,9 +10,12 @@ import {
 	toSnapshot,
 	applySnapshot,
 	SnapshotDiff,
-	effect,
-	reaction,
-	runInAction,
+	createEffect,
+	createReaction,
+	runInBatch,
+	createSignal,
+	createComputed,
+	observable,
 } from "../src/index";
 
 import { onSnapshotDiff } from "../src/api";
@@ -28,7 +31,7 @@ test("can create a model", () => {
 test("direct new calls are disallowed", () => {
 	class M extends Model {}
 	expect(() => new M()).toThrowErrorMatchingInlineSnapshot(
-		`"r-state-tree: Can't initialize model directly, use \`M.create()\` instead"`
+		`[Error: r-state-tree: Can't initialize model directly, use \`M.create()\` instead]`
 	);
 });
 
@@ -277,7 +280,7 @@ test("child models are reactive properties", () => {
 
 	const m = M.create();
 	let count = 0;
-	reaction(
+	createReaction(
 		() => m.mc,
 		() => count++
 	);
@@ -330,7 +333,7 @@ describe("model identifiers", () => {
 
 		const mp = MP.create();
 		expect(() => mp.m.clearId()).toThrowErrorMatchingInlineSnapshot(
-			`"r-state-tree can't clear an identifier once it has already been set."`
+			`[Error: r-state-tree can't clear an identifier once it has already been set.]`
 		);
 	});
 
@@ -349,7 +352,7 @@ describe("model identifiers", () => {
 
 		const mp = MP.create();
 		expect(() => mp.add()).toThrowErrorMatchingInlineSnapshot(
-			`"r-state-tree: id: 0 is already assigned to another model"`
+			`[Error: r-state-tree: id: 0 is already assigned to another model]`
 		);
 	});
 
@@ -596,7 +599,7 @@ describe("model references", () => {
 		const m = M.create();
 		let current;
 
-		effect(() => (current = m.mr));
+		createEffect(() => (current = m.mr));
 
 		expect(current).toBe(undefined);
 		m.setModel(0);
@@ -847,7 +850,7 @@ describe("model state", () => {
 		let count = 0;
 
 		const m = M.create();
-		effect(() => {
+		createEffect(() => {
 			count++;
 			m.prop;
 		});
@@ -896,7 +899,7 @@ describe("model state", () => {
 
 		const m = M.create();
 
-		effect(() => {
+		createEffect(() => {
 			m.prop;
 			count++;
 		});
@@ -921,7 +924,7 @@ describe("model state", () => {
 
 		const m = M.create();
 
-		effect(() => {
+		createEffect(() => {
 			m.mc;
 			count++;
 		});
@@ -946,7 +949,7 @@ describe("model state", () => {
 
 		const m = M.create();
 
-		effect(() => {
+		createEffect(() => {
 			m.mc;
 			count++;
 		});
@@ -1035,7 +1038,7 @@ describe("model state", () => {
 		}
 
 		expect(() => MP.create()).toThrowErrorMatchingInlineSnapshot(
-			`"r-state-tree: id: 0 is already assigned to another model"`
+			`[Error: r-state-tree: id: 0 is already assigned to another model]`
 		);
 	});
 
@@ -1053,7 +1056,7 @@ describe("model state", () => {
 		expect(() =>
 			applySnapshot(m, { ms2: [{ id: 0 }] })
 		).toThrowErrorMatchingInlineSnapshot(
-			`"r-state-tree duplicate ids detected after snapshot was loaded"`
+			`[Error: r-state-tree duplicate ids detected after snapshot was loaded]`
 		);
 	});
 
@@ -1260,7 +1263,7 @@ describe("model state", () => {
 
 			const modifiedSnapshot = toSnapshot(m);
 
-			runInAction(() =>
+			runInBatch(() =>
 				snapshots.reverse().forEach((snapshot) => {
 					applySnapshot(m, snapshot.undo);
 				})
@@ -1268,7 +1271,7 @@ describe("model state", () => {
 
 			expect(toSnapshot(m)).toStrictEqual(originalSnapshot);
 
-			runInAction(() =>
+			runInBatch(() =>
 				snapshots.reverse().forEach((snapshot) => {
 					applySnapshot(m, snapshot.redo);
 				})
@@ -1321,7 +1324,7 @@ describe("model state", () => {
 			]);
 
 			const oldRef = m.mc;
-			runInAction(() => applySnapshot(m, snapshots[0].undo));
+			runInBatch(() => applySnapshot(m, snapshots[0].undo));
 			expect(m.mc.id).toBe(0);
 			expect(m.mc).not.toBe(oldRef);
 			expect(oldRef.parent).toBe(null);

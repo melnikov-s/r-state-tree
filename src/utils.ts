@@ -25,14 +25,14 @@ export function getParentConstructor(
 
 export function clone<T>(val: T): T {
 	if (Array.isArray(val)) {
-		return (val.map((v) => clone(v)) as unknown) as T;
+		return val.map((v) => clone(v)) as unknown as T;
 	} else if (val && typeof val === "object") {
 		const keys = Object.keys(val);
-		const cloned: T = {} as T;
+		const cloned: any = {} as any;
 
 		for (let i = 0; i < keys.length; i++) {
 			const key = keys[i];
-			cloned[key] = clone(val[key]);
+			cloned[key] = clone((val as any)[key]);
 		}
 
 		return cloned;
@@ -51,27 +51,30 @@ export function getDiff<T extends object>(
 		return null;
 	}
 	const keys = Object.keys(o1);
-	const diff: Partial<T> = {};
+	const diff: any = {};
+
+	const obj1 = o1 as any;
+	const obj2 = o2 as any;
 
 	for (let i = 0; i < keys.length; i++) {
 		const key = keys[i];
 
-		if (o1[key] !== o2[key]) {
+		if (obj1[key] !== obj2[key]) {
 			if (config?.[key]?.type === CommonCfgTypes.child) {
-				const childDiff = getDiff(o1[key], o2[key], getConfig);
+				const childDiff = getDiff(obj1[key], obj2[key], getConfig);
 				if (childDiff) {
 					diff[key] = childDiff;
 				}
 			} else if (config?.[key]?.type === CommonCfgTypes.children) {
-				diff[key] = o2[key].map((model: object, index: number) => {
-					if (o1[key][index]) {
-						return getDiff(o1[key][index], model, getConfig);
+				diff[key] = obj2[key].map((model: object, index: number) => {
+					if (obj1[key][index]) {
+						return getDiff(obj1[key][index], model, getConfig);
 					}
 
 					return model;
 				});
 			} else {
-				diff[key] = o2[key];
+				diff[key] = obj2[key];
 			}
 		}
 	}

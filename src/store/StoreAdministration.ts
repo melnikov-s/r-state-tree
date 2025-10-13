@@ -1,4 +1,16 @@
-import { getAdministration, ObjectAdministration } from "nu-observables";
+import {
+	getAdministration,
+	PreactObjectAdministration as ObjectAdministration,
+	ListenerNode,
+	createSignal,
+	createListener,
+	SignalNode,
+	ComputedNode,
+	createReaction,
+	runInBatch,
+	runInUntracked,
+	createComputed,
+} from "../observables";
 import Store, { allowNewStore } from "./Store";
 import Model from "../model/Model";
 import {
@@ -11,21 +23,10 @@ import {
 } from "../types";
 import { getPropertyDescriptor } from "../utils";
 import computedProxy from "../computedProxy";
-import {
-	untracked,
-	batch,
-	ListenerNode,
-	ComputedNode,
-	createComputed,
-	listener,
-	Signal,
-	reaction,
-	runInAction,
-} from "../graph";
 
 export function updateProps(props: Props, newProps: Props): void {
-	untracked(() => {
-		batch(() => {
+	runInUntracked(() => {
+		runInBatch(() => {
 			const propKeys = Object.keys(newProps);
 			propKeys.forEach((k) => {
 				if (k !== "models") {
@@ -46,7 +47,7 @@ export function getStoreAdm(store: Store): StoreAdministration {
 }
 
 type ChildStoreData = {
-	value: Signal<Store | null | Store[]>;
+	value: SignalNode<Store | null | Store[]>;
 	computed: ComputedNode<StoreElement | null | StoreElement[]>;
 	listener: ListenerNode;
 };
@@ -121,7 +122,9 @@ export class StoreAdministration<
 		elements: Array<StoreElement | null>
 	): Store[] {
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		const oldStores = untracked(() => childStoreData.value.get()) as Store[];
+		const oldStores = runInUntracked(() =>
+			childStoreData.value.get()
+		) as Store[];
 		const stores: Store[] = [];
 		let keyedIndexChanged = false;
 
@@ -201,7 +204,7 @@ export class StoreAdministration<
 		});
 
 		if (newStores.size || removedStores.size || keyedIndexChanged) {
-			runInAction(() => childStoreData.value.set(stores));
+			runInBatch(() => childStoreData.value.set(stores));
 		}
 
 		removedStores.forEach((s) => getStoreAdm(s).unmount());
@@ -215,14 +218,14 @@ export class StoreAdministration<
 		element: StoreElement | null
 	): Store | null {
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		const oldStore = untracked(() =>
+		const oldStore = runInUntracked(() =>
 			childStoreData.value.get()
 		) as Store | null;
 		const { key, Type, props } = element || {};
 
 		if (!element) {
 			oldStore && getStoreAdm(oldStore).unmount();
-			runInAction(() => childStoreData.value.set(null));
+			runInBatch(() => childStoreData.value.set(null));
 			return null;
 		} else if (
 			!oldStore ||
@@ -234,11 +237,11 @@ export class StoreAdministration<
 			}
 
 			const childStore = this.createChildStore(element);
-			runInAction(() => childStoreData.value.set(childStore));
+			runInBatch(() => childStoreData.value.set(childStore));
 			getStoreAdm(childStore).mount(this);
 			return childStore;
 		} else {
-			runInAction(() => updateProps(oldStore.props, props!));
+			runInBatch(() => updateProps(oldStore.props, props!));
 			return oldStore;
 		}
 	}
@@ -267,14 +270,14 @@ export class StoreAdministration<
 			throw new Error("child stores are only supported on getters");
 		}
 
-		return createComputed(descriptor.get, this.proxy, true);
+		return createComputed(descriptor.get, this.proxy);
 	}
 
 	private initializeStore(name: PropertyKey): Store | null {
-		const value = new Signal<null | Store | Store[]>(null);
+		const value = createSignal<null | Store | Store[]>(null);
 		const childStoreData: ChildStoreData = this.childStoreDataMap.get(name) ?? {
 			computed: this.getComputedGetter(name),
-			listener: listener(() => this.updateStore(name)),
+			listener: createListener(() => this.updateStore(name)),
 			value,
 		};
 
@@ -287,10 +290,10 @@ export class StoreAdministration<
 	}
 
 	private initializeStores(name: PropertyKey): Store[] {
-		const value = new Signal<Store[] | Store | null>([]);
+		const value = createSignal<Store[] | Store | null>([]);
 		const childStoreData: ChildStoreData = this.childStoreDataMap.get(name) ?? {
 			computed: this.getComputedGetter(name),
-			listener: listener(() => this.updateStores(name)),
+			listener: createListener(() => this.updateStores(name)),
 			value,
 		};
 
@@ -305,20 +308,24 @@ export class StoreAdministration<
 	private getStore(name: PropertyKey): Store | null {
 		const childStoreData = this.childStoreDataMap.get(name);
 
-		if (!childStoreData || childStoreData.computed.isDirty()) {
+		if (!childStoreData) {
 			return this.initializeStore(name);
 		} else {
-			return childStoreData!.value.get() as Store | null;
+			const storeElement = runInUntracked(() => childStoreData.computed.get());
+			this.setSingleStore(name, storeElement as StoreElement | null);
+			return childStoreData.value.get() as Store | null;
 		}
 	}
 
 	private getStores(name: PropertyKey): Store[] {
 		const childStoreData = this.childStoreDataMap.get(name);
 
-		if (!childStoreData || childStoreData.computed.isDirty()) {
+		if (!childStoreData) {
 			return this.initializeStores(name);
 		} else {
-			return childStoreData!.value.get() as Store[];
+			const storeElement = runInUntracked(() => childStoreData.computed.get());
+			this.setStoreList(name, storeElement as StoreElement[]);
+			return childStoreData.value.get() as Store[];
 		}
 	}
 
@@ -330,8 +337,8 @@ export class StoreAdministration<
 		return !this.parent;
 	}
 
-	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
-		const unsub = reaction(track, callback);
+	createReaction<T>(track: () => T, callback: (a: T) => void): () => void {
+		const unsub = createReaction(track, callback);
 		this.reactionsUnsub.push(unsub);
 		return unsub;
 	}
@@ -357,7 +364,7 @@ export class StoreAdministration<
 			}
 		});
 		this.mounted = true;
-		runInAction(() => this.proxy.storeDidMount?.());
+		runInBatch(() => this.proxy.storeDidMount?.());
 	}
 
 	unmount(): void {

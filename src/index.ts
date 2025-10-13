@@ -8,12 +8,9 @@ import {
 	applySnapshot,
 	onSnapshotDiff,
 } from "./api";
-import { Configuration, Snapshot, IdType, SnapshotDiff } from "./types";
-import { runInAction, effect, reaction, task, untracked } from "./graph";
 
 export {
 	createStore,
-	Configuration,
 	Store,
 	Model,
 	mount,
@@ -23,14 +20,26 @@ export {
 	onSnapshotDiff,
 	toSnapshot,
 	applySnapshot,
-	SnapshotDiff,
-	Snapshot,
-	IdType,
-	runInAction,
-	effect,
-	reaction,
-	task,
-	untracked,
 };
 
+export {
+	observable,
+	source,
+	reportChanged,
+	reportObserved,
+	getSignal,
+	isObservable,
+	createSignal,
+	createAtom,
+	createComputed,
+	createReaction,
+	createListener,
+	runInBatch,
+	runInUntracked,
+	createEffect,
+	Observable,
+} from "./observables";
+
 export * from "./decorators";
+
+export type { Configuration, Snapshot, IdType, SnapshotDiff } from "./types";

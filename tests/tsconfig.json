@@ -8,6 +8,7 @@
 		"noImplicitAny": false,
 		"noImplicitThis": false,
 		"lib": ["es6"],
+		"types": ["vitest/globals"],
 		"strictNullChecks": false,
 		"experimentalDecorators": true,
 		"downlevelIteration": true,

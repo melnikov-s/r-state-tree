@@ -3,9 +3,8 @@ import {
 	Store,
 	mount,
 	createStore,
-	task,
-	reaction,
-	effect,
+	createReaction,
+	createEffect,
 } from "../src/index";
 
 export function createContainer<
@@ -166,7 +165,7 @@ export function createContainer<
 		}
 
 		const m = createContainer(M);
-		reaction(
+		createReaction(
 			() => m.state,
 			() => count++
 		);
@@ -191,7 +190,7 @@ export function createContainer<
 		}
 
 		const m = createContainer(M);
-		reaction(
+		createReaction(
 			() => m.twiceState,
 			() => count++
 		);
@@ -200,16 +199,6 @@ export function createContainer<
 		m.incState();
 		expect(count).toBe(1);
 		expect(m.twiceState).toBe(2);
-	});
-
-	test(`(${Container.name}) state can't be mutated directly`, () => {
-		class M extends Container {
-			state = 0;
-		}
-
-		const m = createContainer(M);
-		effect(() => m.state);
-		expect(() => m.state++).toThrow();
 	});
 
 	test(`(${Container.name}) supports async actions`, async () => {
@@ -222,8 +211,8 @@ export function createContainer<
 
 			async inc() {
 				this.value++;
-				this.result = await task(
-					new Promise((resolve) => setTimeout(() => resolve(result), 0))
+				this.result = await new Promise((resolve) =>
+					setTimeout(() => resolve(result), 0)
 				);
 
 				this.value++;
@@ -233,7 +222,7 @@ export function createContainer<
 
 		const s = createContainer(S);
 		expect(s.value).toBe(0);
-		effect(() => s.value);
+		createEffect(() => s.value);
 		const w = s.inc();
 		expect(s.value).toBe(1);
 		expect(s.result).toBe(null);

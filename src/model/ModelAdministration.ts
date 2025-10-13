@@ -1,9 +1,15 @@
 import {
 	getAdministration,
 	createObservableWithCustomAdministration,
-	ObjectAdministration,
+	PreactObjectAdministration,
 	getSource,
-} from "nu-observables";
+	ComputedNode,
+	runInBatch,
+	createComputed,
+	AtomNode,
+	createAtom,
+	createReaction,
+} from "../observables";
 import Model from "../model/Model";
 import {
 	ModelConfiguration,
@@ -28,14 +34,6 @@ import {
 	MutationEvent,
 	observe,
 } from "./ChildModelsAdministration";
-import {
-	AtomNode,
-	createComputed,
-	ComputedNode,
-	reaction,
-	runInAction,
-	graph,
-} from "../graph";
 
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
@@ -46,15 +44,17 @@ export function getConfigurationFromSnapshot(
 	return configMap.get(snapshot);
 }
 
-export function getModelAdm<T extends Model>(model: T): ModelAdministration<T> {
-	return getAdministration(model)! as unknown as ModelAdministration<T>;
+export function getModelAdm<T extends Model>(model: T): ModelAdministration {
+	return getAdministration(model)! as unknown as ModelAdministration;
 }
 
 function getIdKey(Ctor: typeof Model): string | number | null {
 	if (!ctorIdKeyMap.has(Ctor)) {
 		const key =
 			Object.keys(Ctor.types).find(
-				(prop) => Ctor.types[prop].type === ModelCfgTypes.id
+				(prop) =>
+					(Ctor.types[prop as keyof typeof Ctor.types] as any).type ===
+					ModelCfgTypes.id
 			) ?? null;
 
 		ctorIdKeyMap.set(Ctor, key);
@@ -73,7 +73,7 @@ function getModelRefSnapshot<T extends Model>(modelRef: T): RefSnapshot | null {
 function getSnapshotId(snapshot: Snapshot, Ctor: typeof Model): IdType | null {
 	const idKey = getIdKey(Ctor);
 
-	return idKey ? (snapshot[idKey] as IdType) : null;
+	return idKey ? ((snapshot as any)[idKey] as IdType) : null;
 }
 
 function getSnapshotRefId(snapshot: RefSnapshot): IdType {
@@ -87,12 +87,10 @@ function getSnapshotRefId(snapshot: RefSnapshot): IdType {
 	return snapshot[keys[0]];
 }
 
-export class ModelAdministration<
-	ModelType extends Model = Model
-> extends ObjectAdministration<ModelType> {
+export class ModelAdministration extends PreactObjectAdministration<any> {
 	static proxyTraps: ProxyHandler<object> = Object.assign(
 		{},
-		ObjectAdministration.proxyTraps,
+		PreactObjectAdministration.proxyTraps,
 		{
 			get(target, prop, proxy) {
 				const adm = getAdministration(target) as ModelAdministration;
@@ -105,7 +103,7 @@ export class ModelAdministration<
 					case ModelCfgTypes.modelRefs:
 						return adm.getModelRefs(prop);
 					default:
-						return ObjectAdministration.proxyTraps.get?.apply(
+						return PreactObjectAdministration.proxyTraps.get?.apply(
 							null,
 							arguments as any
 						);
@@ -142,7 +140,7 @@ export class ModelAdministration<
 						}
 					}
 
-					return ObjectAdministration.proxyTraps.set?.apply(
+					return PreactObjectAdministration.proxyTraps.set?.apply(
 						null,
 						arguments as any
 					);
@@ -173,19 +171,19 @@ export class ModelAdministration<
 		} as ProxyHandler<object>
 	);
 
-	configuration!: ModelConfiguration<ModelType>;
-	parent: ModelAdministration<Model> | null = null;
+	configuration!: ModelConfiguration<any>;
+	parent: ModelAdministration | null = null;
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
-	root: ModelAdministration<any> = this;
+	root: ModelAdministration = this;
 	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
 	private writeInProgress: Set<PropertyKey> = new Set();
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
 	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
 	parentName: PropertyKey | null = null;
 
-	setConfiguration(configuration: ModelConfiguration<ModelType>): void {
+	setConfiguration(configuration: ModelConfiguration<any>): void {
 		this.configuration = configuration;
 	}
 
@@ -193,17 +191,17 @@ export class ModelAdministration<
 		let a = this.referencedAtoms?.get(name);
 		if (!a) {
 			if (!this.referencedAtoms) this.referencedAtoms = new Map();
-			a = new AtomNode();
-			this.referencedAtoms.set(name, a);
+			a = createAtom();
+			this.referencedAtoms.set(name, a!);
 		}
 
-		return a;
+		return a!;
 	}
 
 	private setState(name: string, value: unknown): void {
 		const oldValue = this.source[name];
 		if (value !== oldValue) {
-			ObjectAdministration.proxyTraps.set!(
+			PreactObjectAdministration.proxyTraps.set!(
 				this.source,
 				name,
 				value,
@@ -252,7 +250,6 @@ export class ModelAdministration<
 	private setModels(name: PropertyKey, newModelsSource: Model[]): void {
 		const newModels = createObservableWithCustomAdministration(
 			[] as Model[],
-			graph,
 			ChildModelsAdministration
 		);
 
@@ -277,7 +274,7 @@ export class ModelAdministration<
 		this.modelsTraceUnsub.get(name)?.();
 
 		// set the model on the observable proxy
-		ObjectAdministration.proxyTraps.set!(
+		PreactObjectAdministration.proxyTraps.set!(
 			this.source,
 			name as string,
 			newModels,
@@ -335,16 +332,14 @@ export class ModelAdministration<
 
 		if (!c) {
 			if (!this.referencedModels) this.referencedModels = new Map();
-			c = createComputed(
-				() => {
-					a.reportObserved();
-					return (this.source[name] || [])
-						.map((id: IdType) => getModelById(this.root.proxy, id))
-						.filter((m: Model | undefined) => !!m);
-				},
-				null,
-				true
-			);
+			c = createComputed(() => {
+				a.reportObserved();
+				const models = (this.source[name] || [])
+					.map((id: IdType) => getModelById(this.root.proxy, id))
+					.filter((m: Model | undefined) => !!m);
+
+				return models;
+			});
 
 			this.referencedModels.set(name, c);
 		}
@@ -387,7 +382,7 @@ export class ModelAdministration<
 	}
 
 	private attach(
-		parent: ModelAdministration<any> | null = null,
+		parent: ModelAdministration | null = null,
 		parentName: PropertyKey | null = null
 	): void {
 		if (this.parent) {
@@ -402,14 +397,14 @@ export class ModelAdministration<
 			this.parentName = parentName;
 		}
 
-		runInAction(() => {
+		runInBatch(() => {
 			onModelAttached(this.proxy);
 			this.proxy.modelDidAttach();
 		});
 	}
 
 	private detach(): void {
-		runInAction(() => {
+		runInBatch(() => {
 			this.proxy.modelWillDetach();
 			onModelDetached(this.proxy);
 		});
@@ -419,7 +414,7 @@ export class ModelAdministration<
 	}
 
 	private toJSON(): Snapshot<Model> {
-		return Object.keys(this.configuration).reduce((json, key) => {
+		return Object.keys(this.configuration).reduce((json: any, key) => {
 			switch (this.configuration[key].type) {
 				case ModelCfgTypes.state:
 				case ModelCfgTypes.id:
@@ -433,14 +428,10 @@ export class ModelAdministration<
 					if (!this.snapshotMap.has(key)) {
 						this.snapshotMap.set(
 							key,
-							createComputed(
-								() => {
-									const models: Model[] = this.proxy[key] ?? [];
-									return models.map((m) => getModelRefSnapshot(m)) as unknown[];
-								},
-								null,
-								true
-							)
+							createComputed(() => {
+								const models: Model[] = this.proxy[key] ?? [];
+								return models.map((m) => getModelRefSnapshot(m)) as unknown[];
+							})
 						);
 					}
 
@@ -453,34 +444,30 @@ export class ModelAdministration<
 					if (!this.snapshotMap.has(key)) {
 						this.snapshotMap.set(
 							key,
-							createComputed(
-								() => {
-									return getSource(
-										(this.proxy[key] ?? []).map((model: Model) =>
-											getModelAdm(model).getSnapshot()
-										)
-									);
-								},
-								null,
-								true
-							)
+							createComputed(() => {
+								return getSource(
+									(this.proxy[key] ?? []).map((model: Model) =>
+										getModelAdm(model).getSnapshot()
+									)
+								);
+							})
 						);
 					}
 					json[key] = this.snapshotMap.get(key)!.get();
 					break;
 			}
 			return json;
-		}, {}) as Snapshot<ModelType>;
+		}, {}) as Snapshot<any>;
 	}
 
-	onSnapshotChange(onChange: SnapshotChange<ModelType>): () => void {
-		return reaction(
+	onSnapshotChange(onChange: SnapshotChange<any>): () => void {
+		return createReaction(
 			() => this.getSnapshot(),
 			(snapshot) => onChange(snapshot, this.proxy)
 		);
 	}
 
-	loadSnapshot(snapshot: Snapshot<ModelType>): void {
+	loadSnapshot(snapshot: Snapshot<any>): void {
 		const ensureChildTypes = (key: string): true => {
 			if (!this.configuration[key].childType) {
 				throw new Error(
@@ -589,20 +576,16 @@ export class ModelAdministration<
 		});
 	}
 
-	getSnapshot(): Snapshot<ModelType> {
+	getSnapshot(): Snapshot<any> {
 		if (!this.computedSnapshot) {
-			this.computedSnapshot = createComputed(
-				() => {
-					const json = this.toJSON();
-					configMap.set(json, this.configuration);
+			this.computedSnapshot = createComputed(() => {
+				const json = this.toJSON();
+				configMap.set(json, this.configuration);
 
-					return json;
-				},
-				null,
-				true
-			);
+				return json;
+			});
 		}
 
-		return this.computedSnapshot.get() as Snapshot<ModelType>;
+		return this.computedSnapshot.get() as Snapshot<any>;
 	}
 }

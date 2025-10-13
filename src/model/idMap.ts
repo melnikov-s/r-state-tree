@@ -1,5 +1,4 @@
-import { getObservable } from "nu-observables";
-import { graph } from "../graph";
+import { observable } from "../observables";
 import { IdType } from "../types";
 import Model from "./Model";
 import { getModelAdm } from "./ModelAdministration";
@@ -72,7 +71,8 @@ export function getIdentifier(model: Model): IdType | undefined {
 }
 
 export function getModelById(root: Model, id: IdType): Model | undefined {
-	return attachedIdMap.get(root)?.get(id);
+	const map = attachedIdMap.get(root);
+	return map?.get(id);
 }
 
 function updateIdentifier(model: Model): void {
@@ -103,7 +103,7 @@ export function onModelAttached(model: Model): void {
 			let map = attachedIdMap.get(node);
 
 			if (!map) {
-				map = getObservable(new Map(), graph);
+				map = observable(new Map());
 				attachedIdMap.set(node, map);
 			}
 

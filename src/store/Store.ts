@@ -7,8 +7,7 @@ import {
 import {
 	createObservableWithCustomAdministration,
 	getObservable,
-} from "nu-observables";
-import { graph } from "../graph";
+} from "../observables";
 
 let initEnabled = false;
 export function allowNewStore<T>(fn: () => T): T {
@@ -63,12 +62,11 @@ export default class Store<
 
 		const observable = createObservableWithCustomAdministration(
 			this,
-			graph,
 			StoreAdministration
 		);
 		const adm = getStoreAdm(observable);
 		adm.setConfiguration(config ?? {});
-		adm.write("props", getObservable({}, graph));
+		adm.write("props", getObservable({}));
 		updateProps(observable.props, props);
 
 		return observable;
@@ -82,8 +80,8 @@ export default class Store<
 		return getStoreAdm(this).computedContext as ContextType;
 	}
 
-	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
-		return getStoreAdm(this).reaction(track, callback);
+	createReaction<T>(track: () => T, callback: (a: T) => void): () => void {
+		return getStoreAdm(this).createReaction(track, callback);
 	}
 
 	provideContext(): null | Record<string, unknown> {

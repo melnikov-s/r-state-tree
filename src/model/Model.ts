@@ -1,7 +1,6 @@
 import { getModelAdm, ModelAdministration } from "./ModelAdministration";
 import { Configuration, Snapshot } from "../types";
-import { createObservableWithCustomAdministration } from "nu-observables";
-import { graph } from "../graph";
+import { createObservableWithCustomAdministration } from "../observables";
 
 let initEnabled = false;
 export default class Model {
@@ -36,7 +35,6 @@ export default class Model {
 
 		const observable = createObservableWithCustomAdministration(
 			this,
-			graph,
 			ModelAdministration
 		);
 		const adm = getModelAdm(observable);

@@ -27,14 +27,14 @@ export function unmount<S extends Store>(container: S): void {
 }
 
 export function toSnapshot<T extends Model>(model: T): Snapshot<T> {
-	return getModelAdm(model).getSnapshot();
+	return getModelAdm(model).getSnapshot() as any;
 }
 
 export function onSnapshot<T extends Model>(
 	model: T,
 	callback: (snapshot: Snapshot<T>, model: T) => void
 ): () => void {
-	return getModelAdm(model).onSnapshotChange(callback);
+	return getModelAdm(model).onSnapshotChange(callback as any);
 }
 
 export function onSnapshotDiff<T extends Model>(
@@ -43,16 +43,13 @@ export function onSnapshotDiff<T extends Model>(
 ): () => void {
 	let prev = getModelAdm(model).getSnapshot();
 
-	return getModelAdm(model).onSnapshotChange(function (
-		next: Snapshot<T>,
-		model: T
-	) {
+	return getModelAdm(model).onSnapshotChange(function (next, model) {
 		const diff = {
 			undo: getDiff(next, prev, getConfigurationFromSnapshot)!,
 			redo: getDiff(prev, next, getConfigurationFromSnapshot)!,
 		};
 
-		callback(diff, model);
+		callback(diff as any, model);
 		prev = next;
 	});
 }

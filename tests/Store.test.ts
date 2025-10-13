@@ -8,8 +8,11 @@ import {
 	Model,
 	model,
 	updateStore,
-	reaction,
-	effect,
+	createReaction,
+	createEffect,
+	runInBatch,
+	createComputed,
+	observable,
 } from "../src/index";
 
 test("can mount a store", () => {
@@ -170,7 +173,7 @@ test("child stores are reactive", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	effect(() => {
+	createEffect(() => {
 		s.c.length;
 		count++;
 	});
@@ -202,7 +205,7 @@ test("child store can be retrieved during an action", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	effect(() => {
+	createEffect(() => {
 		s.c;
 	});
 
@@ -231,7 +234,7 @@ test("children stores can be retrieved during an action", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	effect(() => {
+	createEffect(() => {
 		s.c.length;
 	});
 
@@ -258,7 +261,7 @@ test("child stores do not trigger listeners when only props change", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	effect(() => {
+	createEffect(() => {
 		s.c.length;
 		count++;
 	});
@@ -288,7 +291,7 @@ test("child stores are reactive", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	effect(() => {
+	createEffect(() => {
 		s.c.length;
 		count++;
 	});
@@ -319,7 +322,7 @@ test("child stores with keys", () => {
 	const stores = s.cs.slice();
 	expect(stores.length).toBe(3);
 	let count = 0;
-	effect(() => {
+	createEffect(() => {
 		count++;
 		s.cs;
 	});
@@ -415,8 +418,8 @@ test("when props change only those computed methods that are directly affected a
 	let count = 0;
 	const s = mount(createStore(S));
 	let result;
-	effect(() => (result = s.c.value));
-	effect(() => {
+	createEffect(() => (result = s.c.value));
+	createEffect(() => {
 		s.c.values;
 		count++;
 	});
@@ -466,8 +469,8 @@ test("context test", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 	let result;
-	effect(() => (result = s.c.value));
-	effect(() => {
+	createEffect(() => (result = s.c.value));
+	createEffect(() => {
 		s.c.values;
 		count++;
 	});
@@ -657,13 +660,13 @@ test("models on the store are reactive", () => {
 	const m2 = M2.create();
 	const s = mount(createStore(S, { models: { m1, m2 } }));
 
-	reaction(
+	createReaction(
 		() => s.cs.m,
 		() => count++
 	);
 
 	// should never trigger
-	reaction(
+	createReaction(
 		() => s.cs.models,
 		() => count++
 	);
@@ -688,7 +691,7 @@ test("can setup a reaction in a store", () => {
 		unsub;
 
 		storeDidMount() {
-			this.unsub = this.reaction(
+			this.unsub = this.createReaction(
 				() => this.prop,
 				() => this.count++
 			);
@@ -712,7 +715,7 @@ test("can setup a reaction in a store", () => {
 test("reaction in a store will auto unsub after store is unmounted ", () => {
 	class C extends Store<any> {
 		storeDidMount() {
-			this.reaction(
+			this.createReaction(
 				() => this.props.prop,
 				() => this.props.countUp()
 			);

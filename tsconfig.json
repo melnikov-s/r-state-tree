@@ -2,7 +2,7 @@
 	"compilerOptions": {
 		"experimentalDecorators": true,
 		"rootDir": "src",
-		"target": "es2015",
+		"target": "es2020",
 		"alwaysStrict": true,
 		"sourceMap": false,
 		"removeComments": true,
@@ -11,14 +11,14 @@
 		"noUnusedLocals": true,
 		"noImplicitAny": true,
 		"noImplicitThis": true,
-		"lib": ["es2015"],
+		"lib": ["es2020", "dom"],
+		"types": ["vitest/globals"],
 		"strictNullChecks": true,
 		"strictFunctionTypes": true,
 		"declaration": true,
-		"suppressImplicitAnyIndexErrors": true,
-		"declarationDir": "./lib",
+		"declarationDir": "./dist",
 		"outDir": "./dist",
-		"moduleResolution": "Node"
+		"moduleResolution": "bundler"
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules"]
