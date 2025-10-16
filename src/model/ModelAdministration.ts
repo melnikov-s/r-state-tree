@@ -119,15 +119,15 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							return true;
 						}
 						case ModelCfgTypes.modelRefs: {
-							adm.setModelRefs(name, value as Model[]);
+							adm.setModelRefs(name, value ?? ([] as Model[]));
 							return true;
 						}
 						case CommonCfgTypes.children: {
-							adm.setModels(name, value as Model[]);
+							adm.setModels(name, value ?? ([] as Model[]));
 							return true;
 						}
 						case CommonCfgTypes.child: {
-							adm.setModel(name, value as Model | null);
+							adm.setModel(name, value ?? (null as Model | null));
 							break;
 						}
 						case ModelCfgTypes.id: {
@@ -171,7 +171,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		} as ProxyHandler<object>
 	);
 
-	configuration!: ModelConfiguration<any>;
+	private configurationGetter?: () => ModelConfiguration<any>;
 	parent: ModelAdministration | null = null;
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<Model[]>>;
@@ -183,8 +183,12 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
 	parentName: PropertyKey | null = null;
 
-	setConfiguration(configuration: ModelConfiguration<any>): void {
-		this.configuration = configuration;
+	setConfiguration(configurationGetter: () => ModelConfiguration<any>): void {
+		this.configurationGetter = configurationGetter;
+	}
+
+	private get configuration(): ModelConfiguration<any> {
+		return this.configurationGetter?.() ?? {};
 	}
 
 	private getReferencedAtom(name: PropertyKey): AtomNode {

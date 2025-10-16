@@ -1,10 +1,13 @@
 import { getModelAdm, ModelAdministration } from "./ModelAdministration";
-import { Configuration, Snapshot } from "../types";
+import { Configuration, ModelConfiguration, Snapshot } from "../types";
 import { createObservableWithCustomAdministration } from "../observables";
 
 let initEnabled = false;
 export default class Model {
-	static types: object = {};
+	static get types(): ModelConfiguration<unknown> {
+		return (this as any)[Symbol.metadata];
+	}
+
 	static childTypes: object = {};
 
 	static create<T extends Model = Model>(
@@ -38,9 +41,10 @@ export default class Model {
 			ModelAdministration
 		);
 		const adm = getModelAdm(observable);
-		const config = (this.constructor as typeof Model)
-			.types as Configuration<this>;
-		adm.setConfiguration(config ?? {});
+		adm.setConfiguration(
+			() =>
+				((this.constructor as typeof Model).types as Configuration<this>) ?? {}
+		);
 
 		return observable;
 	}

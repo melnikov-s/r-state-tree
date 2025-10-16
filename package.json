@@ -38,6 +38,7 @@
 	},
 	"homepage": "https://github.com/melnikov-s/r-state-tree#readme",
 	"devDependencies": {
+		"@tsmetadata/polyfill": "^1.1.3",
 		"@typescript-eslint/eslint-plugin": "^5.8.1",
 		"@typescript-eslint/parser": "^5.8.1",
 		"eslint": "^8.5.0",

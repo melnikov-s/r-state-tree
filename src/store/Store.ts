@@ -49,7 +49,10 @@ export default class Store<
 	PropsType extends Props = Props,
 	ContextType extends Context = Context
 > {
-	static types: unknown = {};
+	static get types(): StoreConfiguration<unknown> {
+		return (this as any)[Symbol.metadata];
+	}
+
 	props!: PropsType;
 
 	constructor(props: PropsType) {
@@ -57,15 +60,15 @@ export default class Store<
 			throw new Error("r-state-tree: Can't initialize store directly");
 		}
 
-		const config = (this.constructor as typeof Store)
-			.types as Configuration<this>;
-
 		const observable = createObservableWithCustomAdministration(
 			this,
 			StoreAdministration
 		);
 		const adm = getStoreAdm(observable);
-		adm.setConfiguration(config ?? {});
+		adm.setConfiguration(
+			() =>
+				((this.constructor as typeof Store).types as Configuration<this>) ?? {}
+		);
 		adm.write("props", getObservable({}));
 		updateProps(observable.props, props);
 

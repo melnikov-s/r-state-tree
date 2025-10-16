@@ -8,6 +8,12 @@ Reactive state management featuring store trees, computed child stores, and snap
 pnpm add r-state-tree
 ```
 
+### Requirements
+
+This library uses [TC39 Stage 3 Decorators](https://github.com/tc39/proposal-decorators) and requires TypeScript 5.0+ with `target: "es2022"` or higher.
+
+The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
+
 ## Stores
 
 Stores describe reactive state containers composed into a tree.

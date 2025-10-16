@@ -90,7 +90,9 @@ export class StoreAdministration<
 				}
 
 				if (adm.configuration[name as string]?.type === StoreCfgTypes.model) {
-					throw new Error(`r-state-tree: model ${String(name)} is read-only`);
+					if (value !== undefined) {
+						throw new Error(`r-state-tree: model ${String(name)} is read-only`);
+					}
 				}
 
 				return ObjectAdministration.proxyTraps.set?.apply(
@@ -101,16 +103,22 @@ export class StoreAdministration<
 		} as ProxyHandler<object>
 	);
 
-	configuration!: StoreConfiguration<StoreType>;
 	parent: StoreAdministration | null = null;
 	mounted: boolean = false;
 	computedContext!: Context;
 	private contextReactionUnsub: (() => void) | null = null;
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
 	private reactionsUnsub: (() => void)[] = [];
+	private configurationGetter?: () => StoreConfiguration<StoreType>;
 
-	setConfiguration(configuration: StoreConfiguration<StoreType>): void {
-		this.configuration = configuration;
+	setConfiguration(
+		configurationGetter: () => StoreConfiguration<StoreType>
+	): void {
+		this.configurationGetter = configurationGetter;
+	}
+
+	private get configuration(): StoreConfiguration<StoreType> {
+		return this.configurationGetter?.() ?? {};
 	}
 
 	private createChildStore(element: StoreElement): Store {

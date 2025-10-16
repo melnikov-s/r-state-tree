@@ -1,8 +1,8 @@
 {
+	"extends": "@tsmetadata/polyfill/lib/tsconfig.polyfill.json",
 	"compilerOptions": {
-		"experimentalDecorators": true,
 		"rootDir": "src",
-		"target": "es2020",
+		"target": "es2022",
 		"alwaysStrict": true,
 		"sourceMap": false,
 		"removeComments": true,
@@ -11,14 +11,14 @@
 		"noUnusedLocals": true,
 		"noImplicitAny": true,
 		"noImplicitThis": true,
-		"lib": ["es2020", "dom"],
+		"lib": ["es2022"],
 		"types": ["vitest/globals"],
 		"strictNullChecks": true,
 		"strictFunctionTypes": true,
 		"declaration": true,
-		"declarationDir": "./dist",
+		"declarationDir": "./lib",
 		"outDir": "./dist",
-		"moduleResolution": "bundler"
+		"moduleResolution": "Node"
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules"]

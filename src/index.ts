@@ -1,3 +1,4 @@
+import "@tsmetadata/polyfill";
 import Store, { createStore, updateStore } from "./store/Store";
 import Model from "./model/Model";
 import {

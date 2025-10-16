@@ -1,16 +1,15 @@
 {
 	"compilerOptions": {
 		"rootDir": "../",
-		"target": "es6",
+		"target": "es2022",
 		"alwaysStrict": false,
 		"noImplicitReturns": false,
 		"noUnusedLocals": false,
 		"noImplicitAny": false,
 		"noImplicitThis": false,
-		"lib": ["es6"],
+		"lib": ["es2022"],
 		"types": ["vitest/globals"],
 		"strictNullChecks": false,
-		"experimentalDecorators": true,
 		"downlevelIteration": true,
 		"esModuleInterop": true,
 		"moduleResolution": "node"

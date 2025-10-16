@@ -1,6 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import Store from "./store/Store";
-import Model from "./model/Model";
+import "@tsmetadata/polyfill";
 import {
 	childType,
 	modelType,
@@ -11,33 +9,31 @@ import {
 	modelRefsType,
 } from "./types";
 
-function makeDecorator(
-	type: unknown,
-	asMethod = (val: unknown) => makeDecorator((type as Function)(val))
-): any {
-	return function (...args: unknown[]) {
-		if (args.length === 1) {
-			return asMethod(args[0]);
-		} else {
-			const [target, propertyKey, descriptor] = args as [
-				object,
-				PropertyKey,
-				PropertyDescriptor
-			];
-			const Ctor = target.constructor as typeof Store;
-			if (Ctor.types === Store.types || Ctor.types === Model.types) {
-				Ctor.types = {};
-			}
+function makeDecorator(type: unknown): any {
+	return function <T>(value: T, context: DecoratorContext): T {
+		context.metadata![context.name!] = type;
 
-			(Ctor.types as any)[propertyKey] = type;
-
-			return descriptor;
-		}
+		return value;
 	};
 }
 
-export const child = makeDecorator(childType);
-export const children = makeDecorator(childrenType);
+function makeChildDecorator(
+	type?: typeof childType | typeof childrenType
+): any {
+	return function <T>(valueOrChildType: T, context?: DecoratorContext): any {
+		// Direct use: @child
+		if (context !== undefined) {
+			return makeDecorator(type)(valueOrChildType, context);
+		}
+
+		// Factory use: @child(ChildType)
+		const childType = valueOrChildType;
+		return makeDecorator(type ? type(childType as Function) : type);
+	};
+}
+
+export const child = makeChildDecorator(childType);
+export const children = makeChildDecorator(childrenType);
 export const model = makeDecorator(modelType);
 export const modelRef = makeDecorator(modelRefType);
 export const modelRefs = makeDecorator(modelRefsType);
