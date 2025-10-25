@@ -16,6 +16,7 @@ import {
 	createSignal,
 	createComputed,
 	observable,
+	createContext,
 } from "../src/index";
 
 import { onSnapshotDiff } from "../src/api";
@@ -1334,5 +1335,567 @@ describe("model state", () => {
 				prop: 0,
 			});
 		});
+	});
+});
+
+describe("model context", () => {
+	test("can create and consume context with default value", () => {
+		const ThemeContext = createContext<"light" | "dark">("light");
+
+		class C extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		const c = C.create();
+		expect(c.theme).toBe("light");
+	});
+
+	test("can create and consume context without default value", () => {
+		const UserContext = createContext<{ name: string } | null>();
+
+		class C extends Model {
+			get user() {
+				return UserContext.consume(this);
+			}
+		}
+
+		const c = C.create();
+		expect(c.user).toBe(undefined);
+	});
+
+	test("context flows down from parent to child", () => {
+		const ThemeContext = createContext<"light" | "dark">("light");
+
+		class ChildModel extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentModel extends Model {
+			theme = "dark" as const;
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c = ChildModel.create();
+		}
+
+		const parent = ParentModel.create();
+		expect(parent.c.theme).toBe("dark");
+	});
+
+	test("context flows down multiple levels", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class GrandChildModel extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ChildModel extends Model {
+			@child gc = GrandChildModel.create();
+		}
+
+		class ParentModel extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c = ChildModel.create();
+		}
+
+		const parent = ParentModel.create();
+		expect(parent.c.gc.theme).toBe("dark");
+	});
+
+	test("child can override parent context", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class Child extends Model {
+			theme = "blue";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			get currentTheme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c = Child.create();
+		}
+
+		const parent = Parent.create();
+		expect(parent.c.currentTheme).toBe("blue");
+	});
+
+	test("multiple independent contexts don't collide", () => {
+		const ThemeContext = createContext<string>("light");
+		const UserContext = createContext<string>("guest");
+
+		class Child extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+
+			get user() {
+				return UserContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+			user = "admin";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			[UserContext.provide]() {
+				return this.user;
+			}
+
+			@child c = Child.create();
+		}
+
+		const parent = Parent.create();
+		expect(parent.c.theme).toBe("dark");
+		expect(parent.c.user).toBe("admin");
+	});
+
+	test("context is reactive", () => {
+		const ThemeContext = createContext<string>("light");
+		let count = 0;
+
+		class Child extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c = Child.create();
+
+			changeTheme() {
+				this.theme = "blue";
+			}
+		}
+
+		const parent = Parent.create();
+
+		createEffect(() => {
+			parent.c.theme;
+			count++;
+		});
+
+		expect(count).toBe(1);
+		expect(parent.c.theme).toBe("dark");
+		parent.changeTheme();
+		expect(count).toBe(2);
+		expect(parent.c.theme).toBe("blue");
+	});
+
+	test("context with array of children", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class Child extends Model {
+			value = 0;
+
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@children cs = [Child.create(), Child.create()];
+		}
+
+		const parent = Parent.create();
+		expect(parent.cs[0].theme).toBe("dark");
+		expect(parent.cs[1].theme).toBe("dark");
+	});
+
+	test("detached model uses default context", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class Child extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c: Child = Child.create();
+			detachedChild: Child | null = null;
+
+			detachChild() {
+				this.detachedChild = this.c;
+				this.c = null;
+			}
+		}
+
+		const parent = Parent.create();
+		expect(parent.c.theme).toBe("dark");
+		parent.detachChild();
+		expect(parent.detachedChild!.theme).toBe("light");
+	});
+
+	test("re-attached model gets parent context", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class Child extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c: Child | null = Child.create();
+			savedChild: Child | null = null;
+
+			detachChild() {
+				this.savedChild = this.c;
+				this.c = null;
+			}
+
+			reattachChild() {
+				this.c = this.savedChild;
+				this.savedChild = null;
+			}
+		}
+
+		const parent = Parent.create();
+		const myChild = parent.c;
+		expect(myChild!.theme).toBe("dark");
+		parent.detachChild();
+		expect(myChild!.theme).toBe("light");
+		parent.reattachChild();
+		expect(parent.c).toBe(myChild);
+		expect(myChild!.theme).toBe("dark");
+	});
+
+	test("model attached to different parent gets new context", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class Child extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme: string;
+
+			constructor() {
+				super();
+				this.theme = "dark";
+			}
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c: Child | null = null;
+
+			attachChild(child: Child) {
+				this.c = child;
+			}
+		}
+
+		const parent1 = Parent.create();
+		parent1.theme = "dark";
+		const parent2 = Parent.create();
+		parent2.theme = "blue";
+
+		const myChild = Child.create();
+		parent1.attachChild(myChild);
+		expect(myChild.theme).toBe("dark");
+
+		parent1.c = null;
+		parent2.attachChild(myChild);
+		expect(myChild.theme).toBe("blue");
+	});
+
+	test("context in detached array element uses default", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class Child extends Model {
+			@identifier id: number;
+
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@children cs: Child[] = [
+				Child.create({ id: 0 }),
+				Child.create({ id: 1 }),
+			];
+
+			removeFirst() {
+				this.cs.shift();
+			}
+		}
+
+		const parent = Parent.create();
+		const firstChild = parent.cs[0];
+		expect(firstChild.theme).toBe("dark");
+		parent.removeFirst();
+		expect(firstChild.theme).toBe("light");
+	});
+
+	test("context can use computed values", () => {
+		const CountContext = createContext<number>(0);
+
+		class Child extends Model {
+			get count() {
+				return CountContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			value = 1;
+
+			get doubleValue() {
+				return this.value * 2;
+			}
+
+			[CountContext.provide]() {
+				return this.doubleValue;
+			}
+
+			@child c = Child.create();
+
+			increment() {
+				this.value++;
+			}
+		}
+
+		const parent = Parent.create();
+		expect(parent.c.count).toBe(2);
+		parent.increment();
+		expect(parent.c.count).toBe(4);
+	});
+
+	test("context can depend on child values", () => {
+		const ValueContext = createContext<number>(0);
+
+		class Child extends Model {
+			value = 5;
+		}
+
+		class GrandChild extends Model {
+			get contextValue() {
+				return ValueContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			@child c1 = Child.create();
+			@child c2 = GrandChild.create();
+
+			[ValueContext.provide]() {
+				return this.c1.value;
+			}
+		}
+
+		const parent = Parent.create();
+		expect(parent.c2.contextValue).toBe(5);
+	});
+
+	test("context reactivity with reaction", () => {
+		const ThemeContext = createContext<string>("light");
+		let reactionCount = 0;
+		let currentTheme: string | undefined;
+
+		class Child extends Model {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child c = Child.create();
+
+			changeTheme(newTheme: string) {
+				this.theme = newTheme;
+			}
+		}
+
+		const parent = Parent.create();
+
+		createReaction(
+			() => parent.c.theme,
+			(theme) => {
+				currentTheme = theme;
+				reactionCount++;
+			}
+		);
+
+		expect(reactionCount).toBe(0);
+		parent.changeTheme("blue");
+		expect(reactionCount).toBe(1);
+		expect(currentTheme).toBe("blue");
+		parent.changeTheme("green");
+		expect(reactionCount).toBe(2);
+		expect(currentTheme).toBe("green");
+	});
+
+	test("context with complex types", () => {
+		type User = { name: string; role: string };
+		const UserContext = createContext<User | null>(null);
+
+		class Child extends Model {
+			get user() {
+				return UserContext.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			user: User = { name: "Admin", role: "admin" };
+
+			[UserContext.provide]() {
+				return this.user;
+			}
+
+			@child c = Child.create();
+
+			updateUser(user: User) {
+				this.user = user;
+			}
+		}
+
+		const parent = Parent.create();
+		expect(parent.c.user).toEqual({ name: "Admin", role: "admin" });
+		parent.updateUser({ name: "User", role: "user" });
+		expect(parent.c.user).toEqual({ name: "User", role: "user" });
+	});
+
+	test("multiple contexts can coexist without interference", () => {
+		const Context1 = createContext<string>("default1");
+		const Context2 = createContext<number>(0);
+		const Context3 = createContext<boolean>(false);
+
+		class Child extends Model {
+			get val1() {
+				return Context1.consume(this);
+			}
+			get val2() {
+				return Context2.consume(this);
+			}
+			get val3() {
+				return Context3.consume(this);
+			}
+		}
+
+		class Parent extends Model {
+			[Context1.provide]() {
+				return "provided1";
+			}
+			[Context2.provide]() {
+				return 42;
+			}
+			[Context3.provide]() {
+				return true;
+			}
+
+			@child c = Child.create();
+		}
+
+		const parent = Parent.create();
+		expect(parent.c.val1).toBe("provided1");
+		expect(parent.c.val2).toBe(42);
+		expect(parent.c.val3).toBe(true);
+	});
+
+	test("context not provided by nearest ancestor uses default", () => {
+		const Context1 = createContext<string>("default1");
+		const Context2 = createContext<string>("default2");
+
+		class GrandChild extends Model {
+			get val1() {
+				return Context1.consume(this);
+			}
+			get val2() {
+				return Context2.consume(this);
+			}
+		}
+
+		class Child extends Model {
+			[Context1.provide]() {
+				return "from-child";
+			}
+
+			@child gc = GrandChild.create();
+		}
+
+		class Parent extends Model {
+			[Context1.provide]() {
+				return "from-parent";
+			}
+			[Context2.provide]() {
+				return "from-parent-2";
+			}
+
+			@child c = Child.create();
+		}
+
+		const parent = Parent.create();
+		// Context1 should come from Child (nearest ancestor)
+		expect(parent.c.gc.val1).toBe("from-child");
+		// Context2 should come from Parent (skips Child)
+		expect(parent.c.gc.val2).toBe("from-parent-2");
 	});
 });

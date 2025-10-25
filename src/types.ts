@@ -48,27 +48,18 @@ export type ModelConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type StoreConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type Configuration<T> = ModelConfiguration<T> | StoreConfiguration<T>;
 
-type NonFunctionPropertyNames<T> = {
-	[K in keyof T]: T[K] extends Function ? never : K;
-}[keyof T];
-
-type ChildrenToSnapshot<T> = {
-	[K in keyof T]: T[K] extends Model
+// Don't evaluate property types to avoid circular references
+// Snapshot types are primarily for documentation - actual snapshot logic
+// uses the configuration object, not TypeScript types
+export type Snapshot<T extends Model = Model> = {
+	[K in keyof T]?: T[K] extends Model
 		? Snapshot<T[K]>
 		: T[K] extends Array<infer R>
 		? R extends Model
 			? Array<Snapshot<R>>
 			: T[K]
-		: T[K];
+		: T[K] | null;
 };
-
-type Nullable<T> = {
-	[K in keyof T]: T[K] | null;
-};
-
-export type Snapshot<T extends Model = Model> = Nullable<
-	Partial<ChildrenToSnapshot<Pick<T, NonFunctionPropertyNames<T>>>>
->;
 
 export type SnapshotDiff<T extends Model = Model> = {
 	undo: Snapshot<T>;

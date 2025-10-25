@@ -9,6 +9,7 @@ import {
 	applySnapshot,
 	onSnapshotDiff,
 } from "./api";
+import { createContext } from "./context";
 
 export {
 	createStore,
@@ -21,6 +22,7 @@ export {
 	onSnapshotDiff,
 	toSnapshot,
 	applySnapshot,
+	createContext,
 };
 
 export {
@@ -44,3 +46,4 @@ export {
 export * from "./decorators";
 
 export type { Configuration, Snapshot, IdType, SnapshotDiff } from "./types";
+export type { Context } from "./context";

@@ -19,10 +19,8 @@ import {
 	Props,
 	CommonCfgTypes,
 	StoreCfgTypes,
-	Context,
 } from "../types";
 import { getPropertyDescriptor } from "../utils";
-import computedProxy from "../computedProxy";
 
 export function updateProps(props: Props, newProps: Props): void {
 	runInUntracked(() => {
@@ -62,8 +60,6 @@ export class StoreAdministration<
 			get(target, name) {
 				if (name === "key") {
 					return (target as Store).key;
-				} else if (name === "context") {
-					return (target as Store).context;
 				}
 
 				const adm = getAdministration(target) as StoreAdministration;
@@ -85,7 +81,7 @@ export class StoreAdministration<
 			set(target, name, value) {
 				const adm = getAdministration(target) as StoreAdministration;
 
-				if (name === "props" || name === "context") {
+				if (name === "props") {
 					throw new Error(`r-state-tree: ${name} is read-only`);
 				}
 
@@ -105,8 +101,7 @@ export class StoreAdministration<
 
 	parent: StoreAdministration | null = null;
 	mounted: boolean = false;
-	computedContext!: Context;
-	private contextReactionUnsub: (() => void) | null = null;
+	private contextCache = new Map<symbol, ComputedNode<unknown>>();
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
 	private reactionsUnsub: (() => void)[] = [];
 	private configurationGetter?: () => StoreConfiguration<StoreType>;
@@ -345,6 +340,62 @@ export class StoreAdministration<
 		return !this.parent;
 	}
 
+	getContextValue<T>(
+		contextId: symbol,
+		provideSymbol: symbol,
+		defaultValue: T | undefined,
+		hasDefault: boolean
+	): T {
+		// Check cache first
+		let computed = this.contextCache.get(contextId);
+
+		if (!computed) {
+			// Create computed that walks up the parent chain
+			computed = createComputed(() => {
+				return this.lookupContextValue(
+					contextId,
+					provideSymbol,
+					defaultValue,
+					hasDefault
+				);
+			});
+			this.contextCache.set(contextId, computed);
+		}
+
+		return computed.get() as T;
+	}
+
+	private lookupContextValue<T>(
+		contextId: symbol,
+		provideSymbol: symbol,
+		defaultValue: T | undefined,
+		hasDefault: boolean
+	): T {
+		// Check if current store provides this context
+		const provideMethod = (this.source as any)[provideSymbol];
+		if (typeof provideMethod === "function") {
+			return provideMethod.call(this.proxy);
+		}
+
+		// Walk up the parent chain
+		if (this.parent) {
+			return this.parent.getContextValue(
+				contextId,
+				provideSymbol,
+				defaultValue,
+				hasDefault
+			);
+		}
+
+		// No provider found, use default
+		if (hasDefault) {
+			return defaultValue as T;
+		}
+
+		// No default and no provider - return undefined
+		return undefined as T;
+	}
+
 	createReaction<T>(track: () => T, callback: (a: T) => void): () => void {
 		const unsub = createReaction(track, callback);
 		this.reactionsUnsub.push(unsub);
@@ -353,15 +404,6 @@ export class StoreAdministration<
 
 	mount(parent: StoreAdministration | null = null): void {
 		this.parent = parent || null;
-		if (this.parent) {
-			const parentSource = this.parent.proxy;
-			this.computedContext = computedProxy(
-				createComputed(() => ({
-					...parentSource.context,
-					...parentSource.provideContext(),
-				}))
-			);
-		}
 
 		this.childStoreDataMap.forEach(({ value }) => {
 			const stores = value.get();
@@ -392,7 +434,8 @@ export class StoreAdministration<
 			listener.dispose();
 		});
 		this.childStoreDataMap.clear();
-		this.contextReactionUnsub?.();
+		this.contextCache.forEach((computed) => computed.clear());
+		this.contextCache.clear();
 		this.reactionsUnsub.forEach((u) => u());
 		this.parent = null;
 	}

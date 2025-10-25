@@ -1,4 +1,4 @@
-import { Props, Context, StoreConfiguration, Configuration } from "../types";
+import { Props, StoreConfiguration, Configuration } from "../types";
 import {
 	getStoreAdm,
 	StoreAdministration,
@@ -45,10 +45,7 @@ export function types<T extends Store>(
 	return config;
 }
 
-export default class Store<
-	PropsType extends Props = Props,
-	ContextType extends Context = Context
-> {
+export default class Store<PropsType extends Props = Props> {
 	static get types(): StoreConfiguration<unknown> {
 		return (this as any)[Symbol.metadata];
 	}
@@ -79,16 +76,8 @@ export default class Store<
 		return this.props.key;
 	}
 
-	get context(): ContextType {
-		return getStoreAdm(this).computedContext as ContextType;
-	}
-
 	createReaction<T>(track: () => T, callback: (a: T) => void): () => void {
 		return getStoreAdm(this).createReaction(track, callback);
-	}
-
-	provideContext(): null | Record<string, unknown> {
-		return null;
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-empty-function

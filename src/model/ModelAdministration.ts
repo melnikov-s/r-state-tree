@@ -172,7 +172,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	);
 
 	private configurationGetter?: () => ModelConfiguration<any>;
-	parent: ModelAdministration | null = null;
+	private _parent: ModelAdministration | null = null;
+	private parentAtom: AtomNode = createAtom();
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
@@ -181,7 +182,20 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private writeInProgress: Set<PropertyKey> = new Set();
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
 	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
+	private contextCache = new Map<symbol, ComputedNode<unknown>>();
 	parentName: PropertyKey | null = null;
+
+	get parent(): ModelAdministration | null {
+		this.parentAtom.reportObserved();
+		return this._parent;
+	}
+
+	set parent(value: ModelAdministration | null) {
+		if (this._parent !== value) {
+			this._parent = value;
+			this.parentAtom.reportChanged();
+		}
+	}
 
 	setConfiguration(configurationGetter: () => ModelConfiguration<any>): void {
 		this.configurationGetter = configurationGetter;
@@ -413,8 +427,62 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			onModelDetached(this.proxy);
 		});
 
+		this.contextCache.forEach((computed) => computed.clear());
+		this.contextCache.clear();
 		this.parent = null;
 		this.root = this;
+	}
+
+	getContextValue<T>(
+		contextId: symbol,
+		provideSymbol: symbol,
+		defaultValue: T | undefined,
+		hasDefault: boolean
+	): T {
+		let computed = this.contextCache.get(contextId);
+
+		if (!computed) {
+			computed = createComputed(() => {
+				return this.lookupContextValue(
+					contextId,
+					provideSymbol,
+					defaultValue,
+					hasDefault
+				);
+			});
+			this.contextCache.set(contextId, computed);
+		}
+
+		return computed.get() as T;
+	}
+
+	private lookupContextValue<T>(
+		contextId: symbol,
+		provideSymbol: symbol,
+		defaultValue: T | undefined,
+		hasDefault: boolean
+	): T {
+		const provideMethod = (this.source as any)[provideSymbol];
+		if (typeof provideMethod === "function") {
+			return provideMethod.call(this.proxy);
+		}
+
+		// Access this.parent reactively so context updates when parent changes
+		const parent = this.parent;
+		if (parent) {
+			return parent.getContextValue(
+				contextId,
+				provideSymbol,
+				defaultValue,
+				hasDefault
+			);
+		}
+
+		if (hasDefault) {
+			return defaultValue as T;
+		}
+
+		return undefined as T;
 	}
 
 	private toJSON(): Snapshot<Model> {

@@ -13,6 +13,7 @@ import {
 	runInBatch,
 	createComputed,
 	observable,
+	createContext,
 } from "../src/index";
 
 test("can mount a store", () => {
@@ -431,112 +432,6 @@ test("when props change only those computed methods that are directly affected a
 	expect(count).toBe(1);
 });
 
-test("context test", () => {
-	class C extends Store<any> {
-		get value() {
-			const context = this.context;
-			return context.value;
-		}
-
-		get values() {
-			return [this.context.values];
-		}
-	}
-
-	let provideCount = 0;
-
-	class S extends Store<any> {
-		value = 0;
-		values = [0];
-
-		provideContext() {
-			provideCount++;
-			return {
-				value: this.value,
-				values: this.values,
-			};
-		}
-
-		@child get c() {
-			return createStore(C);
-		}
-
-		inc() {
-			this.value++;
-		}
-	}
-
-	let count = 0;
-	const s = mount(createStore(S));
-	let result;
-	createEffect(() => (result = s.c.value));
-	createEffect(() => {
-		s.c.values;
-		count++;
-	});
-
-	expect(provideCount).toBe(1);
-	expect(count).toBe(1);
-	expect(result).toBe(0);
-	s.inc();
-	expect(result).toBe(1);
-	expect(count).toBe(1);
-	expect(provideCount).toBe(2);
-	expect(s.c.value).toBe(1);
-});
-
-test("context can use child store values", () => {
-	class CS1 extends Store<any> {
-		value = {};
-	}
-	class CS2 extends Store<any> {}
-
-	class S extends Store<any> {
-		provideContext() {
-			return {
-				value: this.cs1.value,
-			};
-		}
-
-		@child get cs1() {
-			return createStore(CS1);
-		}
-
-		@child get cs2() {
-			return createStore(CS2);
-		}
-	}
-
-	const s = mount(createStore(S));
-	expect(s.cs2.context.value).toBe(s.cs1.value);
-});
-
-test("context can use child store values (children)", () => {
-	class CS1 extends Store<any> {
-		value = {};
-	}
-	class CS2 extends Store<any> {}
-
-	class S extends Store<any> {
-		provideContext() {
-			return {
-				value: this.css[0].value,
-			};
-		}
-
-		@children get css() {
-			return [createStore(CS1)];
-		}
-
-		@child get cs2() {
-			return createStore(CS2);
-		}
-	}
-
-	const s = mount(createStore(S));
-	expect(s.cs2.context.value).toBe(s.css[0].value);
-});
-
 test("models on the store can be accessed", () => {
 	class M extends Model {}
 	class S extends Store<any> {
@@ -757,4 +652,535 @@ test("reaction in a store will auto unsub after store is unmounted ", () => {
 	expect(s.c).toBe(null);
 	s.inc();
 	expect(s.count).toBe(2);
+});
+
+describe("store context", () => {
+	test("can create and consume context with default value", () => {
+		const ThemeContext = createContext<"light" | "dark">("light");
+
+		class C extends Store {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		const c = mount(createStore(C));
+		expect(c.theme).toBe("light");
+	});
+
+	test("can create and consume context without default value", () => {
+		const UserContext = createContext<{ name: string } | null>();
+
+		class C extends Store {
+			get user() {
+				return UserContext.consume(this);
+			}
+		}
+
+		const c = mount(createStore(C));
+		expect(c.user).toBe(undefined);
+	});
+
+	test("context flows down from parent to child store", () => {
+		const ThemeContext = createContext<"light" | "dark">("light");
+
+		class ChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark" as const;
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c.theme).toBe("dark");
+	});
+
+	test("context flows down multiple levels", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class GrandChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ChildStore extends Store<any> {
+			@child
+			get gc() {
+				return createStore(GrandChildStore);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c.gc.theme).toBe("dark");
+	});
+
+	test("child can override parent context", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class ChildStore extends Store<any> {
+			theme = "blue";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			get currentTheme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c.currentTheme).toBe("blue");
+	});
+
+	test("multiple independent contexts don't collide", () => {
+		const ThemeContext = createContext<string>("light");
+		const UserContext = createContext<string>("guest");
+
+		class ChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+
+			get user() {
+				return UserContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+			user = "admin";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			[UserContext.provide]() {
+				return this.user;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c.theme).toBe("dark");
+		expect(parent.c.user).toBe("admin");
+	});
+
+	test("context is reactive", () => {
+		const ThemeContext = createContext<string>("light");
+		let count = 0;
+
+		class ChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+
+			changeTheme() {
+				this.theme = "blue";
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+
+		createEffect(() => {
+			parent.c.theme;
+			count++;
+		});
+
+		expect(count).toBe(1);
+		expect(parent.c.theme).toBe("dark");
+		parent.changeTheme();
+		expect(count).toBe(2);
+		expect(parent.c.theme).toBe("blue");
+	});
+
+	test("context with array of children", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class ChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+			items = [0, 1];
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@children
+			get cs() {
+				return this.items.map(() => createStore(ChildStore));
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.cs[0].theme).toBe("dark");
+		expect(parent.cs[1].theme).toBe("dark");
+	});
+
+	test("unmounted child store uses default context", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class ChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+			mounted = true;
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child
+			get c() {
+				return this.mounted ? createStore(ChildStore) : null;
+			}
+
+			unmountChild() {
+				this.mounted = false;
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c!.theme).toBe("dark");
+		parent.unmountChild();
+		expect(parent.c).toBe(null);
+	});
+
+	test("re-mounted child store gets parent context", () => {
+		const ThemeContext = createContext<string>("light");
+
+		class ChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+			mounted = true;
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child
+			get c() {
+				return this.mounted ? createStore(ChildStore) : null;
+			}
+
+			unmountChild() {
+				this.mounted = false;
+			}
+
+			remountChild() {
+				this.mounted = true;
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c!.theme).toBe("dark");
+		parent.unmountChild();
+		expect(parent.c).toBe(null);
+		parent.remountChild();
+		expect(parent.c!.theme).toBe("dark");
+	});
+
+	test("context can use computed values", () => {
+		const CountContext = createContext<number>(0);
+
+		class ChildStore extends Store<any> {
+			get count() {
+				return CountContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			value = 1;
+
+			get doubleValue() {
+				return this.value * 2;
+			}
+
+			[CountContext.provide]() {
+				return this.doubleValue;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+
+			increment() {
+				this.value++;
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c.count).toBe(2);
+		parent.increment();
+		expect(parent.c.count).toBe(4);
+	});
+
+	test("context can depend on child values", () => {
+		const ValueContext = createContext<number>(0);
+
+		class ChildStore1 extends Store<any> {
+			value = 5;
+		}
+
+		class ChildStore2 extends Store<any> {
+			get contextValue() {
+				return ValueContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			@child
+			get c1() {
+				return createStore(ChildStore1);
+			}
+
+			@child
+			get c2() {
+				return createStore(ChildStore2);
+			}
+
+			[ValueContext.provide]() {
+				return this.c1.value;
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c2.contextValue).toBe(5);
+	});
+
+	test("context reactivity with reaction", () => {
+		const ThemeContext = createContext<string>("light");
+		let reactionCount = 0;
+		let currentTheme: string | undefined;
+
+		class ChildStore extends Store<any> {
+			get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+
+			changeTheme(newTheme: string) {
+				this.theme = newTheme;
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+
+		createReaction(
+			() => parent.c.theme,
+			(theme) => {
+				currentTheme = theme;
+				reactionCount++;
+			}
+		);
+
+		expect(reactionCount).toBe(0);
+		parent.changeTheme("blue");
+		expect(reactionCount).toBe(1);
+		expect(currentTheme).toBe("blue");
+		parent.changeTheme("green");
+		expect(reactionCount).toBe(2);
+		expect(currentTheme).toBe("green");
+	});
+
+	test("context with complex types", () => {
+		type User = { name: string; role: string };
+		const UserContext = createContext<User | null>(null);
+
+		class ChildStore extends Store<any> {
+			get user() {
+				return UserContext.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			user: User = { name: "Admin", role: "admin" };
+
+			[UserContext.provide]() {
+				return this.user;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+
+			updateUser(user: User) {
+				this.user = user;
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c.user).toEqual({ name: "Admin", role: "admin" });
+		parent.updateUser({ name: "User", role: "user" });
+		expect(parent.c.user).toEqual({ name: "User", role: "user" });
+	});
+
+	test("multiple contexts can coexist without interference", () => {
+		const Context1 = createContext<string>("default1");
+		const Context2 = createContext<number>(0);
+		const Context3 = createContext<boolean>(false);
+
+		class ChildStore extends Store<any> {
+			get val1() {
+				return Context1.consume(this);
+			}
+			get val2() {
+				return Context2.consume(this);
+			}
+			get val3() {
+				return Context3.consume(this);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			[Context1.provide]() {
+				return "provided1";
+			}
+			[Context2.provide]() {
+				return 42;
+			}
+			[Context3.provide]() {
+				return true;
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.c.val1).toBe("provided1");
+		expect(parent.c.val2).toBe(42);
+		expect(parent.c.val3).toBe(true);
+	});
+
+	test("context not provided by nearest ancestor uses default", () => {
+		const Context1 = createContext<string>("default1");
+		const Context2 = createContext<string>("default2");
+
+		class GrandChildStore extends Store<any> {
+			get val1() {
+				return Context1.consume(this);
+			}
+			get val2() {
+				return Context2.consume(this);
+			}
+		}
+
+		class ChildStore extends Store<any> {
+			[Context1.provide]() {
+				return "from-child";
+			}
+
+			@child
+			get gc() {
+				return createStore(GrandChildStore);
+			}
+		}
+
+		class ParentStore extends Store<any> {
+			[Context1.provide]() {
+				return "from-parent";
+			}
+			[Context2.provide]() {
+				return "from-parent-2";
+			}
+
+			@child
+			get c() {
+				return createStore(ChildStore);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		// Context1 should come from Child (nearest ancestor)
+		expect(parent.c.gc.val1).toBe("from-child");
+		// Context2 should come from Parent (skips Child)
+		expect(parent.c.gc.val2).toBe("from-parent-2");
+	});
 });
