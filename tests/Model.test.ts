@@ -1489,7 +1489,7 @@ describe("model context", () => {
 		}
 
 		class Parent extends Model {
-			theme = "dark";
+			@observable theme = "dark";
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -1700,7 +1700,7 @@ describe("model context", () => {
 		}
 
 		class Parent extends Model {
-			value = 1;
+			@observable value = 1;
 
 			get doubleValue() {
 				return this.value * 2;
@@ -1761,7 +1761,7 @@ describe("model context", () => {
 		}
 
 		class Parent extends Model {
-			theme = "dark";
+			@observable theme = "dark";
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -1804,7 +1804,7 @@ describe("model context", () => {
 		}
 
 		class Parent extends Model {
-			user: User = { name: "Admin", role: "admin" };
+			@observable user: User = { name: "Admin", role: "admin" };
 
 			[UserContext.provide]() {
 				return this.user;

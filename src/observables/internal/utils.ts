@@ -1,4 +1,10 @@
 import { AtomNode, ComputedNode, SignalNode } from "../preact";
+import {
+	ObservableCfgTypes,
+	ModelCfgTypes,
+	CommonCfgTypes,
+	StoreCfgTypes,
+} from "../../types";
 
 export function defaultEquals<T>(a: T, b: T): boolean {
 	return a === b || (a !== a && b !== b);
@@ -18,20 +24,56 @@ export function isPropertyKey(val: unknown): val is string | number | symbol {
 
 export type PropertyType = "action" | "computed" | "observable";
 
-export function getPropertyType(key: PropertyKey, obj: object): PropertyType {
+export function getPropertyType(
+	key: PropertyKey,
+	obj: object
+): PropertyType | null {
+	// Check if this is a class instance with metadata (not a plain object)
+	const hasMetadata = (obj.constructor as any)[Symbol.metadata] !== undefined;
+
+	// Get property descriptor
 	const descriptor = getPropertyDescriptor(obj, key);
-	if (descriptor) {
-		if (
-			typeof descriptor.get === "function" ||
-			typeof descriptor.set === "function"
-		) {
+
+	// Methods are always actions (batched)
+	if (descriptor?.value && typeof descriptor.value === "function") {
+		return "action";
+	}
+
+	// Check if it's a getter/setter
+	const isGetter =
+		descriptor &&
+		(typeof descriptor.get === "function" ||
+			typeof descriptor.set === "function");
+
+	// For plain objects (no metadata), use implicit behavior
+	if (!hasMetadata) {
+		if (isGetter) {
 			return "computed";
-		} else if (typeof descriptor.value === "function") {
-			return "action";
+		}
+		return "observable";
+	}
+
+	// For class instances, check decorator metadata
+	const metadata = (obj.constructor as any)[Symbol.metadata];
+	if (metadata && metadata[key]) {
+		const config = metadata[key];
+
+		switch (config.type) {
+			case ObservableCfgTypes.computed:
+				return "computed";
+			case ModelCfgTypes.state:
+			case ObservableCfgTypes.observable:
+			case ModelCfgTypes.id:
+			case ModelCfgTypes.modelRef:
+			case ModelCfgTypes.modelRefs:
+			case CommonCfgTypes.child:
+			case CommonCfgTypes.children:
+			case StoreCfgTypes.model:
+				return "observable";
 		}
 	}
 
-	return "observable";
+	return null;
 }
 
 export function getPropertyDescriptor(

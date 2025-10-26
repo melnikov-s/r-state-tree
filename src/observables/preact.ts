@@ -1,5 +1,5 @@
 import {
-	computed,
+	computed as preactComputed,
 	signal,
 	Signal,
 	ReadonlySignal,
@@ -241,7 +241,7 @@ export function createComputed<T>(
 	fn: () => T,
 	context: unknown = null
 ): ComputedNode<T> {
-	const c = computed(context ? fn.bind(context) : fn);
+	const c = preactComputed(context ? fn.bind(context) : fn);
 	return {
 		node: c,
 		get() {
@@ -277,8 +277,40 @@ export type PreactObservable<T> = T extends Function
 				: `$${string & key}`]?: Signal<T[key]>;
 	  };
 
-export function observable<T>(obj: T): PreactObservable<T> {
-	return getObservable(obj) as any;
+// observable can be used both as a decorator and as a function
+export function observable<T>(obj: T): PreactObservable<T>;
+export function observable(
+	value: undefined,
+	context: ClassFieldDecoratorContext
+): void;
+export function observable(value: any, context?: any): any {
+	// If context exists and has 'kind', it's being used as a decorator
+	if (context && typeof context === "object" && "kind" in context) {
+		// Decorator behavior - set metadata
+		context.metadata![context.name!] = { type: "observable" };
+		return value;
+	}
+
+	// Otherwise, it's the regular observable wrapping function
+	return getObservable(value) as any;
+}
+
+// computed can be used both as a decorator and as a function
+export function computed<T>(
+	value: () => T,
+	context: ClassGetterDecoratorContext
+): void;
+export function computed<T>(fn: () => T, context?: unknown): ComputedNode<T>;
+export function computed(value: any, context?: any): any {
+	// If context exists and has 'kind', it's being used as a decorator
+	if (context && typeof context === "object" && "kind" in context) {
+		// Decorator behavior - set metadata
+		context.metadata![context.name!] = { type: "computed" };
+		return value;
+	}
+
+	// Otherwise, it's the regular computed function (value is actually the fn)
+	return createComputed(value, context);
 }
 
 export function source<T>(obj: PreactObservable<T> | T): T {

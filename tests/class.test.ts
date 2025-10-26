@@ -1,4 +1,10 @@
-import { createEffect, observable, Observable, isObservable } from "../src";
+import {
+	createEffect,
+	observable,
+	Observable,
+	isObservable,
+	computed,
+} from "../src";
 
 test("objects created from class return `false` from `isObservable`", () => {
 	class C extends Observable {}
@@ -9,7 +15,7 @@ test("objects created from class return `false` from `isObservable`", () => {
 
 test("objects create from class have observable properties", () => {
 	class C extends Observable {
-		value = "prop";
+		@observable value = "prop";
 	}
 
 	const o = new C();
@@ -26,7 +32,7 @@ test("objects create from class have observable properties", () => {
 
 test("object methods return a value", () => {
 	class C extends Observable {
-		value = "prop";
+		@observable value = "prop";
 
 		readValue() {
 			return this.value;
@@ -39,7 +45,7 @@ test("object methods return a value", () => {
 
 test("object methods are observable", () => {
 	class C extends Observable {
-		value = "prop";
+		@observable value = "prop";
 
 		readValue() {
 			return this.value;
@@ -60,10 +66,10 @@ test("object methods are observable", () => {
 
 test("object getters and setters on same property", () => {
 	class C extends Observable {
-		valueA = 0;
-		valueB = 0;
+		@observable valueA = 0;
+		@observable valueB = 0;
 
-		get values() {
+		@computed get values() {
 			return this.valueA + this.valueB;
 		}
 
@@ -87,9 +93,9 @@ test("object getters and setters on same property", () => {
 
 test("object getters return a value", () => {
 	class C extends Observable {
-		value = "prop";
+		@observable value = "prop";
 
-		get readValue() {
+		@computed get readValue() {
 			return this.value;
 		}
 	}
@@ -100,9 +106,9 @@ test("object getters return a value", () => {
 
 test("object getters are observable", () => {
 	class C extends Observable {
-		value = "prop";
+		@observable value = "prop";
 
-		get readValue() {
+		@computed get readValue() {
 			return this.value;
 		}
 	}
@@ -121,7 +127,7 @@ test("object getters are observable", () => {
 
 test("can have properties that are Promise", async () => {
 	class C extends Observable {
-		value = Promise.resolve(42);
+		@observable value = Promise.resolve(42);
 	}
 
 	const o = new C();
@@ -143,7 +149,7 @@ test("constructor has observable instance", () => {
 			super();
 			weakSet.add(this);
 		}
-		prop = {};
+		@observable prop = {};
 		arrowFunc = () => {
 			expect(isObservable(this.prop)).toBe(true);
 		};

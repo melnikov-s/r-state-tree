@@ -5,6 +5,8 @@ import {
 	createStore,
 	createReaction,
 	createEffect,
+	observable,
+	computed,
 } from "../src/index";
 
 export function createContainer<
@@ -25,8 +27,8 @@ export function createContainer<
 			const obj = { prop: "value" };
 
 			class C extends Container {
-				stateA = null;
-				stateB = null;
+				@observable stateA = null;
+				@observable stateB = null;
 
 				setA(obj) {
 					this.stateA = obj;
@@ -57,8 +59,8 @@ export function createContainer<
 			const array = [0];
 
 			class C extends Container {
-				stateA = null;
-				stateB = null;
+				@observable stateA = null;
+				@observable stateB = null;
 
 				setA(array) {
 					this.stateA = array;
@@ -89,8 +91,8 @@ export function createContainer<
 			const map = new Map([["prop", "value"]]);
 
 			class C extends Container {
-				stateA = null;
-				stateB = null;
+				@observable stateA = null;
+				@observable stateB = null;
 
 				setA(map) {
 					this.stateA = map;
@@ -124,8 +126,8 @@ export function createContainer<
 			const set = new Set([0]);
 
 			class C extends Container {
-				stateA = null;
-				stateB = null;
+				@observable stateA = null;
+				@observable stateB = null;
 
 				setA(set) {
 					this.stateA = set;
@@ -157,7 +159,7 @@ export function createContainer<
 		let count = 0;
 
 		class M extends Container {
-			state = 0;
+			@observable state = 0;
 
 			incState() {
 				this.state++;
@@ -178,13 +180,13 @@ export function createContainer<
 		let count = 0;
 
 		class M extends Container {
-			state = 0;
+			@observable state = 0;
 
 			incState() {
 				this.state++;
 			}
 
-			get twiceState() {
+			@computed get twiceState() {
 				return this.state * 2;
 			}
 		}
@@ -205,9 +207,9 @@ export function createContainer<
 		const result = {};
 
 		class S extends Container {
-			value = 0;
+			@observable value = 0;
 
-			result = null;
+			@observable result = null;
 
 			async inc() {
 				this.value++;

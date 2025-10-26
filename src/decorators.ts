@@ -7,6 +7,8 @@ import {
 	stateType,
 	childrenType,
 	modelRefsType,
+	observableType,
+	computedType,
 } from "./types";
 
 function makeDecorator(type: unknown): any {
@@ -39,3 +41,4 @@ export const modelRef = makeDecorator(modelRefType);
 export const modelRefs = makeDecorator(modelRefsType);
 export const identifier = makeDecorator(idType);
 export const state = makeDecorator(stateType);
+// observable and computed are now dual-purpose functions exported from preact.ts

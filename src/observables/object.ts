@@ -27,7 +27,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	hasMap: AtomMap<PropertyKey>;
 	valuesMap: SignalMap<PropertyKey>;
 	computedMap!: Map<PropertyKey, ComputedNode<T[keyof T]>>;
-	types: Map<PropertyKey, PropertyType>;
+	types: Map<PropertyKey, PropertyType | null>;
 
 	static proxyTraps: ProxyHandler<object> = {
 		has(target, name) {
@@ -118,10 +118,10 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return computedNode.get();
 	}
 
-	private getType(key: keyof T): PropertyType {
+	private getType(key: keyof T): PropertyType | null {
 		let type = this.types.get(key);
 
-		if (!type) {
+		if (type === undefined) {
 			type = getPropertyType(key, this.source);
 			this.types.set(key, type);
 		}
@@ -164,6 +164,11 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	read(key: keyof T): unknown {
 		const type = this.getType(key);
 
+		// Non-reactive property - just return the raw value
+		if (type === null) {
+			return this.get(key);
+		}
+
 		switch (type) {
 			case "observable":
 			case "action": {
@@ -195,6 +200,12 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 	write(key: keyof T, newValue: T[keyof T]): void {
 		const type = this.getType(key);
+
+		// Non-reactive property - just set the value directly
+		if (type === null) {
+			this.set(key, newValue);
+			return;
+		}
 
 		// if this property is a setter
 		if (type === "computed") {

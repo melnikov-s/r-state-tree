@@ -13,6 +13,7 @@ import {
 	runInBatch,
 	createComputed,
 	observable,
+	computed,
 	createContext,
 } from "../src/index";
 
@@ -51,7 +52,7 @@ test("can create a child store", () => {
 
 test("child store can be null", () => {
 	class S extends Store<any> {
-		mounted = true;
+		@observable mounted = true;
 		@child
 		get c() {
 			return this.mounted ? createStore(C, { prop: 0 }) : null;
@@ -70,13 +71,13 @@ test("child store can be null", () => {
 
 test("can access props in constructor", () => {
 	class S extends Store<any> {
-		prop = {};
+		@observable prop = {};
 		@child get child() {
 			return createStore(C, { prop: this.prop });
 		}
 	}
 	class C extends Store<any> {
-		prop = this.props.prop;
+		@observable prop = this.props.prop;
 	}
 
 	const s = mount(createStore(S));
@@ -86,14 +87,14 @@ test("can access props in constructor", () => {
 test("can access models from props in constructor", () => {
 	class M extends Model {}
 	class S extends Store<any> {
-		model = M.create();
+		@observable model = M.create();
 		@child get child() {
 			return createStore(C, { models: { model: this.model } });
 		}
 	}
 	class C extends Store<any> {
 		@model model;
-		prop;
+		@observable prop;
 		constructor(props) {
 			super(props);
 			this.prop = this.model;
@@ -127,7 +128,7 @@ test("can create an array of child stores", () => {
 
 test("updates an array of stores", () => {
 	class S extends Store<any> {
-		value = 0;
+		@observable value = 0;
 
 		inc() {
 			this.value++;
@@ -157,12 +158,12 @@ test("updates an array of stores", () => {
 
 test("child stores are reactive", () => {
 	class C extends Store<any> {
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		values = [];
+		@observable values = [];
 		add() {
 			this.values.push(this.values.length);
 		}
@@ -187,12 +188,12 @@ test("child stores are reactive", () => {
 
 test("child store can be retrieved during an action", () => {
 	class C extends Store<any> {
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		value = false;
+		@observable value = false;
 		add() {
 			count++;
 			this.value = true;
@@ -216,12 +217,12 @@ test("child store can be retrieved during an action", () => {
 
 test("children stores can be retrieved during an action", () => {
 	class C extends Store<any> {
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		values = [];
+		@observable values = [];
 		add() {
 			count++;
 			this.values.push(this.values.length);
@@ -245,12 +246,12 @@ test("children stores can be retrieved during an action", () => {
 
 test("child stores do not trigger listeners when only props change", () => {
 	class C extends Store<any> {
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		values = [1, 2];
+		@observable values = [1, 2];
 		changeValues() {
 			this.values = this.values.map((v) => v + 1);
 		}
@@ -275,12 +276,12 @@ test("child stores do not trigger listeners when only props change", () => {
 
 test("child stores are reactive", () => {
 	class C extends Store<any> {
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		values = [];
+		@observable values = [];
 		add() {
 			this.values.push(this.values.length);
 		}
@@ -305,12 +306,12 @@ test("child stores are reactive", () => {
 
 test("child stores with keys", () => {
 	class C extends Store<any> {
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 	}
 	class S extends Store<any> {
-		keys = [1, 2, 3];
+		@observable keys = [1, 2, 3];
 		@children get cs() {
 			return this.keys.map((value) => createStore(C, { value, key: value }));
 		}
@@ -339,7 +340,7 @@ test("props are reactive", () => {
 	let propsCounter = 0;
 
 	class S extends Store<any> {
-		value = 0;
+		@observable value = 0;
 
 		inc() {
 			this.value++;
@@ -381,7 +382,7 @@ test("will call `storeDidMount` when a root store mounts", () => {
 
 test("storeDidMount is executed in an action", () => {
 	class S extends Store<any> {
-		count = 0;
+		@observable count = 0;
 		storeDidMount() {
 			this.count++;
 		}
@@ -394,18 +395,18 @@ test("storeDidMount is executed in an action", () => {
 
 test("when props change only those computed methods that are directly affected are triggered", () => {
 	class C extends Store<any> {
-		get value() {
+		@computed get value() {
 			return this.props.value;
 		}
 
-		get values() {
+		@computed get values() {
 			return [this.props.values];
 		}
 	}
 
 	class S extends Store<any> {
-		value = 0;
-		values = [0];
+		@observable value = 0;
+		@observable values = [0];
 
 		@child get c() {
 			return createStore(C, { value: this.value, values: this.values });
@@ -485,10 +486,10 @@ test("models on the store can be an array", () => {
 
 test("models on the store can be updated", () => {
 	class M1 extends Model {
-		state = 0;
+		@observable state = 0;
 	}
 	class M2 extends Model {
-		state = 0;
+		@observable state = 0;
 	}
 
 	class CS extends Store<any> {
@@ -496,7 +497,7 @@ test("models on the store can be updated", () => {
 	}
 
 	class S extends Store<any> {
-		state = false;
+		@observable state = false;
 		@model m1: M1;
 		@model m2: M2;
 
@@ -520,23 +521,23 @@ test("models on the store are reactive", () => {
 	let count = 0;
 
 	class M1 extends Model {
-		state = 0;
+		@observable state = 0;
 	}
 	class M2 extends Model {
-		state = 0;
+		@observable state = 0;
 	}
 
 	class CS extends Store<any> {
 		@model m: M1 | M2;
 		@model m1: M1;
 
-		get models() {
+		@computed get models() {
 			return [this.m1];
 		}
 	}
 
 	class S extends Store<any> {
-		state = false;
+		@observable state = false;
 		@model m1: M1;
 		@model m2: M2;
 
@@ -581,8 +582,8 @@ test("can't initianialize store directly", () => {
 
 test("can setup a reaction in a store", () => {
 	class S extends Store<any> {
-		prop = 0;
-		count = 0;
+		@observable prop = 0;
+		@observable count = 0;
 		unsub;
 
 		storeDidMount() {
@@ -618,9 +619,9 @@ test("reaction in a store will auto unsub after store is unmounted ", () => {
 	}
 
 	class S extends Store<any> {
-		mounted = true;
-		prop = 0;
-		count = 0;
+		@observable mounted = true;
+		@observable prop = 0;
+		@observable count = 0;
 
 		@child get c() {
 			return this.mounted
@@ -685,13 +686,13 @@ describe("store context", () => {
 		const ThemeContext = createContext<"light" | "dark">("light");
 
 		class ChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark" as const;
+			@observable theme = "dark" as const;
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -711,7 +712,7 @@ describe("store context", () => {
 		const ThemeContext = createContext<string>("light");
 
 		class GrandChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 		}
@@ -724,7 +725,7 @@ describe("store context", () => {
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
+			@observable theme = "dark";
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -744,19 +745,19 @@ describe("store context", () => {
 		const ThemeContext = createContext<string>("light");
 
 		class ChildStore extends Store<any> {
-			theme = "blue";
+			@observable theme = "blue";
 
 			[ThemeContext.provide]() {
 				return this.theme;
 			}
 
-			get currentTheme() {
+			@computed get currentTheme() {
 				return ThemeContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
+			@observable theme = "dark";
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -777,18 +778,18 @@ describe("store context", () => {
 		const UserContext = createContext<string>("guest");
 
 		class ChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 
-			get user() {
+			@computed get user() {
 				return UserContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
-			user = "admin";
+			@observable theme = "dark";
+			@observable user = "admin";
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -814,13 +815,13 @@ describe("store context", () => {
 		let count = 0;
 
 		class ChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
+			@observable theme = "dark";
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -854,14 +855,14 @@ describe("store context", () => {
 		const ThemeContext = createContext<string>("light");
 
 		class ChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
-			items = [0, 1];
+			@observable theme = "dark";
+			@observable items = [0, 1];
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -882,14 +883,14 @@ describe("store context", () => {
 		const ThemeContext = createContext<string>("light");
 
 		class ChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
-			mounted = true;
+			@observable theme = "dark";
+			@observable mounted = true;
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -915,14 +916,14 @@ describe("store context", () => {
 		const ThemeContext = createContext<string>("light");
 
 		class ChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
-			mounted = true;
+			@observable theme = "dark";
+			@observable mounted = true;
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -954,15 +955,15 @@ describe("store context", () => {
 		const CountContext = createContext<number>(0);
 
 		class ChildStore extends Store<any> {
-			get count() {
+			@computed get count() {
 				return CountContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			value = 1;
+			@observable value = 1;
 
-			get doubleValue() {
+			@computed get doubleValue() {
 				return this.value * 2;
 			}
 
@@ -990,11 +991,11 @@ describe("store context", () => {
 		const ValueContext = createContext<number>(0);
 
 		class ChildStore1 extends Store<any> {
-			value = 5;
+			@observable value = 5;
 		}
 
 		class ChildStore2 extends Store<any> {
-			get contextValue() {
+			@computed get contextValue() {
 				return ValueContext.consume(this);
 			}
 		}
@@ -1025,13 +1026,13 @@ describe("store context", () => {
 		let currentTheme: string | undefined;
 
 		class ChildStore extends Store<any> {
-			get theme() {
+			@computed get theme() {
 				return ThemeContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			theme = "dark";
+			@observable theme = "dark";
 
 			[ThemeContext.provide]() {
 				return this.theme;
@@ -1071,13 +1072,13 @@ describe("store context", () => {
 		const UserContext = createContext<User | null>(null);
 
 		class ChildStore extends Store<any> {
-			get user() {
+			@computed get user() {
 				return UserContext.consume(this);
 			}
 		}
 
 		class ParentStore extends Store<any> {
-			user: User = { name: "Admin", role: "admin" };
+			@observable user: User = { name: "Admin", role: "admin" };
 
 			[UserContext.provide]() {
 				return this.user;

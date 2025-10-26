@@ -37,7 +37,16 @@ export enum StoreCfgTypes {
 	model = "model",
 }
 
-export type ConfigurationTypes = CommonCfgTypes | ModelCfgTypes | StoreCfgTypes;
+export enum ObservableCfgTypes {
+	observable = "observable",
+	computed = "computed",
+}
+
+export type ConfigurationTypes =
+	| CommonCfgTypes
+	| ModelCfgTypes
+	| StoreCfgTypes
+	| ObservableCfgTypes;
 
 export type ConfigurationType = {
 	type: ConfigurationTypes;
@@ -99,4 +108,12 @@ export const modelRefsType: ConfigurationType = {
 export const idType: ConfigurationType = { type: ModelCfgTypes.id };
 export const modelType: ConfigurationType = {
 	type: StoreCfgTypes.model,
+};
+
+export const observableType: ConfigurationType = {
+	type: ObservableCfgTypes.observable,
+};
+
+export const computedType: ConfigurationType = {
+	type: ObservableCfgTypes.computed,
 };

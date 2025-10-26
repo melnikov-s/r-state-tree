@@ -143,6 +143,53 @@ runInBatch(() => {
 });
 ```
 
+## Observable classes
+
+For reactive class instances outside the Model/Store system, use `@observable` and `@computed` decorators:
+
+```ts
+import { Observable, observable, computed, createEffect } from "r-state-tree";
+
+class Counter extends Observable {
+	@observable count = 0;
+	@observable step = 1;
+
+	@computed get doubled() {
+		return this.count * 2;
+	}
+
+	increment() {
+		this.count += this.step;
+	}
+}
+
+const counter = new Counter();
+
+createEffect(() => {
+	console.log("Count:", counter.count, "Doubled:", counter.doubled);
+});
+
+counter.increment(); // Triggers the effect
+```
+
+**Important:** Class instances require explicit `@observable` and `@computed` decorators. Properties without decorators are **not** reactive.
+
+### Plain objects (implicit reactivity)
+
+Plain objects wrapped with `observable()` use implicit reactivity for backward compatibility:
+
+```ts
+import { observable, createEffect } from "r-state-tree";
+
+const state = observable({ count: 0 });
+
+createEffect(() => {
+	console.log(state.count); // All properties are reactive
+});
+
+state.count++; // Triggers the effect
+```
+
 ## Models and snapshots
 
 Models capture persistent state with snapshot utilities.

@@ -29,6 +29,7 @@ export {
 	reportChanged,
 	reportObserved,
 	observable,
+	computed,
 	createEffect,
 	Observable,
 } from "./preact";

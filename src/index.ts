@@ -27,6 +27,7 @@ export {
 
 export {
 	observable,
+	computed,
 	source,
 	reportChanged,
 	reportObserved,
