@@ -65,9 +65,7 @@ export function getPropertyType(
 			case ObservableCfgTypes.observable:
 			case ModelCfgTypes.id:
 			case ModelCfgTypes.modelRef:
-			case ModelCfgTypes.modelRefs:
 			case CommonCfgTypes.child:
-			case CommonCfgTypes.children:
 			case StoreCfgTypes.model:
 				return "observable";
 		}

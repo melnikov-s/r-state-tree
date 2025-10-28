@@ -99,9 +99,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				}
 				switch (adm.configuration[prop as string]?.type) {
 					case ModelCfgTypes.modelRef:
+						if (Array.isArray(adm.source[prop])) {
+							return adm.getModelRefs(prop);
+						}
 						return adm.getModelRef(prop);
-					case ModelCfgTypes.modelRefs:
-						return adm.getModelRefs(prop);
 					default:
 						return PreactObjectAdministration.proxyTraps.get?.apply(
 							null,
@@ -115,20 +116,19 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				try {
 					switch (adm.configuration[name as string]?.type) {
 						case ModelCfgTypes.modelRef: {
-							adm.setModelRef(name, value as Model | undefined);
-							return true;
-						}
-						case ModelCfgTypes.modelRefs: {
-							adm.setModelRefs(name, value ?? ([] as Model[]));
-							return true;
-						}
-						case CommonCfgTypes.children: {
-							adm.setModels(name, value ?? ([] as Model[]));
+							Array.isArray(value)
+								? adm.setModelRefs(name, value)
+								: adm.setModelRef(name, value as Model | undefined);
 							return true;
 						}
 						case CommonCfgTypes.child: {
-							adm.setModel(name, value ?? (null as Model | null));
-							break;
+							if (Array.isArray(value)) {
+								adm.setModels(name, value);
+								return true;
+							} else {
+								adm.setModel(name, value ?? (null as Model | null));
+								break;
+							}
 						}
 						case ModelCfgTypes.id: {
 							adm.setId(name as string, value as IdType);
@@ -156,8 +156,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				if (desc && "value" in desc && !adm.writeInProgress.has(name)) {
 					switch (adm.configuration[name as string]?.type) {
 						case ModelCfgTypes.modelRef:
-						case ModelCfgTypes.modelRefs:
-						case CommonCfgTypes.children:
 						case CommonCfgTypes.child:
 						case ModelCfgTypes.id: {
 							adm.proxy[name] = desc.value;
@@ -493,39 +491,42 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					json[key] = clone(getSource(this.proxy[key]));
 					break;
 				case ModelCfgTypes.modelRef:
-					const model: Model | undefined = this.proxy[key];
+					const model: Model[] | Model | undefined = this.proxy[key];
+					if (Array.isArray(model)) {
+						if (!this.snapshotMap.has(key)) {
+							this.snapshotMap.set(
+								key,
+								createComputed(() => {
+									const models: Model[] = this.proxy[key] ?? [];
+									return models.map((m) => getModelRefSnapshot(m)) as unknown[];
+								})
+							);
+						}
+
+						json[key] = this.snapshotMap.get(key)!.get();
+						break;
+					}
 					json[key] = model && getModelRefSnapshot(model);
 					break;
-				case ModelCfgTypes.modelRefs:
-					if (!this.snapshotMap.has(key)) {
-						this.snapshotMap.set(
-							key,
-							createComputed(() => {
-								const models: Model[] = this.proxy[key] ?? [];
-								return models.map((m) => getModelRefSnapshot(m)) as unknown[];
-							})
-						);
-					}
-
-					json[key] = this.snapshotMap.get(key)!.get();
-					break;
 				case CommonCfgTypes.child:
-					json[key] = getModelAdm(this.proxy[key])?.getSnapshot();
-					break;
-				case CommonCfgTypes.children:
-					if (!this.snapshotMap.has(key)) {
-						this.snapshotMap.set(
-							key,
-							createComputed(() => {
-								return getSource(
-									(this.proxy[key] ?? []).map((model: Model) =>
-										getModelAdm(model).getSnapshot()
-									)
-								);
-							})
-						);
+					const child: Model | Model[] | undefined = this.proxy[key];
+					if (Array.isArray(child)) {
+						if (!this.snapshotMap.has(key)) {
+							this.snapshotMap.set(
+								key,
+								createComputed(() => {
+									return getSource(
+										(this.proxy[key] ?? []).map((model: Model) =>
+											getModelAdm(model).getSnapshot()
+										)
+									);
+								})
+							);
+						}
+						json[key] = this.snapshotMap.get(key)!.get();
+						break;
 					}
-					json[key] = this.snapshotMap.get(key)!.get();
+					json[key] = getModelAdm(child!)?.getSnapshot();
 					break;
 			}
 			return json;
@@ -560,20 +561,20 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						this.proxy[key] = value;
 						break;
 					case ModelCfgTypes.modelRef:
-						if (value instanceof Model) {
+						if (Array.isArray(value)) {
+							if ((value as unknown[])?.[0] instanceof Model) {
+								this.proxy[key] = value;
+							} else {
+								this.source[key] = value.map((snapshot: RefSnapshot) =>
+									getSnapshotRefId(snapshot)
+								);
+								this.referencedAtoms?.get(key)?.reportChanged();
+							}
+							break;
+						} else if (value instanceof Model) {
 							this.proxy[key] = value;
 						} else {
 							this.source[key] = getSnapshotRefId(value);
-							this.referencedAtoms?.get(key)?.reportChanged();
-						}
-						break;
-					case ModelCfgTypes.modelRefs:
-						if ((value as unknown[])?.[0] instanceof Model) {
-							this.proxy[key] = value;
-						} else {
-							this.source[key] = value.map((snapshot: RefSnapshot) =>
-								getSnapshotRefId(snapshot)
-							);
 							this.referencedAtoms?.get(key)?.reportChanged();
 						}
 						break;
@@ -583,7 +584,41 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					case CommonCfgTypes.child:
 						let model: Model;
 
-						if (value instanceof Model) {
+						if (Array.isArray(value)) {
+							const Ctor = childType as typeof Model;
+							this.proxy[key] = (value as Snapshot[])?.map(
+								(snapshot, index) => {
+									snapshot = snapshot ?? {};
+									let model: Model;
+									if (snapshot instanceof Model) {
+										model = snapshot;
+									} else {
+										ensureChildTypes(key);
+
+										const id = childType && getSnapshotId(snapshot, Ctor);
+										const foundModel =
+											id != null
+												? getModelById(this.root.proxy, id)
+												: this.proxy[key][index];
+										const adm = foundModel && getModelAdm(foundModel);
+
+										if (
+											adm &&
+											foundModel!.parent === this.proxy &&
+											adm?.parentName === key
+										) {
+											adm.loadSnapshot(snapshot);
+											model = foundModel!;
+										} else {
+											model = Ctor.create(snapshot);
+										}
+									}
+
+									return model;
+								}
+							);
+							break;
+						} else if (value instanceof Model) {
 							model = value;
 						} else {
 							ensureChildTypes(key);
@@ -606,38 +641,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						}
 
 						this.proxy[key] = model;
-						break;
-					case CommonCfgTypes.children:
-						const Ctor = childType as typeof Model;
-						this.proxy[key] = (value as Snapshot[])?.map((snapshot, index) => {
-							snapshot = snapshot ?? {};
-							let model: Model;
-							if (snapshot instanceof Model) {
-								model = snapshot;
-							} else {
-								ensureChildTypes(key);
-
-								const id = childType && getSnapshotId(snapshot, Ctor);
-								const foundModel =
-									id != null
-										? getModelById(this.root.proxy, id)
-										: this.proxy[key][index];
-								const adm = foundModel && getModelAdm(foundModel);
-
-								if (
-									adm &&
-									foundModel!.parent === this.proxy &&
-									adm?.parentName === key
-								) {
-									adm.loadSnapshot(snapshot);
-									model = foundModel!;
-								} else {
-									model = Ctor.create(snapshot);
-								}
-							}
-
-							return model;
-						});
 						break;
 					default:
 						console.warn(

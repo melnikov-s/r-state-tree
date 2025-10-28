@@ -66,8 +66,6 @@ export class StoreAdministration<
 				switch (adm.configuration[name as string]?.type) {
 					case CommonCfgTypes.child:
 						return adm.getStore(name);
-					case CommonCfgTypes.children:
-						return adm.getStores(name);
 					case StoreCfgTypes.model:
 						return adm.getModelRef(name);
 					default:
@@ -254,15 +252,9 @@ export class StoreAdministration<
 		const storeElement = childStoreData.listener.track(() =>
 			childStoreData.computed.get()
 		);
-		this.setSingleStore(name, storeElement as StoreElement | null);
-	}
-
-	private updateStores(name: PropertyKey): void {
-		const childStoreData = this.childStoreDataMap.get(name)!;
-		const storeElement = childStoreData.listener.track(() =>
-			childStoreData.computed.get()
-		);
-		this.setStoreList(name, storeElement as StoreElement[]);
+		Array.isArray(storeElement)
+			? this.setStoreList(name, storeElement)
+			: this.setSingleStore(name, storeElement as StoreElement | null);
 	}
 
 	private getComputedGetter(
@@ -288,24 +280,10 @@ export class StoreAdministration<
 		const storeElement = childStoreData.listener.track(() =>
 			childStoreData.computed.get()
 		);
-		this.setSingleStore(name, storeElement as StoreElement | null);
+		Array.isArray(storeElement)
+			? this.setStoreList(name, storeElement)
+			: this.setSingleStore(name, storeElement as StoreElement | null);
 		return childStoreData.value.get() as Store | null;
-	}
-
-	private initializeStores(name: PropertyKey): Store[] {
-		const value = createSignal<Store[] | Store | null>([]);
-		const childStoreData: ChildStoreData = this.childStoreDataMap.get(name) ?? {
-			computed: this.getComputedGetter(name),
-			listener: createListener(() => this.updateStores(name)),
-			value,
-		};
-
-		this.childStoreDataMap.set(name, childStoreData);
-		const storeElement = childStoreData.listener.track(() =>
-			childStoreData.computed.get()
-		);
-		this.setStoreList(name, storeElement as StoreElement[]);
-		return childStoreData.value.get() as Store[];
 	}
 
 	private getStore(name: PropertyKey): Store | null {
@@ -315,20 +293,10 @@ export class StoreAdministration<
 			return this.initializeStore(name);
 		} else {
 			const storeElement = runInUntracked(() => childStoreData.computed.get());
-			this.setSingleStore(name, storeElement as StoreElement | null);
+			Array.isArray(storeElement)
+				? this.setStoreList(name, storeElement)
+				: this.setSingleStore(name, storeElement as StoreElement | null);
 			return childStoreData.value.get() as Store | null;
-		}
-	}
-
-	private getStores(name: PropertyKey): Store[] {
-		const childStoreData = this.childStoreDataMap.get(name);
-
-		if (!childStoreData) {
-			return this.initializeStores(name);
-		} else {
-			const storeElement = runInUntracked(() => childStoreData.computed.get());
-			this.setStoreList(name, storeElement as StoreElement[]);
-			return childStoreData.value.get() as Store[];
 		}
 	}
 

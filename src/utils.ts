@@ -61,18 +61,23 @@ export function getDiff<T extends object>(
 
 		if (obj1[key] !== obj2[key]) {
 			if (config?.[key]?.type === CommonCfgTypes.child) {
-				const childDiff = getDiff(obj1[key], obj2[key], getConfig);
-				if (childDiff) {
-					diff[key] = childDiff;
-				}
-			} else if (config?.[key]?.type === CommonCfgTypes.children) {
-				diff[key] = obj2[key].map((model: object, index: number) => {
-					if (obj1[key][index]) {
-						return getDiff(obj1[key][index], model, getConfig);
-					}
+				const value = obj2[key];
+				if (Array.isArray(value)) {
+					// Array of children
+					diff[key] = value.map((model: object, index: number) => {
+						if (obj1[key][index]) {
+							return getDiff(obj1[key][index], model, getConfig);
+						}
 
-					return model;
-				});
+						return model;
+					});
+				} else {
+					// Single child
+					const childDiff = getDiff(obj1[key], obj2[key], getConfig);
+					if (childDiff) {
+						diff[key] = childDiff;
+					}
+				}
 			} else {
 				diff[key] = obj2[key];
 			}

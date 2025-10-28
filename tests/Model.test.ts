@@ -2,9 +2,7 @@ import {
 	Model,
 	identifier,
 	modelRef,
-	modelRefs,
 	child,
-	children,
 	state,
 	onSnapshot,
 	toSnapshot,
@@ -104,7 +102,7 @@ describe("model lifecylce", () => {
 		}
 
 		class M extends Model {
-			@children cms: CM[] = [];
+			@child cms: CM[] = [];
 
 			addCM() {
 				this.cms.push(CM.create());
@@ -152,7 +150,7 @@ describe("model lifecylce", () => {
 		}
 
 		class M extends Model {
-			@children cms: CM[] = [CM.create(), CM.create()];
+			@child cms: CM[] = [CM.create(), CM.create()];
 
 			popCM() {
 				this.cms.pop();
@@ -181,7 +179,7 @@ describe("model lifecylce", () => {
 		}
 
 		class M extends Model {
-			@children cms: CM[] = [CM.create(), CM.create()];
+			@child cms: CM[] = [CM.create(), CM.create()];
 
 			reverse() {
 				this.cms = this.cms.slice().reverse();
@@ -329,7 +327,6 @@ describe("model identifiers", () => {
 
 		class MP extends Model {
 			@child m = M.create();
-			@modelRef mr = this.m;
 		}
 
 		const mp = MP.create();
@@ -344,7 +341,7 @@ describe("model identifiers", () => {
 		}
 
 		class MP extends Model {
-			@children ms = [M.create()];
+			@child ms = [M.create()];
 
 			add() {
 				this.ms.push(M.create());
@@ -368,7 +365,7 @@ describe("model identifiers", () => {
 
 		class MP extends Model {
 			@child m = M.create();
-			@modelRef mr = this.m;
+			@modelRef mr: M = this.m;
 		}
 
 		const mp = MP.create();
@@ -389,7 +386,7 @@ describe("model identifiers", () => {
 
 		class MP extends Model {
 			@child m = M.create();
-			@modelRef mr = this.m;
+			@modelRef mr: M = this.m;
 		}
 
 		const mp = MP.create();
@@ -431,7 +428,7 @@ test("can get the parent of a model", () => {
 	class M extends Model {
 		@child mc: MC = MC.create();
 		@child mc2: MC | null = null;
-		@children mcs: MC[] = [MC.create(), MC.create()];
+		@child mcs: MC[] = [MC.create(), MC.create()];
 	}
 
 	const m = M.create();
@@ -454,7 +451,7 @@ test("children models can be set with Object.defineProperty", () => {
 	}
 
 	class M extends Model {
-		@children mcs;
+		@child mcs;
 
 		constructor() {
 			super();
@@ -485,7 +482,7 @@ describe("model references", () => {
 		}
 
 		class M extends Model {
-			@child mc: MC = MC.create();
+			@child(MC) mc: MC = MC.create();
 			@modelRef mr: MC;
 
 			setRef() {
@@ -539,7 +536,7 @@ describe("model references", () => {
 			@identifier id = 0;
 		}
 		class M extends Model {
-			@child mc: MC = MC.create();
+			@child(MC) mc: MC = MC.create();
 			@modelRef mr: MC;
 
 			setRef() {
@@ -565,7 +562,7 @@ describe("model references", () => {
 		}
 
 		class M extends Model {
-			@children mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@child mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
 			@modelRef mr: MC;
 
 			setRef() {
@@ -589,7 +586,7 @@ describe("model references", () => {
 			@identifier id;
 		}
 		class M extends Model {
-			@children mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@child mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
 			@modelRef mr: MC;
 
 			setModel(index: number) {
@@ -616,7 +613,7 @@ describe("model references", () => {
 			@identifier id = 0;
 		}
 		class M extends Model {
-			@child mc: MC = MC.create();
+			@child(MC) mc: MC = MC.create();
 			@modelRef mr: MC;
 			_temp: MC;
 
@@ -686,9 +683,9 @@ describe("model references", () => {
 			@identifier id;
 		}
 		class M extends Model {
-			@child mc1 = MC.create({ id: 1 });
-			@child mc2: MC = MC.create({ id: 2 });
-			@modelRefs mr: MC[] = [];
+			@child(MC) mc1 = MC.create({ id: 1 });
+			@child(MC) mc2: MC = MC.create({ id: 2 });
+			@modelRef mr: MC[] = [];
 			_temp: MC;
 
 			setRef() {
@@ -727,7 +724,7 @@ describe("model references", () => {
 		}
 
 		class Todos extends Model {
-			@children(Todo) todos = [];
+			@child(Todo) todos = [];
 			@modelRef selectedTodo: Todo | undefined;
 			empty() {
 				this.todos = [];
@@ -775,7 +772,7 @@ describe("model state", () => {
 		@identifier id;
 		@state prop = 0;
 		ignored = 0;
-		@children(MCA) mcas: MCA[] = [MCA.create(), MCA.create()];
+		@child(MCA) mcas: MCA[] = [MCA.create(), MCA.create()];
 		@modelRef mcaRef: MCA = this.mcas[0];
 
 		modelDidInit() {
@@ -788,8 +785,8 @@ describe("model state", () => {
 	class M extends Model {
 		@state prop = 0;
 		ignored = 0;
-		@children(MCA) mcas: MCA[] = [];
-		@children(MCB) mcbs: MCB[] = [MCB.create(), MCB.create()];
+		@child(MCA) mcas: MCA[] = [];
+		@child(MCB) mcbs: MCB[] = [MCB.create(), MCB.create()];
 		@child(MCA) mca: MCA = MCA.create();
 		anotherIgnored = 0;
 		inc() {
@@ -916,7 +913,7 @@ describe("model state", () => {
 			@identifier id = id++;
 		}
 		class M extends Model {
-			@children mcs = [MC.create(), MC.create()];
+			@child mcs = [MC.create(), MC.create()];
 			@modelRef mc = null;
 			load() {
 				applySnapshot(m, { mc: { id: 0 } });
@@ -941,8 +938,8 @@ describe("model state", () => {
 			@identifier id = id++;
 		}
 		class M extends Model {
-			@children mcs = [MC.create(), MC.create()];
-			@modelRefs mc = [];
+			@child mcs = [MC.create(), MC.create()];
+			@modelRef mc = [];
 			load() {
 				applySnapshot(m, { mc: [{ id: 0 }, { id: 1 }] });
 			}
@@ -1004,7 +1001,7 @@ describe("model state", () => {
 		}
 
 		class M extends Model {
-			@children(MC) mcs = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@child(MC) mcs = [MC.create({ id: 0 }), MC.create({ id: 1 })];
 		}
 
 		const m = M.create();
@@ -1031,11 +1028,11 @@ describe("model state", () => {
 		}
 
 		class M extends Model {
-			@children(MC) mcs: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@child(MC) mcs: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
 		}
 
 		class MP extends Model {
-			@children(M) ms: M[] = [M.create(), M.create()];
+			@child(M) ms: M[] = [M.create(), M.create()];
 		}
 
 		expect(() => MP.create()).toThrowErrorMatchingInlineSnapshot(
@@ -1049,8 +1046,8 @@ describe("model state", () => {
 		}
 
 		class M extends Model {
-			@children(MC) ms1: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
-			@children(MC) ms2: MC[] = [MC.create({ id: 2 }), MC.create({ id: 3 })];
+			@child(MC) ms1: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@child(MC) ms2: MC[] = [MC.create({ id: 2 }), MC.create({ id: 3 })];
 		}
 
 		const m = M.create();
@@ -1067,8 +1064,8 @@ describe("model state", () => {
 		}
 
 		class M extends Model {
-			@children(MC) ms1: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
-			@children(MC) ms2: MC[] = [MC.create({ id: 2 }), MC.create({ id: 3 })];
+			@child(MC) ms1: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@child(MC) ms2: MC[] = [MC.create({ id: 2 }), MC.create({ id: 3 })];
 		}
 
 		const m = M.create();
@@ -1090,7 +1087,7 @@ describe("model state", () => {
 		}
 
 		class M extends Model {
-			@children(MC) ms: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
+			@child(MC) ms: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
 			act() {
 				const mc = this.ms.pop();
 				this.ms.unshift(mc);
@@ -1111,9 +1108,9 @@ describe("model state", () => {
 		}
 		class M extends Model {
 			@child mc: MC;
-			@children mcs: MC[];
+			@child mcs: MC[];
 			@modelRef mr: MC;
-			@modelRefs mrs: MC[];
+			@modelRef mrs: MC[];
 		}
 
 		const mca = MC.create({ prop: 0 });
@@ -1176,9 +1173,9 @@ describe("model state", () => {
 		}
 
 		class M extends Model {
-			@child mca: MC;
-			@child mcb: MC;
-			@modelRefs mcrs: MC[];
+			@child(MC) mca: MC;
+			@child(MC) mcb: MC;
+			@modelRef mcrs: MC[];
 			@modelRef mcr: MC;
 
 			setRef(m: MC) {
@@ -1195,7 +1192,7 @@ describe("model state", () => {
 		let count = 0;
 		const mca = MC.create();
 		const mcb = MC.create();
-		const m = M.create({ mcb: mcb, mcrs: [mca], mcr: mca });
+		const m = M.create({ mca: mca, mcb: mcb, mcrs: [mca], mcr: mca });
 		onSnapshot(m, () => {
 			count++;
 		});
@@ -1207,7 +1204,7 @@ describe("model state", () => {
 		m.clearMCB();
 		expect(count).toBe(3);
 		expect(toSnapshot(m)).toEqual({
-			mca: undefined,
+			mca: { id: 0 },
 			mcb: undefined,
 			mcr: undefined,
 			mcrs: [],
@@ -1229,7 +1226,7 @@ describe("model state", () => {
 				@state propB = 0;
 				obs = 0;
 				@child(MC) mc: MC = MC.create();
-				@children(MC) mcs: MC[] = [MC.create(), MC.create({ prop: 1 })];
+				@child(MC) mcs: MC[] = [MC.create(), MC.create({ prop: 1 })];
 
 				action() {
 					this.propA++;
@@ -1534,7 +1531,7 @@ describe("model context", () => {
 				return this.theme;
 			}
 
-			@children cs = [Child.create(), Child.create()];
+			@child cs = [Child.create(), Child.create()];
 		}
 
 		const parent = Parent.create();
@@ -1673,10 +1670,7 @@ describe("model context", () => {
 				return this.theme;
 			}
 
-			@children cs: Child[] = [
-				Child.create({ id: 0 }),
-				Child.create({ id: 1 }),
-			];
+			@child cs: Child[] = [Child.create({ id: 0 }), Child.create({ id: 1 })];
 
 			removeFirst() {
 				this.cs.shift();

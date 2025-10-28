@@ -1,44 +1,32 @@
 import "@tsmetadata/polyfill";
-import {
-	childType,
-	modelType,
-	modelRefType,
-	idType,
-	stateType,
-	childrenType,
-	modelRefsType,
-	observableType,
-	computedType,
-} from "./types";
+import { childType, modelType, modelRefType, idType, stateType } from "./types";
 
 function makeDecorator(type: unknown): any {
 	return function <T>(value: T, context: DecoratorContext): T {
 		context.metadata![context.name!] = type;
-
 		return value;
 	};
 }
 
-function makeChildDecorator(
-	type?: typeof childType | typeof childrenType
-): any {
+// Unified decorator that supports both @child and @child(Type) syntax
+function makeChildDecorator(typeObj: any): any {
 	return function <T>(valueOrChildType: T, context?: DecoratorContext): any {
 		// Direct use: @child
 		if (context !== undefined) {
-			return makeDecorator(type)(valueOrChildType, context);
+			return makeDecorator(typeObj)(valueOrChildType, context);
 		}
 
 		// Factory use: @child(ChildType)
-		const childType = valueOrChildType;
-		return makeDecorator(type ? type(childType as Function) : type);
+		const childCtor = valueOrChildType;
+		return function <T>(value: T, context: DecoratorContext): T {
+			const typeWithCtor = (typeObj as Function)(childCtor);
+			return makeDecorator(typeWithCtor)(value, context);
+		};
 	};
 }
 
 export const child = makeChildDecorator(childType);
-export const children = makeChildDecorator(childrenType);
+export const modelRef = makeChildDecorator(modelRefType);
 export const model = makeDecorator(modelType);
-export const modelRef = makeDecorator(modelRefType);
-export const modelRefs = makeDecorator(modelRefsType);
 export const identifier = makeDecorator(idType);
 export const state = makeDecorator(stateType);
-// observable and computed are now dual-purpose functions exported from preact.ts

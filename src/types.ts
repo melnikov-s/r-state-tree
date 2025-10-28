@@ -23,14 +23,12 @@ export type IdType = string | number;
 
 export enum CommonCfgTypes {
 	child = "child",
-	children = "children",
 }
 
 export enum ModelCfgTypes {
 	state = "state",
 	id = "id",
 	modelRef = "modelRef",
-	modelRefs = "modelRefs",
 }
 
 export enum StoreCfgTypes {
@@ -89,22 +87,17 @@ export const childType = Object.assign(
 	{ type: CommonCfgTypes.child }
 );
 
-export const childrenType = Object.assign(
-	function (childType: Function): ConfigurationType {
-		return { type: CommonCfgTypes.children, childType };
-	},
-	{ type: CommonCfgTypes.children }
-);
-
 export const stateType: ConfigurationType = {
 	type: ModelCfgTypes.state,
 };
-export const modelRefType: ConfigurationType = {
-	type: ModelCfgTypes.modelRef,
-};
-export const modelRefsType: ConfigurationType = {
-	type: ModelCfgTypes.modelRefs,
-};
+
+export const modelRefType = Object.assign(
+	function (childType: Function): ConfigurationType {
+		return { type: ModelCfgTypes.modelRef, childType };
+	},
+	{ type: ModelCfgTypes.modelRef }
+);
+
 export const idType: ConfigurationType = { type: ModelCfgTypes.id };
 export const modelType: ConfigurationType = {
 	type: StoreCfgTypes.model,

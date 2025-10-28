@@ -2,7 +2,6 @@
 import {
 	Store,
 	child,
-	children,
 	createStore,
 	mount,
 	Model,
@@ -10,8 +9,6 @@ import {
 	updateStore,
 	createReaction,
 	createEffect,
-	runInBatch,
-	createComputed,
 	observable,
 	computed,
 	createContext,
@@ -107,7 +104,7 @@ test("can access models from props in constructor", () => {
 
 test("can create an array of child stores", () => {
 	class S extends Store<any> {
-		@children
+		@child
 		get cs() {
 			return types.map((Type, i) => createStore(Type, { prop: i }));
 		}
@@ -134,7 +131,7 @@ test("updates an array of stores", () => {
 			this.value++;
 		}
 
-		@children
+		@child
 		get cs() {
 			return types.map((Type, i) =>
 				createStore(Type, { prop: this.value + i })
@@ -167,7 +164,7 @@ test("child stores are reactive", () => {
 		add() {
 			this.values.push(this.values.length);
 		}
-		@children get c() {
+		@child get c() {
 			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
@@ -228,7 +225,7 @@ test("children stores can be retrieved during an action", () => {
 			this.values.push(this.values.length);
 			expect(this.c.length).toBe(this.values.length);
 		}
-		@children get c() {
+		@child get c() {
 			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
@@ -255,7 +252,7 @@ test("child stores do not trigger listeners when only props change", () => {
 		changeValues() {
 			this.values = this.values.map((v) => v + 1);
 		}
-		@children get c() {
+		@child get c() {
 			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
@@ -285,7 +282,7 @@ test("child stores are reactive", () => {
 		add() {
 			this.values.push(this.values.length);
 		}
-		@children get c() {
+		@child get c() {
 			return this.values.map((value) => createStore(C, { value }));
 		}
 	}
@@ -312,7 +309,7 @@ test("child stores with keys", () => {
 	}
 	class S extends Store<any> {
 		@observable keys = [1, 2, 3];
-		@children get cs() {
+		@child get cs() {
 			return this.keys.map((value) => createStore(C, { value, key: value }));
 		}
 		reverse() {
@@ -340,7 +337,8 @@ test("props are reactive", () => {
 	let propsCounter = 0;
 
 	class S extends Store<any> {
-		@observable value = 0;
+		@observable
+		value = 0;
 
 		inc() {
 			this.value++;
@@ -868,7 +866,7 @@ describe("store context", () => {
 				return this.theme;
 			}
 
-			@children
+			@child
 			get cs() {
 				return this.items.map(() => createStore(ChildStore));
 			}
