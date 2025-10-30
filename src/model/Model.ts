@@ -3,6 +3,15 @@ import { Configuration, ModelConfiguration, Snapshot } from "../types";
 import { createObservableWithCustomAdministration } from "../observables";
 
 let initEnabled = false;
+
+type ExtractModelDidInitArgs<T extends Model> = T extends {
+	modelDidInit(...args: infer Args): unknown;
+}
+	? Args extends [infer Snapshot, ...infer Rest]
+		? Rest
+		: []
+	: [];
+
 export default class Model {
 	static get types(): ModelConfiguration<unknown> {
 		return (this as any)[Symbol.metadata];
@@ -13,7 +22,7 @@ export default class Model {
 	static create<T extends Model = Model>(
 		this: { new (...args: unknown[]): T },
 		snapshot?: Snapshot<T>,
-		...args: unknown[]
+		...args: ExtractModelDidInitArgs<T>
 	): T {
 		let instance: T;
 		try {
