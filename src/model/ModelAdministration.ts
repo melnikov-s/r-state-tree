@@ -246,15 +246,24 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private setModel(name: PropertyKey, newModel: Model | null): void {
-		const oldModel = this.getModel(name) as Model | null;
+		const currentValue = this.proxy[name];
 
-		if (oldModel === newModel) {
+		if (currentValue === newModel) {
 			return;
 		}
 
 		this.activeModels.add(name);
-		if (oldModel) {
-			getModelAdm(oldModel).detach();
+
+		// Handle switching from array to single: clean up the array first
+		if (Array.isArray(currentValue)) {
+			const oldModels = currentValue as Model[];
+			oldModels.forEach((child) => getModelAdm(child).detach());
+			// Unsub from model trace if it exists
+			this.modelsTraceUnsub.get(name)?.();
+			this.modelsTraceUnsub.delete(name);
+		} else if (currentValue) {
+			// Handle normal single model replacement
+			getModelAdm(currentValue).detach();
 		}
 
 		if (newModel) {
@@ -271,23 +280,29 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 		newModels.push(...newModelsSource);
 
-		const oldModels = this.getModels(name) ?? [];
+		const currentValue = this.proxy[name];
 
-		if (oldModels === newModels) {
+		if (currentValue === newModels) {
 			return;
 		}
 
-		const oldModelSet = new Set(oldModels);
-		const newModelSet = new Set(newModels);
-
 		this.activeModels.add(name);
 
-		oldModels.forEach(
-			(child) => newModelSet.has(child) || getModelAdm(child).detach()
-		);
+		// Handle switching from single to array: clean up the single model first
+		if (currentValue && !Array.isArray(currentValue)) {
+			getModelAdm(currentValue).detach();
+		} else if (Array.isArray(currentValue)) {
+			// Handle normal array replacement
+			const oldModels = currentValue as Model[];
+			const newModelSet = new Set(newModels);
 
-		// unsub from old model trace
-		this.modelsTraceUnsub.get(name)?.();
+			oldModels.forEach(
+				(child) => newModelSet.has(child) || getModelAdm(child).detach()
+			);
+
+			// unsub from old model trace
+			this.modelsTraceUnsub.get(name)?.();
+		}
 
 		// set the model on the observable proxy
 		PreactObjectAdministration.proxyTraps.set!(
@@ -313,23 +328,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		);
 
 		newModels.forEach((child) => {
+			const oldModelSet = Array.isArray(currentValue)
+				? new Set(currentValue as Model[])
+				: new Set();
 			if (!oldModelSet.has(child)) {
 				const internalModel = getModelAdm(child);
 				internalModel.attach(this, name);
 			}
 		});
-	}
-
-	private getModel(name: PropertyKey): Model | undefined {
-		const model = this.proxy[name];
-
-		return (model as Model) ?? null;
-	}
-
-	private getModels(name: PropertyKey): Model[] {
-		const model = this.proxy[name];
-
-		return (model ?? []) as Model[];
 	}
 
 	private getModelRef(name: PropertyKey): Model | undefined {

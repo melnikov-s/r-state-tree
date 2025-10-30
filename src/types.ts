@@ -58,14 +58,22 @@ export type Configuration<T> = ModelConfiguration<T> | StoreConfiguration<T>;
 // Don't evaluate property types to avoid circular references
 // Snapshot types are primarily for documentation - actual snapshot logic
 // uses the configuration object, not TypeScript types
+type SnapshotValue<T> = T extends Model
+	? Snapshot<T>
+	: T extends Array<infer R>
+	? R extends Model
+		? Array<Snapshot<R>>
+		: T
+	: T;
+
 export type Snapshot<T extends Model = Model> = {
-	[K in keyof T]?: T[K] extends Model
-		? Snapshot<T[K]>
-		: T[K] extends Array<infer R>
-		? R extends Model
-			? Array<Snapshot<R>>
-			: T[K]
-		: T[K] | null;
+	[K in keyof T]?: T[K] extends infer U
+		? U extends Model | Model[]
+			? SnapshotValue<U> | null
+			: U extends null | undefined
+			? null
+			: SnapshotValue<Exclude<U, null | undefined>> | null
+		: never;
 };
 
 export type SnapshotDiff<T extends Model = Model> = {
