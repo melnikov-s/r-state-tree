@@ -51,15 +51,15 @@ updateStore(app.todo, { title: "Ship release" });
 
 ### Child stores
 
-Use `@child` for single child stores and `@children` for arrays.
+Use `@child` for both single child stores and arrays.
 
 ```ts
-import { child, children } from "r-state-tree";
+import { child } from "r-state-tree";
 
 class ListStore extends Store {
 	items = ["Buy milk", "Walk dog"];
 
-	@children get todos() {
+	@child get todos() {
 		return this.items.map((title, i) =>
 			createStore(TodoStore, { title, key: i })
 		);
@@ -220,20 +220,38 @@ todo.title = "Learn r-state-tree";
 stop();
 ```
 
+### Model lifecycle hooks
+
+Models support lifecycle methods:
+
+```ts
+class TodoModel extends Model {
+	@child tags: TagModel[] = [];
+
+	modelDidInit(snapshot?, ...args: unknown[]) {
+		// Called when model is created via Model.create()
+		// Receives the snapshot and any additional arguments passed to create()
+		console.log("Model initialized", snapshot);
+	}
+
+	modelDidAttach() {
+		// Called when this model is attached as a child to another model
+		console.log("Model attached to parent");
+	}
+
+	modelWillDetach() {
+		// Called when this model is detached from its parent
+		console.log("Model will be detached");
+	}
+}
+```
+
 ### Model decorators
 
 Use decorators to configure model properties:
 
 ```ts
-import {
-	Model,
-	state,
-	identifier,
-	child,
-	children,
-	modelRef,
-	modelRefs,
-} from "r-state-tree";
+import { Model, state, identifier, child, modelRef } from "r-state-tree";
 
 class User extends Model {
 	@identifier id = 0;
@@ -245,19 +263,29 @@ class TodoModel extends Model {
 	@state title = "";
 	@modelRef assignee?: User; // Reference to another model by ID
 	@child metadata = MetadataModel.create(); // Nested child model
-	@children tags: TagModel[] = []; // Array of child models
+	@child tags: TagModel[] = []; // Array of child models
+}
+```
+
+The `@child` and `@modelRef` decorators support both single values and arrays. You can also specify the child type using `@child(ChildType)`:
+
+```ts
+class TodoModel extends Model {
+	@child(TagModel) tags: TagModel[] = []; // Type-safe array of child models
+	@child(TagModel) primaryTag: TagModel | null = null; // Can switch between single and array at runtime
 }
 ```
 
 ### Model references
 
-Reference models by ID using `@modelRef` and `@modelRefs`:
+Reference models by ID using `@modelRef`:
 
 ```ts
 class ProjectModel extends Model {
 	@identifier id = 0;
-	@children users: User[] = [];
-	@modelRef owner?: User;
+	@child users: User[] = [];
+	@modelRef owner?: User; // Single reference
+	@modelRef assignees: User[] = []; // Array of references
 
 	assignOwner(userId: number) {
 		// Find user by ID and set as owner
@@ -276,6 +304,30 @@ const project = ProjectModel.create({
 });
 
 project.owner?.name; // "Alice"
+```
+
+Both `@child` and `@modelRef` support runtime type switching between single values and arrays:
+
+```ts
+class ItemModel extends Model {
+	@identifier id = 0;
+	@state value = 0;
+}
+
+class ContainerModel extends Model {
+	@child(ItemModel) items: ItemModel | ItemModel[]; // Can be single or array
+
+	setSingle() {
+		this.items = ItemModel.create({ id: 1, value: 10 });
+	}
+
+	setArray() {
+		this.items = [
+			ItemModel.create({ id: 2, value: 20 }),
+			ItemModel.create({ id: 3, value: 30 }),
+		];
+	}
+}
 ```
 
 ### Snapshot diffs

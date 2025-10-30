@@ -60,6 +60,33 @@ describe("model lifecylce", () => {
 		expect(m.count).toBe(1);
 	});
 
+	test("modelDidInit is executed in an action", () => {
+		class M extends Model {
+			@state count = 0;
+			modelDidInit() {
+				this.count++;
+			}
+		}
+
+		const m = M.create();
+		expect(m.count).toBe(1);
+	});
+
+	test("modelDidInit can be called without snapshot", () => {
+		let called = false;
+		class M extends Model {
+			@state prop = 0;
+			modelDidInit(snapshot) {
+				expect(snapshot).toBe(undefined);
+				called = true;
+			}
+		}
+
+		const m = M.create();
+		expect(called).toBe(true);
+		expect(m.prop).toBe(0);
+	});
+
 	test("will call modelDidAttach when children are attached", () => {
 		let count = 0;
 
@@ -106,6 +133,42 @@ describe("model lifecylce", () => {
 		expect(count).toBe(1);
 		m.addCM();
 		expect(count).toBe(2);
+	});
+
+	test("will call modelDidAttach when model is initialized as a child", () => {
+		let attachCount = 0;
+
+		class CM extends Model {
+			modelDidAttach() {
+				attachCount++;
+			}
+		}
+
+		class M extends Model {
+			@child cm: CM = CM.create();
+		}
+
+		const m = M.create();
+		expect(attachCount).toBe(1);
+		expect(m.cm).toBeInstanceOf(CM);
+	});
+
+	test("will call modelDidAttach when model is initialized as a child (array)", () => {
+		let attachCount = 0;
+
+		class CM extends Model {
+			modelDidAttach() {
+				attachCount++;
+			}
+		}
+
+		class M extends Model {
+			@child cms: CM[] = [CM.create(), CM.create()];
+		}
+
+		const m = M.create();
+		expect(attachCount).toBe(2);
+		expect(m.cms.length).toBe(2);
 	});
 
 	test("will call modelWillDetach when children are detached", () => {
@@ -181,6 +244,49 @@ describe("model lifecylce", () => {
 		expect(count).toBe(2);
 		m.reverse();
 		expect(count).toBe(2);
+	});
+
+	test("modelDidAttach is executed in an action", () => {
+		class CM extends Model {
+			@state count = 0;
+			modelDidAttach() {
+				this.count++;
+			}
+		}
+
+		class M extends Model {
+			@child cm: CM;
+			setCM() {
+				this.cm = CM.create();
+			}
+		}
+
+		const m = M.create();
+		m.setCM();
+		expect(m.cm.count).toBe(1);
+	});
+
+	test("modelWillDetach is executed in an action", () => {
+		class CM extends Model {
+			@state count = 0;
+			modelWillDetach() {
+				this.count++;
+			}
+		}
+
+		class M extends Model {
+			@child cm: CM = CM.create();
+			_temp: CM;
+			clearCM() {
+				this._temp = this.cm;
+				this.cm = null;
+			}
+		}
+
+		const m = M.create();
+		expect(m.cm.count).toBe(0);
+		m.clearCM();
+		expect(m._temp.count).toBe(1);
 	});
 });
 

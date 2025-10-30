@@ -4,6 +4,7 @@ import {
 	child,
 	createStore,
 	mount,
+	unmount,
 	Model,
 	model,
 	updateStore,
@@ -388,6 +389,35 @@ test("storeDidMount is executed in an action", () => {
 
 	let s;
 	expect(() => (s = mount(createStore(S)))).not.toThrow();
+	expect(s.count).toBe(1);
+});
+
+test("will call `storeWillUnmount` when a root store unmounts", () => {
+	let count = 0;
+
+	class S extends Store<any> {
+		storeWillUnmount() {
+			count++;
+		}
+	}
+
+	const s = mount(createStore(S));
+	expect(count).toBe(0);
+	unmount(s);
+	expect(count).toBe(1);
+});
+
+test("storeWillUnmount is executed in an action", () => {
+	class S extends Store<any> {
+		@observable count = 0;
+		storeWillUnmount() {
+			this.count++;
+		}
+	}
+
+	const s = mount(createStore(S));
+	expect(s.count).toBe(0);
+	unmount(s);
 	expect(s.count).toBe(1);
 });
 

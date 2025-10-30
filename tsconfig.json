@@ -16,7 +16,7 @@
 		"strictNullChecks": true,
 		"strictFunctionTypes": true,
 		"declaration": true,
-		"declarationDir": "./lib",
+		"declarationDir": "./dist",
 		"outDir": "./dist",
 		"moduleResolution": "Node",
 		"skipLibCheck": true

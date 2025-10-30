@@ -19,9 +19,21 @@ export function allowNewStore<T>(fn: () => T): T {
 	}
 }
 
+type CreateStoreProps<T extends Props> = {
+	[K in keyof T as undefined extends T[K] ? K : never]?: T[K] extends infer U
+		? U extends undefined
+			? never
+			: undefined extends U
+			? U | undefined
+			: U
+		: never;
+} & {
+	[K in keyof T as undefined extends T[K] ? never : K]?: T[K];
+} & Pick<Props, 'key'>;
+
 export function createStore<K extends Store<T>, T extends Props>(
 	Type: new (props: T) => K,
-	props?: T
+	props?: CreateStoreProps<T>
 ): K {
 	return {
 		Type,
@@ -32,7 +44,7 @@ export function createStore<K extends Store<T>, T extends Props>(
 
 export function updateStore<K extends Store<T>, T extends Props>(
 	store: K,
-	props: T
+	props: CreateStoreProps<T>
 ): K {
 	updateProps(store.props, props);
 
