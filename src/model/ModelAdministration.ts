@@ -4,11 +4,11 @@ import {
 	PreactObjectAdministration,
 	getSource,
 	ComputedNode,
-	runInBatch,
+	batch,
 	createComputed,
 	AtomNode,
 	createAtom,
-	createReaction,
+	reaction,
 } from "../observables";
 import Model from "../model/Model";
 import {
@@ -419,14 +419,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			this.parentName = parentName;
 		}
 
-		runInBatch(() => {
+		batch(() => {
 			onModelAttached(this.proxy);
 			this.proxy.modelDidAttach();
 		});
 	}
 
 	private detach(): void {
-		runInBatch(() => {
+		batch(() => {
 			this.proxy.modelWillDetach();
 			onModelDetached(this.proxy);
 		});
@@ -540,7 +540,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	onSnapshotChange(onChange: SnapshotChange<any>): () => void {
-		return createReaction(
+		return reaction(
 			() => this.getSnapshot(),
 			(snapshot) => onChange(snapshot, this.proxy)
 		);

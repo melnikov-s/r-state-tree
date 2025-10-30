@@ -1,4 +1,4 @@
-import { AtomNode, createAtom, runInBatch } from "./preact";
+import { AtomNode, createAtom, batch } from "./preact";
 import {
 	getAdministration,
 	getObservable,
@@ -275,7 +275,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 	}
 
 	onArrayChanged(lengthChanged = false, index?: number, count?: number): void {
-		runInBatch(() => {
+		batch(() => {
 			if (lengthChanged) {
 				this.keysAtom.reportChanged();
 			}

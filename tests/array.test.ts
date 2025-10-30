@@ -1,10 +1,10 @@
 import {
 	isObservable,
-	createReaction,
-	createComputed,
+	reaction,
+	computed,
 	source,
 	observable,
-	createEffect,
+	effect,
 } from "../src";
 
 const array = (obj: any[] = []): any[] => {
@@ -60,7 +60,7 @@ test("sort parameters are observable", () => {
 		const arrB = array([{}, lookup, frozen]);
 		const arrC = array([observedLookup]);
 
-		createEffect(() => {
+		effect(() => {
 			count++;
 			expect(arrA[method](lookup)).not.toBe(negativeValue);
 			expect(arrA[method](observedLookup)).not.toBe(negativeValue);
@@ -85,7 +85,7 @@ test("sort parameters are observable", () => {
 		const arr = array([1, 2, 3]);
 		const realArr = [1, 2, 3];
 
-		createEffect(() => {
+		effect(() => {
 			count++;
 
 			expect(arr[method]("en")).toBe(realArr[method]("en"));
@@ -103,7 +103,7 @@ test("sort parameters are observable", () => {
 		const realArr = [[{}], 2, 3, 4];
 		const arr = array([[{}], 2, 3, 4]);
 
-		createEffect(() => {
+		effect(() => {
 			count++;
 			const result = arr[method]();
 
@@ -134,7 +134,7 @@ test("sort parameters are observable", () => {
 		const arr = array([{}, {}, {}]);
 		const context = {};
 
-		createEffect(() => {
+		effect(() => {
 			let ran = false;
 			count++;
 
@@ -172,7 +172,7 @@ test("sort parameters are observable", () => {
 		let count = 0;
 		const arr = array([{}, {}, {}]);
 
-		createEffect(() => {
+		effect(() => {
 			let ran = false;
 			count++;
 
@@ -225,7 +225,7 @@ test("can observe a single index", () => {
 	const ar = array([0, 1]);
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		ar[0];
 	});
@@ -254,7 +254,7 @@ test("can observe multiple indices", () => {
 	const maxIndex = 5;
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		for (let i = 0; i <= maxIndex; i++) {
 			ar[i];
@@ -283,7 +283,7 @@ test("Array.prototype.reverse", () => {
 	const maxIndex = 5;
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		for (let i = 0; i <= maxIndex; i++) {
 			ar[i];
@@ -303,7 +303,7 @@ test("Array.length", () => {
 	const ar = array([0, 0, 0, 0, 0, 0]);
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		ar.length;
 	});
@@ -331,7 +331,7 @@ test("[mobx-test] basic functionality", function () {
 	expect(a.length).toBe(2);
 	expect(a.slice()).toEqual([1, 2]);
 
-	const sum = createComputed(function () {
+	const sum = computed(function () {
 		return (
 			-1 +
 			a.reduce(function (a, b) {
@@ -340,30 +340,30 @@ test("[mobx-test] basic functionality", function () {
 		);
 	});
 
-	expect(sum.get()).toBe(3);
+	expect(sum.value).toBe(3);
 
 	a[1] = 3;
 	expect(a.length).toBe(2);
 	expect(a.slice()).toEqual([1, 3]);
-	expect(sum.get()).toBe(4);
+	expect(sum.value).toBe(4);
 
 	a.splice(1, 1, 4, 5);
 	expect(a.length).toBe(3);
 	expect(a.slice()).toEqual([1, 4, 5]);
-	expect(sum.get()).toBe(10);
+	expect(sum.value).toBe(10);
 
 	a.splice(1, 1);
-	expect(sum.get()).toBe(6);
+	expect(sum.value).toBe(6);
 	expect(a.slice()).toEqual([1, 5]);
 
 	a.length = 4;
-	expect(isNaN(sum.get())).toBe(true);
+	expect(isNaN(sum.value)).toBe(true);
 	expect(a.length).toEqual(4);
 
 	expect(a.slice()).toEqual([1, 5, undefined, undefined]);
 
 	a.length = 2;
-	expect(sum.get()).toBe(6);
+	expect(sum.value).toBe(6);
 	expect(a.slice()).toEqual([1, 5]);
 
 	expect(a.slice().reverse()).toEqual([5, 1]);
@@ -501,7 +501,7 @@ test("[mobx-test] stringifies same as ecma array", function () {
 test("[mobx-test] observes when stringified", function () {
 	const x = array([]);
 	let c = 0;
-	createEffect(function () {
+	effect(function () {
 		x.toString();
 		c++;
 	});
@@ -512,7 +512,7 @@ test("[mobx-test] observes when stringified", function () {
 test("[mobx-test] observes when stringified to locale", function () {
 	const x = array([]);
 	let c = 0;
-	createEffect(function () {
+	effect(function () {
 		x.toLocaleString();
 		c++;
 	});
@@ -522,13 +522,13 @@ test("[mobx-test] observes when stringified to locale", function () {
 
 test("[mobx-test] react to sort changes", function () {
 	const x = array([4, 2, 3]);
-	const sortedX = createComputed(function () {
+	const sortedX = computed(function () {
 		return x.slice().sort();
 	});
 	let sorted;
 
-	createEffect(function () {
-		sorted = sortedX.get();
+	effect(function () {
+		sorted = sortedX.value;
 	});
 
 	expect(x.slice()).toEqual([4, 2, 3]);
@@ -544,7 +544,7 @@ test("[mobx-test] react to sort changes", function () {
 test("[mobx-test] autoextend buffer length", function () {
 	const ar = array(new Array(1000));
 	let changesCount = 0;
-	createEffect(() => {
+	effect(() => {
 		ar.length;
 		++changesCount;
 	});
@@ -566,7 +566,7 @@ test("[mobx-test] array exposes correct keys", () => {
 test("[mobx-test] can iterate arrays", () => {
 	const x = array([]);
 	const y = [];
-	const d = createReaction(
+	const d = reaction(
 		() => Array.from(x),
 		(items) => y.push(items)
 	);
@@ -606,7 +606,7 @@ test("[mobx-test] slice works", () => {
 test("[mobx-test] slice is reactive", () => {
 	const a = array([1, 2, 3]);
 	let ok = false;
-	createReaction(
+	reaction(
 		() => a.slice().length,
 		(l) => l === 4 && (ok = true)
 	);
@@ -641,7 +641,7 @@ test("[mobx-test] symbol key on array", () => {
 	expect(x[s]).toBe(3);
 
 	let reacted = false;
-	const d = createReaction(
+	const d = reaction(
 		() => x[s],
 		() => {
 			reacted = true;
@@ -663,7 +663,7 @@ test("[mobx-test] non-symbol key on array", () => {
 	expect(x[s]).toBe(3);
 
 	let reacted = false;
-	const d = createReaction(
+	const d = reaction(
 		() => x[s],
 		() => {
 			reacted = true;

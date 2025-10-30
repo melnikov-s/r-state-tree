@@ -33,15 +33,14 @@ export {
 	reportObserved,
 	getSignal,
 	isObservable,
-	createSignal,
-	createAtom,
-	createComputed,
-	createReaction,
-	createListener,
-	runInBatch,
-	runInUntracked,
-	createEffect,
+	reaction,
+	Signal,
+	ReadonlySignal,
+	batch,
+	untracked,
+	effect,
 	Observable,
+	signal,
 } from "./observables";
 
 export * from "./decorators";

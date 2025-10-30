@@ -1,4 +1,4 @@
-import { observable, createEffect } from "../src";
+import { observable, effect } from "../src";
 
 test("date methods return values", () => {
 	const now = new Date().getMonth();
@@ -12,7 +12,7 @@ test("date methods are reactive", () => {
 
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		d.getDate();
 		count++;
 	});

@@ -7,8 +7,8 @@ import {
 	Model,
 	model,
 	updateStore,
-	createReaction,
-	createEffect,
+	reaction,
+	effect,
 	observable,
 	computed,
 	createContext,
@@ -172,7 +172,7 @@ test("child stores are reactive", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	createEffect(() => {
+	effect(() => {
 		s.c.length;
 		count++;
 	});
@@ -204,7 +204,7 @@ test("child store can be retrieved during an action", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	createEffect(() => {
+	effect(() => {
 		s.c;
 	});
 
@@ -233,7 +233,7 @@ test("children stores can be retrieved during an action", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	createEffect(() => {
+	effect(() => {
 		s.c.length;
 	});
 
@@ -260,7 +260,7 @@ test("child stores do not trigger listeners when only props change", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	createEffect(() => {
+	effect(() => {
 		s.c.length;
 		count++;
 	});
@@ -290,7 +290,7 @@ test("child stores are reactive", () => {
 	let count = 0;
 	const s = mount(createStore(S));
 
-	createEffect(() => {
+	effect(() => {
 		s.c.length;
 		count++;
 	});
@@ -321,7 +321,7 @@ test("child stores with keys", () => {
 	const stores = s.cs.slice();
 	expect(stores.length).toBe(3);
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		count++;
 		s.cs;
 	});
@@ -418,8 +418,8 @@ test("when props change only those computed methods that are directly affected a
 	let count = 0;
 	const s = mount(createStore(S));
 	let result;
-	createEffect(() => (result = s.c.value));
-	createEffect(() => {
+	effect(() => (result = s.c.value));
+	effect(() => {
 		s.c.values;
 		count++;
 	});
@@ -554,13 +554,13 @@ test("models on the store are reactive", () => {
 	const m2 = M2.create();
 	const s = mount(createStore(S, { models: { m1, m2 } }));
 
-	createReaction(
+	reaction(
 		() => s.cs.m,
 		() => count++
 	);
 
 	// should never trigger
-	createReaction(
+	reaction(
 		() => s.cs.models,
 		() => count++
 	);
@@ -585,7 +585,7 @@ test("can setup a reaction in a store", () => {
 		unsub;
 
 		storeDidMount() {
-			this.unsub = this.createReaction(
+			this.unsub = this.reaction(
 				() => this.prop,
 				() => this.count++
 			);
@@ -609,7 +609,7 @@ test("can setup a reaction in a store", () => {
 test("reaction in a store will auto unsub after store is unmounted ", () => {
 	class C extends Store<any> {
 		storeDidMount() {
-			this.createReaction(
+			this.reaction(
 				() => this.props.prop,
 				() => this.props.countUp()
 			);
@@ -837,7 +837,7 @@ describe("store context", () => {
 
 		const parent = mount(createStore(ParentStore));
 
-		createEffect(() => {
+		effect(() => {
 			parent.c.theme;
 			count++;
 		});
@@ -1048,7 +1048,7 @@ describe("store context", () => {
 
 		const parent = mount(createStore(ParentStore));
 
-		createReaction(
+		reaction(
 			() => parent.c.theme,
 			(theme) => {
 				currentTheme = theme;

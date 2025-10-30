@@ -90,7 +90,7 @@ Create side effects that run when reactive values change:
 ```ts
 class TodoStore extends Store {
 	storeDidMount() {
-		this.createReaction(
+		this.reaction(
 			() => this.props.title,
 			(title) => console.log("Title changed:", title)
 		);
@@ -133,12 +133,12 @@ Context is reactive and updates automatically when the provided value changes.
 
 ### Actions and batching
 
-`runInBatch` groups updates to avoid redundant reactions.
+`batch` groups updates to avoid redundant reactions.
 
 ```ts
-import { runInBatch } from "r-state-tree";
+import { batch } from "r-state-tree";
 
-runInBatch(() => {
+batch(() => {
 	app.todo.props.title = "Refactor";
 });
 ```
@@ -148,7 +148,7 @@ runInBatch(() => {
 For reactive class instances outside the Model/Store system, use `@observable` and `@computed` decorators:
 
 ```ts
-import { Observable, observable, computed, createEffect } from "r-state-tree";
+import { Observable, observable, computed, effect } from "r-state-tree";
 
 class Counter extends Observable {
 	@observable count = 0;
@@ -165,7 +165,7 @@ class Counter extends Observable {
 
 const counter = new Counter();
 
-createEffect(() => {
+effect(() => {
 	console.log("Count:", counter.count, "Doubled:", counter.doubled);
 });
 
@@ -179,11 +179,11 @@ counter.increment(); // Triggers the effect
 Plain objects wrapped with `observable()` use implicit reactivity for backward compatibility:
 
 ```ts
-import { observable, createEffect } from "r-state-tree";
+import { observable, effect } from "r-state-tree";
 
 const state = observable({ count: 0 });
 
-createEffect(() => {
+effect(() => {
 	console.log(state.count); // All properties are reactive
 });
 

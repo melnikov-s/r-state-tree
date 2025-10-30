@@ -1,8 +1,8 @@
 import {
-	createEffect,
-	createReaction,
+	effect,
+	reaction,
 	observable,
-	runInBatch,
+	batch,
 	source,
 	reportChanged,
 	isObservable,
@@ -57,7 +57,7 @@ test("getters on the object become computed", () => {
 		},
 	});
 
-	createEffect(() => o.comp);
+	effect(() => o.comp);
 	expect(o.comp).toBe(2);
 	expect(count).toBe(1);
 	o.prop++;
@@ -96,7 +96,7 @@ test("observable objects are deeply observed", () => {
 
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		o.obj.prop;
 		o.arr.length;
 		"objB" in o && "obj" in o.objB && o.objB.obj.prop;
@@ -119,7 +119,7 @@ test("does not respond to no-op", () => {
 	let count = 0;
 	const x = object({});
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		return x.x;
 	});
@@ -148,7 +148,7 @@ test("action can turn into observable", () => {
 	let count = 0;
 	const o = object({ v() {} });
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		return o.v;
 	});
@@ -164,7 +164,7 @@ test("observable can turn into action", () => {
 	const o = object({ v: 0 });
 	const o2 = object({ v: 0 });
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		return o.v + o2.v;
 	});
@@ -182,7 +182,7 @@ test("action can turn into observable (source)", () => {
 	let count = 0;
 	const o = object({ v() {} });
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		return o.v;
 	});
@@ -197,7 +197,7 @@ test("observable can turn into action (source)", () => {
 	const o = object({ v: 0 });
 	const o2 = object({ v: 0 });
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		return o.v + o2.v;
 	});
@@ -217,12 +217,12 @@ test("[mobx-test] keys should be observable when extending", () => {
 	const todos = object({});
 
 	const todoTitles = [];
-	createReaction(
+	reaction(
 		() => Object.keys(todos).map((key) => `${key}: ${todos[key]}`),
 		(titles) => todoTitles.push(titles.join(","))
 	);
 
-	runInBatch(() => {
+	batch(() => {
 		Object.assign(todos, {
 			lewis: "Read Lewis",
 			chesterton: "Be mind blown by Chesterton",
@@ -245,7 +245,7 @@ test("[mobx-test] object - set, remove, values are reactive", () => {
 	const todos = object({});
 	const snapshots = [];
 
-	createReaction(
+	reaction(
 		() => Object.values(todos),
 		(values) => snapshots.push(values)
 	);
@@ -267,7 +267,7 @@ test("[mobx-test] object - set, remove, entries are reactive", () => {
 	const todos = object({});
 	const snapshots = [];
 
-	createReaction(
+	reaction(
 		() => Object.entries(todos),
 		(entries) => snapshots.push(entries)
 	);
@@ -300,7 +300,7 @@ test("[mobx-test] object - set, remove, keys are reactive", () => {
 	const todos = object({ a: 3 });
 	const snapshots = [];
 
-	createReaction(
+	reaction(
 		() => Object.keys(todos),
 		(keys) => snapshots.push(keys)
 	);
@@ -319,14 +319,14 @@ test("[mobx-test] has and get are reactive", async () => {
 	const todos = object({});
 	let count = 0;
 
-	createReaction(
+	reaction(
 		() => {
 			return "x" in todos;
 		},
 		(b) => b && count++
 	);
 
-	createReaction(
+	reaction(
 		() => {
 			return todos.y === 3;
 		},
@@ -357,7 +357,7 @@ test("[mobx-test] delete and undelete should work", () => {
 	const x = object({});
 
 	const events = [];
-	createEffect(() => {
+	effect(() => {
 		events.push("a" in x);
 	});
 
@@ -377,7 +377,7 @@ test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 
 		z: 1,
 	});
 
-	createReaction(
+	reaction(
 		() => Object.keys(x),
 		(keys) => events.push(keys.join(","))
 	);
@@ -398,7 +398,7 @@ test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 
 		z: 1,
 	});
 
-	createReaction(
+	reaction(
 		() => x.z,
 		(v) => events.push(v)
 	);
@@ -414,7 +414,7 @@ test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 
 		z: undefined,
 	});
 
-	createReaction(
+	reaction(
 		() => x.z,
 		(v) => events.push(v)
 	);
@@ -427,7 +427,7 @@ test("[mobx-test] should react to future key additions - 1", () => {
 	const events = [];
 	const x = object({});
 
-	createReaction(
+	reaction(
 		() => Object.keys(x),
 		(keys) => events.push(keys.join(","))
 	);
@@ -440,7 +440,7 @@ test("[mobx-test] should react to future key additions - 2", () => {
 	const events = [];
 	const x = object({});
 
-	createReaction(
+	reaction(
 		() => {
 			return x.z;
 		},
@@ -550,7 +550,7 @@ test("[mobx-test] adding a different key doesn't trigger a pending key", () => {
 	const x = object({});
 	let counter = 0;
 
-	createEffect(() => {
+	effect(() => {
 		x.x;
 		counter++;
 	});
@@ -570,7 +570,7 @@ test("[mobx-test] deleting / recreate prop", () => {
 
 	const events = [];
 
-	createEffect(() => {
+	effect(() => {
 		events.push(value.foo);
 	});
 	delete value.foo;

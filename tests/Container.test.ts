@@ -3,8 +3,8 @@ import {
 	Store,
 	mount,
 	createStore,
-	createReaction,
-	createEffect,
+	reaction,
+	effect,
 	observable,
 	computed,
 } from "../src/index";
@@ -167,7 +167,7 @@ export function createContainer<
 		}
 
 		const m = createContainer(M);
-		createReaction(
+		reaction(
 			() => m.state,
 			() => count++
 		);
@@ -192,7 +192,7 @@ export function createContainer<
 		}
 
 		const m = createContainer(M);
-		createReaction(
+		reaction(
 			() => m.twiceState,
 			() => count++
 		);
@@ -224,7 +224,7 @@ export function createContainer<
 
 		const s = createContainer(S);
 		expect(s.value).toBe(0);
-		createEffect(() => s.value);
+		effect(() => s.value);
 		const w = s.inc();
 		expect(s.value).toBe(1);
 		expect(s.result).toBe(null);

@@ -1,10 +1,4 @@
-import {
-	createEffect,
-	observable,
-	Observable,
-	isObservable,
-	computed,
-} from "../src";
+import { effect, observable, Observable, isObservable, computed } from "../src";
 
 test("objects created from class return `false` from `isObservable`", () => {
 	class C extends Observable {}
@@ -21,7 +15,7 @@ test("objects create from class have observable properties", () => {
 	const o = new C();
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		o.value;
 		count++;
 	});
@@ -55,7 +49,7 @@ test("object methods are observable", () => {
 	const o = new C();
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		o.readValue();
 		count++;
 	});
@@ -82,7 +76,7 @@ test("object getters and setters on same property", () => {
 	const o = new C();
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		o.values;
 		count++;
 	});
@@ -116,7 +110,7 @@ test("object getters are observable", () => {
 	const o = new C();
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		o.readValue;
 		count++;
 	});

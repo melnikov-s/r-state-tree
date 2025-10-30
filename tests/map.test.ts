@@ -1,10 +1,4 @@
-import {
-	createEffect,
-	observable,
-	createReaction,
-	source,
-	isObservable,
-} from "../src";
+import { effect, observable, reaction, source, isObservable } from "../src";
 
 const map = <K = any, V = any>(obj: Map<K, V> = new Map()): Map<K, V> => {
 	return observable(obj) as Map<K, V>;
@@ -31,7 +25,7 @@ test("map values are deeply observable", () => {
 	m.set(o, o);
 	expect(isObservable(m.get(o))).toBe(true);
 
-	createEffect(() => {
+	effect(() => {
 		m.get(o).prop;
 		count++;
 	});
@@ -164,7 +158,7 @@ test("WeakMap is reactive", () => {
 	const target = {};
 	let count = 0;
 
-	createEffect(() => {
+	effect(() => {
 		count++;
 		m.has(target);
 	});
@@ -199,7 +193,7 @@ test("does not trigger a change when same observable is set on map initialized w
 	);
 
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		m.forEach(() => {});
 		count++;
 	});
@@ -219,15 +213,15 @@ test("[mobx-test] observe value", function () {
 	let valueX = undefined;
 	let valueY = undefined;
 
-	createEffect(function () {
+	effect(function () {
 		hasX = a.has("x");
 	});
 
-	createEffect(function () {
+	effect(function () {
 		valueX = a.get("x");
 	});
 
-	createEffect(function () {
+	effect(function () {
 		valueY = a.get("y");
 	});
 
@@ -271,13 +265,13 @@ test("[mobx-test] observe collections", function () {
 	const x = map();
 	let ks, vs, entries;
 
-	createEffect(function () {
+	effect(function () {
 		ks = keys(x);
 	});
-	createEffect(function () {
+	effect(function () {
 		vs = iteratorToArray(x.values());
 	});
-	createEffect(function () {
+	effect(function () {
 		entries = iteratorToArray(x.entries());
 	});
 
@@ -335,7 +329,7 @@ test("[mobx-test] unobserve before delete", function () {
 		},
 	});
 	// the error only happens if the value is observed
-	createEffect(function () {
+	effect(function () {
 		values(myObservable.myMap).forEach(function (value) {
 			propValues.push(value.myCalculatedProp);
 		});
@@ -356,7 +350,7 @@ test("[mobx-test] has should not throw on invalid keys", function () {
 test("[mobx-test] map.clear should not be tracked", () => {
 	const x = map(new Map(Object.entries({ a: 3 })));
 	let c = 0;
-	createEffect(() => {
+	effect(() => {
 		c++;
 		x.clear();
 	});
@@ -416,7 +410,7 @@ test("[mobx-test] work with 'toString' key", () => {
 test("[mobx-test] can iterate maps", () => {
 	const x = map();
 	const y = [];
-	const d = createReaction(
+	const d = reaction(
 		() => Array.from(x),
 		(items) => y.push(items)
 	);
@@ -451,7 +445,7 @@ function iteratorToArray(it) {
 test("[mobx-test] can iterate map - entries", () => {
 	const x = map();
 	const y = [];
-	const d = createReaction(
+	const d = reaction(
 		() => iteratorToArray(x.entries()),
 		(items) => y.push(items)
 	);
@@ -473,7 +467,7 @@ test("[mobx-test] can iterate map - entries", () => {
 test("[mobx-test] can iterate map - keys", () => {
 	const x = map();
 	const y = [];
-	const d = createReaction(
+	const d = reaction(
 		() => iteratorToArray(x.keys()),
 		(items) => y.push(items)
 	);
@@ -488,7 +482,7 @@ test("[mobx-test] can iterate map - keys", () => {
 test("[mobx-test] can iterate map - values", () => {
 	const x = map();
 	const y = [];
-	const d = createReaction(
+	const d = reaction(
 		() => iteratorToArray(x.values()),
 		(items) => y.push(items)
 	);
@@ -530,7 +524,7 @@ test("[mobx-test] map.size is reactive", () => {
 	const m = map();
 	const sizes = [];
 
-	createEffect(() => {
+	effect(() => {
 		sizes.push(m.size);
 	});
 
@@ -543,7 +537,7 @@ test("[mobx-test] .forEach() subscribes for key changes", () => {
 	const m = map();
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		m.forEach(() => {});
 	});
@@ -559,7 +553,7 @@ test("[mobx-test] .keys() subscribes for key changes", () => {
 	const m = map();
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.keys()) {
@@ -577,7 +571,7 @@ test("[mobx-test] .values() subscribes for key changes", () => {
 	const m = map();
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.values()) {
@@ -595,7 +589,7 @@ test("[mobx-test] .entries() subscribes for key changes", () => {
 	const m = map();
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.entries()) {
@@ -619,7 +613,7 @@ test("[mobx-test] .entries() subscribes for value changes", () => {
 	);
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.entries()) {
@@ -643,7 +637,7 @@ test("[mobx-test] .values() subscribes for value changes", () => {
 	);
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.values()) {
@@ -667,7 +661,7 @@ test("[mobx-test] .forEach() subscribes for value changes", () => {
 	);
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		m.forEach(() => {});
 	});
@@ -689,7 +683,7 @@ test("[mobx-test] .keys() does NOT subscribe for value changes", () => {
 	);
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.keys()) {
@@ -713,7 +707,7 @@ test("[mobx-test] noop mutations do NOT reportChanges", () => {
 	);
 	let effectInvocationCount = 0;
 
-	createEffect(() => {
+	effect(() => {
 		effectInvocationCount++;
 		m.forEach(() => {});
 	});

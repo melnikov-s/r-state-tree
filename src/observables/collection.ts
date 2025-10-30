@@ -1,4 +1,4 @@
-import { AtomNode, createAtom, runInBatch } from "./preact";
+import { AtomNode, createAtom, batch } from "./preact";
 import {
 	getObservable,
 	getSource,
@@ -68,7 +68,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 	}
 
 	private onCollectionChange(key: K): void {
-		runInBatch(() => {
+		batch(() => {
 			this.keysAtom.reportChanged();
 			this.hasMap.reportChanged(key);
 			this.flushChange();
@@ -97,7 +97,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 	}
 
 	clear(): void {
-		runInBatch(() => {
+		batch(() => {
 			this.source.forEach((_, key) => this.delete(key));
 		});
 	}
@@ -229,7 +229,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 				? oldValue !== value
 				: oldValue !== targetValue
 		) {
-			runInBatch(() => {
+			batch(() => {
 				this.flushChange();
 				if (sourceMap.has(key)) {
 					sourceMap.set(key, targetValue);

@@ -1,7 +1,7 @@
 import {
 	AtomNode,
 	ComputedNode,
-	runInBatch,
+	batch,
 	createAtom,
 	createComputed,
 } from "./preact";
@@ -69,7 +69,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 		ownKeys(target) {
 			const adm = getAdministration(target);
-			runInBatch(() => {
+			batch(() => {
 				adm.keysAtom.reportObserved();
 				adm.atom.reportObserved();
 			});
@@ -91,7 +91,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	}
 
 	private set(key: PropertyKey, value: T[keyof T]): void {
-		runInBatch(() => {
+		batch(() => {
 			Reflect.set(this.source, key, value, this.proxy);
 		});
 	}
@@ -209,7 +209,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 		// if this property is a setter
 		if (type === "computed") {
-			runInBatch(() => this.set(key, newValue));
+			batch(() => this.set(key, newValue));
 			return;
 		}
 
@@ -232,7 +232,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		) {
 			this.set(key, targetValue);
 
-			runInBatch(() => {
+			batch(() => {
 				this.flushChange();
 				if (!had) {
 					this.keysAtom.reportChanged();
@@ -257,7 +257,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		if (!(key in this.source)) return;
 
 		delete this.source[key];
-		runInBatch(() => {
+		batch(() => {
 			this.flushChange();
 			this.valuesMap.reportChanged(key, undefined);
 			this.keysAtom.reportChanged();

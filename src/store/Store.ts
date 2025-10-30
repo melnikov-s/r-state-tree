@@ -76,8 +76,8 @@ export default class Store<PropsType extends Props = Props> {
 		return this.props.key;
 	}
 
-	createReaction<T>(track: () => T, callback: (a: T) => void): () => void {
-		return getStoreAdm(this).createReaction(track, callback);
+	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
+		return getStoreAdm(this).reaction(track, callback);
 	}
 
 	// eslint-disable-next-line @typescript-eslint/no-empty-function

@@ -1,6 +1,6 @@
 import {
 	observable,
-	createEffect,
+	effect,
 	source,
 	reportObserved,
 	reportChanged,
@@ -14,7 +14,7 @@ test("reportObserved returns observable", () => {
 test("reportObserved on object", () => {
 	const o = observable({ value: 1, newV: { value: 1 } });
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o);
 		count++;
 	});
@@ -30,7 +30,7 @@ test("reportObserved on object", () => {
 test("reportObserved on array", () => {
 	const o = observable([1, 2, 3]);
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o);
 		count++;
 	});
@@ -48,7 +48,7 @@ test("reportObserved on array", () => {
 test("reportObserved on map", () => {
 	const o = observable(new Map([[1, 1]]));
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o);
 		count++;
 	});
@@ -62,7 +62,7 @@ test("reportObserved on map", () => {
 test("reportObserved on set", () => {
 	const o = observable(new Set([1, 2, 3]));
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o);
 		count++;
 	});
@@ -87,7 +87,7 @@ test("reportObserved on object (deep)", () => {
 		},
 	});
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o, { deep: true });
 		count++;
 	});
@@ -112,7 +112,7 @@ test("reportObserved on object (not deep)", () => {
 		},
 	});
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o);
 		count++;
 	});
@@ -134,7 +134,7 @@ test("reportObserved on object (deep + circular ref)", () => {
 	observable(ref).ref = o.value;
 
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o, { deep: true });
 		count++;
 	});
@@ -155,7 +155,7 @@ test("reportObserved on map (deep)", () => {
 		])
 	);
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o, { deep: true });
 		count++;
 	});
@@ -175,7 +175,7 @@ test("reportObserved on set (deep)", () => {
 	const refB = observable({ value: 1 });
 	const o = observable(new Set([refA, refB].map(source)));
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o, { deep: true });
 		count++;
 	});
@@ -195,7 +195,7 @@ test("reportObserved on array (deep)", () => {
 	const refB = observable({ value: 1 });
 	const o = observable([refA, refB].map(source));
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		reportObserved(o, { deep: true });
 		count++;
 	});
@@ -213,7 +213,7 @@ test("reportObserved on array (deep)", () => {
 test("reportChanged on object", () => {
 	const o = observable({ value: 1 });
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		o.value;
 		count++;
 	});
@@ -225,7 +225,7 @@ test("reportChanged on object", () => {
 test("reportChanged on array", () => {
 	const o = observable([1, 2, 3]);
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		o.length;
 		count++;
 	});
@@ -237,7 +237,7 @@ test("reportChanged on array", () => {
 test("reportChanged on map", () => {
 	const o = observable(new Map());
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		o.has(1);
 		count++;
 	});
@@ -249,7 +249,7 @@ test("reportChanged on map", () => {
 test("reportChanged on set", () => {
 	const o = observable(new Set());
 	let count = 0;
-	createEffect(() => {
+	effect(() => {
 		o.has(1);
 		count++;
 	});

@@ -6,9 +6,9 @@ import {
 	createListener,
 	SignalNode,
 	ComputedNode,
-	createReaction,
-	runInBatch,
-	runInUntracked,
+	reaction,
+	batch,
+	untracked,
 	createComputed,
 } from "../observables";
 import Store, { allowNewStore } from "./Store";
@@ -23,8 +23,8 @@ import {
 import { getPropertyDescriptor } from "../utils";
 
 export function updateProps(props: Props, newProps: Props): void {
-	runInUntracked(() => {
-		runInBatch(() => {
+	untracked(() => {
+		batch(() => {
 			const propKeys = Object.keys(newProps);
 			propKeys.forEach((k) => {
 				if (k !== "models") {
@@ -123,9 +123,7 @@ export class StoreAdministration<
 		elements: Array<StoreElement | null>
 	): Store[] {
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		const oldStores = runInUntracked(() =>
-			childStoreData.value.get()
-		) as Store[];
+		const oldStores = untracked(() => childStoreData.value.get()) as Store[];
 		const stores: Store[] = [];
 		let keyedIndexChanged = false;
 
@@ -205,7 +203,7 @@ export class StoreAdministration<
 		});
 
 		if (newStores.size || removedStores.size || keyedIndexChanged) {
-			runInBatch(() => childStoreData.value.set(stores));
+			batch(() => childStoreData.value.set(stores));
 		}
 
 		removedStores.forEach((s) => getStoreAdm(s).unmount());
@@ -219,14 +217,14 @@ export class StoreAdministration<
 		element: StoreElement | null
 	): Store | null {
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		const oldStore = runInUntracked(() =>
+		const oldStore = untracked(() =>
 			childStoreData.value.get()
 		) as Store | null;
 		const { key, Type, props } = element || {};
 
 		if (!element) {
 			oldStore && getStoreAdm(oldStore).unmount();
-			runInBatch(() => childStoreData.value.set(null));
+			batch(() => childStoreData.value.set(null));
 			return null;
 		} else if (
 			!oldStore ||
@@ -238,11 +236,11 @@ export class StoreAdministration<
 			}
 
 			const childStore = this.createChildStore(element);
-			runInBatch(() => childStoreData.value.set(childStore));
+			batch(() => childStoreData.value.set(childStore));
 			getStoreAdm(childStore).mount(this);
 			return childStore;
 		} else {
-			runInBatch(() => updateProps(oldStore.props, props!));
+			batch(() => updateProps(oldStore.props, props!));
 			return oldStore;
 		}
 	}
@@ -292,7 +290,7 @@ export class StoreAdministration<
 		if (!childStoreData) {
 			return this.initializeStore(name);
 		} else {
-			const storeElement = runInUntracked(() => childStoreData.computed.get());
+			const storeElement = untracked(() => childStoreData.computed.get());
 			Array.isArray(storeElement)
 				? this.setStoreList(name, storeElement)
 				: this.setSingleStore(name, storeElement as StoreElement | null);
@@ -364,8 +362,8 @@ export class StoreAdministration<
 		return undefined as T;
 	}
 
-	createReaction<T>(track: () => T, callback: (a: T) => void): () => void {
-		const unsub = createReaction(track, callback);
+	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
+		const unsub = reaction(track, callback);
 		this.reactionsUnsub.push(unsub);
 		return unsub;
 	}
@@ -382,7 +380,7 @@ export class StoreAdministration<
 			}
 		});
 		this.mounted = true;
-		runInBatch(() => this.proxy.storeDidMount?.());
+		batch(() => this.proxy.storeDidMount?.());
 	}
 
 	unmount(): void {

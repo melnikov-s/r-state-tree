@@ -1,4 +1,4 @@
-import { ArrayAdministration, getSource, runInBatch } from "../observables";
+import { ArrayAdministration, getSource, batch } from "../observables";
 
 const listenerMap: WeakMap<object, ObservableListener<unknown>> = new WeakMap();
 
@@ -111,7 +111,7 @@ class ObservableListener<T> {
 
 export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 	set(index: number, newValue: T): void {
-		return runInBatch(() => {
+		return batch(() => {
 			super.set(index, newValue);
 
 			const sourceValue = getSource(newValue);
@@ -126,7 +126,7 @@ export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 		deleteCount?: number | undefined,
 		newItems?: T[] | undefined
 	): T[] {
-		return runInBatch(() => {
+		return batch(() => {
 			const deleted = super.spliceWithArray(index, deleteCount, newItems);
 			if (deleteCount || newItems?.length) {
 				notifySpliceArray(this.proxy, index, newItems ?? [], deleted);

@@ -146,15 +146,9 @@ export function createAtom(): AtomNode {
 	};
 }
 
-export function createEffect(fn: () => void) {
-	return effect(fn);
-}
+export { effect, signal, batch, untracked, Signal, ReadonlySignal };
 
-export function runInUntracked<T>(fn: () => T): T {
-	return untracked(() => fn());
-}
-
-export function createReaction<T>(fn: () => T, callback: (value: T) => void) {
+export function reaction<T>(fn: () => T, callback: (value: T) => void) {
 	let initialized = false;
 	let currentValue: T;
 
@@ -300,7 +294,7 @@ export function computed<T>(
 	value: () => T,
 	context: ClassGetterDecoratorContext
 ): void;
-export function computed<T>(fn: () => T, context?: unknown): ComputedNode<T>;
+export function computed<T>(fn: () => T): ReadonlySignal<T>;
 export function computed(value: any, context?: any): any {
 	// If context exists and has 'kind', it's being used as a decorator
 	if (context && typeof context === "object" && "kind" in context) {
@@ -310,17 +304,12 @@ export function computed(value: any, context?: any): any {
 	}
 
 	// Otherwise, it's the regular computed function (value is actually the fn)
-	return createComputed(value, context);
+	return preactComputed(value);
 }
 
 export function source<T>(obj: PreactObservable<T> | T): T {
 	return getSource(obj) as T;
 }
-
-export function runInBatch<T>(fn: () => T): T {
-	return batch(() => fn());
-}
-
 export class Observable {
 	constructor() {
 		return getObservableClassInstance(this);

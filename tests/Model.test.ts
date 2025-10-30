@@ -6,8 +6,8 @@ import {
 	state,
 	toSnapshot,
 	applySnapshot,
-	createEffect,
-	createReaction,
+	effect,
+	reaction,
 } from "../src/index";
 
 test("can create a model", () => {
@@ -270,7 +270,7 @@ test("child models are reactive properties", () => {
 
 	const m = M.create();
 	let count = 0;
-	createReaction(
+	reaction(
 		() => m.mc,
 		() => count++
 	);
@@ -581,7 +581,7 @@ describe("runtime type switching", () => {
 			let reactionCount = 0;
 			let currentValue: MC | MC[];
 
-			createReaction(
+			reaction(
 				() => m.items,
 				(value) => {
 					currentValue = value;
@@ -737,7 +737,7 @@ describe("runtime type switching", () => {
 			let reactionCount = 0;
 			let currentValue: MC | MC[];
 
-			createReaction(
+			reaction(
 				() => m.refs,
 				(value) => {
 					currentValue = value;
@@ -951,7 +951,7 @@ describe("model references", () => {
 		const m = M.create();
 		let current;
 
-		createEffect(() => (current = m.mr));
+		effect(() => (current = m.mr));
 
 		expect(current).toBe(undefined);
 		m.setModel(0);

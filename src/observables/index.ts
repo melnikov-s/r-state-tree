@@ -13,13 +13,13 @@ export { DateAdministration } from "./date";
 export { ObjectAdministration } from "./object";
 export {
 	AtomNode,
-	createReaction,
+	reaction,
 	SignalNode,
 	createAtom,
-	runInBatch,
+	batch,
 	createComputed,
 	createSignal,
-	runInUntracked,
+	untracked,
 	ListenerNode,
 	createListener,
 	ComputedNode,
@@ -30,6 +30,9 @@ export {
 	reportObserved,
 	observable,
 	computed,
-	createEffect,
+	Signal,
+	ReadonlySignal,
+	effect,
+	signal,
 	Observable,
 } from "./preact";
