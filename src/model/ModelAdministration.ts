@@ -235,7 +235,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 		if (id != null && v == null) {
 			throw new Error(
-				"r-state-tree can't clear an identifier once it has already been set."
+				"r-state-tree can't clear an id once it has already been set."
 			);
 		}
 

@@ -28,5 +28,5 @@ function makeChildDecorator(typeObj: any): any {
 export const child = makeChildDecorator(childType);
 export const modelRef = makeChildDecorator(modelRefType);
 export const model = makeDecorator(modelType);
-export const identifier = makeDecorator(idType);
+export const id = makeDecorator(idType);
 export const state = makeDecorator(stateType);

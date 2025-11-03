@@ -1,6 +1,10 @@
 # r-state-tree
 
-Reactive state management featuring store trees, computed child stores, and snapshot utilities backed by `@preact/signals-core`.
+r-state-tree is a reactive state management library for building complex applications by moving state out of your render tree.
+
+- Stores hold application/view state as a tree and drive your UI.
+- Models hold domain state as a separate tree with snapshots, identifiers and references.
+- Views become dumb renderers that react to Stores/Models.
 
 ## Installation
 
@@ -13,6 +17,13 @@ pnpm add r-state-tree
 This library uses [TC39 Stage 3 Decorators](https://github.com/tc39/proposal-decorators) and requires TypeScript 5.0+ with `target: "es2022"` or higher.
 
 The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
+
+## Core concepts
+
+- Stores: application/view state containers. Create with `createStore()`, attach with `mount()`. Compose with `@child` (single or arrays, stable via `{ key }`). React to changes with `effect`/`reaction` and store lifecycles (`storeDidMount`/`storeWillUnmount`). Update reactive `props` via `updateStore()`.
+- Models: domain state containers. Create with `Model.create()`. Persistent via snapshots (`toSnapshot`, `applySnapshot`, `onSnapshot`, diffs via `onSnapshotDiff`). Structure with `@state`, `@child`, identifiers via `@id`, and references via `@modelRef`.
+- Context: pass data through Store/Model trees without prop drilling using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendants.
+- Reactivity: powered by signals. Use `@observable`, `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
 
 ## Stores
 
@@ -143,6 +154,44 @@ batch(() => {
 });
 ```
 
+## Modeling guide
+
+- Root store: mount a single root Store that composes the application via `@child` properties.
+- View stores: create one Store per view/route/tab. Views render from stores; stores drive view transitions.
+- Keyed children: pass `{ key }` when creating child stores to preserve identity across reorders.
+- Models in stores: pass domain Models via `{ models }` and consume with `@model` on the Store.
+
+```ts
+import { Store, Model, child, createStore, mount } from "r-state-tree";
+
+class TabViewStore extends Store<{ title: string }> {}
+
+class RootStore extends Store {
+	@child get tabs() {
+		return ["Home", "Profile"].map((title, i) =>
+			createStore(TabViewStore, { title, key: i })
+		);
+	}
+}
+
+const root = mount(createStore(RootStore));
+```
+
+Passing models into stores:
+
+```ts
+class User extends Model {
+	// ... @id, @state, etc.
+}
+
+class ProfileStore extends Store {
+	@model user: User; // injected model
+}
+
+const user = User.create({ id: 1, name: "Alice" });
+const profile = mount(createStore(ProfileStore, { models: { user } }));
+```
+
 ## Observable classes
 
 For reactive class instances outside the Model/Store system, use `@observable` and `@computed` decorators:
@@ -190,6 +239,61 @@ effect(() => {
 state.count++; // Triggers the effect
 ```
 
+## Observables (low‑level)
+
+Create reactive structures outside Stores/Models. Supported: Objects, Arrays, Map, Set, WeakMap, WeakSet.
+
+- Track reads with `effect`/`reaction`. Nested values are tracked when you access them inside your effects.
+- Access raw values via `source(observable)`; check if something is reactive with `isObservable(value)`.
+- Arrays: reading specific indices (`arr[i]`) or `length` tracks those; common mutators (`push/pop/shift/unshift/splice/reverse/sort/fill`) are reactive; non-index and symbol keys are not reactive.
+
+```ts
+import { observable, effect, computed, reaction } from "r-state-tree";
+
+// Object
+const state = observable({ count: 0, nested: { value: 1 } });
+
+effect(() => {
+	// tracks reads
+	state.count;
+	state.nested.value;
+});
+
+state.count++;
+state.nested.value++;
+
+// Computed
+const doubled = computed(() => state.count * 2);
+effect(() => {
+	doubled.value;
+});
+
+// Array
+const arr = observable([0, 1]);
+effect(() => arr[0]);
+arr[0]++; // triggers; arr.push(2) does not, index 0 didn't change
+
+// Map
+const map = observable(new Map([["k", 1]]));
+effect(() => map.get("k"));
+map.set("k", 2); // triggers
+
+// Set
+const set = observable(new Set([1]));
+effect(() => set.has(2));
+set.add(2); // triggers
+
+// Reaction (runs only on changes, skips initial)
+let last: number | undefined;
+reaction(
+	() => state.count,
+	(v) => {
+		last = v;
+	}
+);
+state.count++;
+```
+
 ## Models and snapshots
 
 Models capture persistent state with snapshot utilities.
@@ -198,14 +302,14 @@ Models capture persistent state with snapshot utilities.
 import {
 	Model,
 	state,
-	identifier,
+	id,
 	applySnapshot,
 	onSnapshot,
 	toSnapshot,
 } from "r-state-tree";
 
 class TodoModel extends Model {
-	@identifier id = 0;
+	@id id = 0;
 	@state title = "";
 	@state completed = false;
 }
@@ -251,15 +355,15 @@ class TodoModel extends Model {
 Use decorators to configure model properties:
 
 ```ts
-import { Model, state, identifier, child, modelRef } from "r-state-tree";
+import { Model, state, id, child, modelRef } from "r-state-tree";
 
 class User extends Model {
-	@identifier id = 0;
+	@id id = 0;
 	@state name = "";
 }
 
 class TodoModel extends Model {
-	@identifier id = 0;
+	@id id = 0;
 	@state title = "";
 	@modelRef assignee?: User; // Reference to another model by ID
 	@child metadata = MetadataModel.create(); // Nested child model
@@ -282,7 +386,7 @@ Reference models by ID using `@modelRef`:
 
 ```ts
 class ProjectModel extends Model {
-	@identifier id = 0;
+	@id id = 0;
 	@child users: User[] = [];
 	@modelRef owner?: User; // Single reference
 	@modelRef assignees: User[] = []; // Array of references
@@ -310,7 +414,7 @@ Both `@child` and `@modelRef` support runtime type switching between single valu
 
 ```ts
 class ItemModel extends Model {
-	@identifier id = 0;
+	@id id = 0;
 	@state value = 0;
 }
 
@@ -329,6 +433,57 @@ class ContainerModel extends Model {
 	}
 }
 ```
+
+## API surface
+
+- Stores
+  - `Store`, `createStore`, `mount`, `unmount`, `updateStore`
+- Models
+  - `Model`, decorators: `@state`, `@id`, `@child`, `@modelRef`
+- Snapshots
+  - `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
+  - Types: `Snapshot`, `SnapshotDiff`, `IdType`, `Configuration`
+- Context
+  - `createContext`, type `Context`
+- Reactivity and observables
+  - `observable`, `computed`, `effect`, `reaction`, `batch`, `untracked`, `Observable`
+  - Utilities: `isObservable`, `source`, `reportObserved`, `reportChanged`
+- Signals interop
+  - `signal`, `getSignal`, types `Signal`, `ReadonlySignal`
+
+## UI integration and signals interop
+
+r-state-tree is built on `@preact/signals-core`. You can interoperate with signals directly:
+
+- Per-property signals via `$prop` on observable objects (including Stores/Models), or `getSignal(obj, key)`.
+- Re-exported utilities: `signal`, `computed`, `effect`, `batch`, `untracked`, and types `Signal`, `ReadonlySignal`.
+
+```ts
+import { observable, effect, getSignal } from "r-state-tree";
+
+const state = observable({ count: 0 });
+
+// Either form returns a Signal<number>
+const s1 = state.$count;
+const s2 = getSignal(state, "count");
+
+effect(() => {
+	// Use s1.value (or s2.value) in your UI binding
+	console.log("count:", s1.value);
+});
+
+// Update via signal or through the object
+s1.value = 1;
+state.count = 2;
+```
+
+### Identifier and reference rules
+
+- `@id` values are unique within a tree. They cannot be cleared to `undefined` after assignment.
+- Identifiers can be reassigned to a new value (including in snapshots) as long as uniqueness is preserved.
+- `@modelRef` requires the referenced model to have an id and be attached to the tree; the ref becomes `undefined` when the model detaches.
+- When a model is re-attached to the same tree, compatible refs restore automatically; attaching to a different root does not restore prior refs.
+- `@modelRef` and `@child` can switch between single and array at runtime; reactions observe the property itself rather than internal array mutations.
 
 ### Snapshot diffs
 

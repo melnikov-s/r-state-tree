@@ -1,6 +1,6 @@
 {
 	"name": "r-state-tree",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "reactive state management library",
 	"main": "dist/r-state-tree.cjs",
 	"module": "dist/r-state-tree.js",

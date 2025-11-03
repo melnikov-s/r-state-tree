@@ -1,6 +1,6 @@
 import {
 	Model,
-	identifier,
+	id,
 	modelRef,
 	child,
 	state,
@@ -415,7 +415,7 @@ test("child model can't be placed in multiple locations in the tree", () => {
 describe("model identifiers", () => {
 	test("identifiers can't be set to undefined once assigned", () => {
 		class M extends Model {
-			@identifier id = 1;
+			@id id = 1;
 
 			clearId() {
 				this.id = undefined;
@@ -428,13 +428,13 @@ describe("model identifiers", () => {
 
 		const mp = MP.create();
 		expect(() => mp.m.clearId()).toThrowErrorMatchingInlineSnapshot(
-			`[Error: r-state-tree can't clear an identifier once it has already been set.]`
+			`[Error: r-state-tree can't clear an id once it has already been set.]`
 		);
 	});
 
-	test("same identifier can't be assigned to different models", () => {
+	test("same id can't be assigned to different models", () => {
 		class M extends Model {
-			@identifier id = 0;
+			@id id = 0;
 		}
 
 		class MP extends Model {
@@ -453,7 +453,7 @@ describe("model identifiers", () => {
 
 	test("identifiers can be re-assigned after init", () => {
 		class M extends Model {
-			@identifier id = 1;
+			@id id = 1;
 
 			setId() {
 				this.id = 2;
@@ -471,9 +471,9 @@ describe("model identifiers", () => {
 		expect(mp.m).toBe(mp.mr);
 	});
 
-	test("correct identifier shows up in snapshot after being re-assigned", () => {
+	test("correct id shows up in snapshot after being re-assigned", () => {
 		class M extends Model {
-			@identifier myId = 1;
+			@id myId = 1;
 			@state test = "me";
 
 			setId() {
@@ -496,7 +496,7 @@ describe("model identifiers", () => {
 
 	test("identifiers can be assigned in modelDidInit", () => {
 		class M extends Model {
-			@identifier id;
+			@id id;
 
 			modelDidInit() {
 				this.id = 1;
@@ -509,7 +509,7 @@ describe("model identifiers", () => {
 
 	test("identifiers can be re-assigned in a snapshot", () => {
 		class M extends Model {
-			@identifier id = 1;
+			@id id = 1;
 			badAction() {
 				this.id++;
 			}
@@ -735,7 +735,7 @@ describe("runtime type switching", () => {
 	describe("modelRef property switching", () => {
 		test("can switch from single modelRef to array of modelRefs", () => {
 			class MC extends Model {
-				@identifier id;
+				@id id;
 				@state value = 0;
 			}
 
@@ -776,7 +776,7 @@ describe("runtime type switching", () => {
 
 		test("can switch from array of modelRefs to single modelRef", () => {
 			class MC extends Model {
-				@identifier id;
+				@id id;
 				@state value = 0;
 			}
 
@@ -815,7 +815,7 @@ describe("runtime type switching", () => {
 
 		test("switching modelRef types is reactive", () => {
 			class MC extends Model {
-				@identifier id;
+				@id id;
 				@state value = 0;
 			}
 
@@ -866,7 +866,7 @@ describe("runtime type switching", () => {
 	describe("snapshot compatibility with type switching", () => {
 		test("snapshots work correctly when switching child types", () => {
 			class MC extends Model {
-				@identifier id;
+				@id id;
 				@state value = 0;
 			}
 
@@ -900,7 +900,7 @@ describe("runtime type switching", () => {
 
 		test("can load snapshot with different type than current", () => {
 			class MC extends Model {
-				@identifier id;
+				@id id;
 				@state value = 0;
 			}
 
@@ -938,7 +938,7 @@ describe("runtime type switching", () => {
 describe("model references", () => {
 	test("can assign a model to a reference", () => {
 		class MC extends Model {
-			@identifier id = 0;
+			@id id = 0;
 		}
 
 		class M extends Model {
@@ -955,7 +955,7 @@ describe("model references", () => {
 		expect(m.mc).toBe(m.mr);
 	});
 
-	test("can't assing a model without an identifier to a reference", () => {
+	test("can't assing a model without an id to a reference", () => {
 		class MC extends Model {}
 		class M extends Model {
 			@child mc: MC = MC.create();
@@ -972,7 +972,7 @@ describe("model references", () => {
 
 	test("model ref is not available until the referenced model is attached", () => {
 		class MC extends Model {
-			@identifier id = 0;
+			@id id = 0;
 		}
 
 		class M extends Model {
@@ -993,7 +993,7 @@ describe("model references", () => {
 
 	test("model ref will become undefined when model is detached", () => {
 		class MC extends Model {
-			@identifier id = 0;
+			@id id = 0;
 		}
 		class M extends Model {
 			@child(MC) mc: MC = MC.create();
@@ -1018,7 +1018,7 @@ describe("model references", () => {
 
 	test("model ref will become undefined when model is detached (array)", () => {
 		class MC extends Model {
-			@identifier id;
+			@id id;
 		}
 
 		class M extends Model {
@@ -1043,7 +1043,7 @@ describe("model references", () => {
 
 	test("model ref is reactive", () => {
 		class MC extends Model {
-			@identifier id;
+			@id id;
 		}
 		class M extends Model {
 			@child mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
@@ -1070,7 +1070,7 @@ describe("model references", () => {
 
 	test("model ref is restored when model is re-attached", () => {
 		class MC extends Model {
-			@identifier id = 0;
+			@id id = 0;
 		}
 		class M extends Model {
 			@child(MC) mc: MC = MC.create();
@@ -1105,7 +1105,7 @@ describe("model references", () => {
 		let temp: MC | null = null;
 
 		class MC extends Model {
-			@identifier id = 0;
+			@id id = 0;
 		}
 		class M extends Model {
 			@child mc: MC = MC.create();
@@ -1140,7 +1140,7 @@ describe("model references", () => {
 	});
 	test("model refs can be an array", () => {
 		class MC extends Model {
-			@identifier id;
+			@id id;
 		}
 		class M extends Model {
 			@child(MC) mc1 = MC.create({ id: 1 });
