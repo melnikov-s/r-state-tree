@@ -29,7 +29,8 @@ type CreateStoreProps<T extends Props> = {
 		: never;
 } & {
 	[K in keyof T as undefined extends T[K] ? never : K]?: T[K];
-} & Pick<Props, 'key'>;
+} & Pick<Props, "key" | "models"> &
+	Partial<Record<string, unknown>>;
 
 export function createStore<K extends Store<T>, T extends Props>(
 	Type: new (props: T) => K,
