@@ -14,6 +14,14 @@ export type Props = {
 	key?: Key;
 	models?: { [key: string]: Model | Model[] | null };
 };
+export type StoreProps<T extends Record<string, any> = Record<string, any>> =
+	T & {
+		[key: string]: unknown;
+		key?: Key;
+		models?: {
+			[key: string]: Model | Model[] | null;
+		};
+	};
 export type StoreCtor<S extends Store = Store> = (new (
 	...args: ConstructorParameters<typeof Store>
 ) => S) & { [P in keyof Store]: Store[P] };

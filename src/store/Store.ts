@@ -1,4 +1,4 @@
-import { Props, StoreConfiguration, Configuration } from "../types";
+import { Props, StoreProps, StoreConfiguration, Configuration } from "../types";
 import {
 	getStoreAdm,
 	StoreAdministration,
@@ -19,7 +19,7 @@ export function allowNewStore<T>(fn: () => T): T {
 	}
 }
 
-type CreateStoreProps<T extends Props> = {
+type CreateStoreProps<T extends Record<string, any>> = {
 	[K in keyof T as undefined extends T[K] ? K : never]?: T[K] extends infer U
 		? U extends undefined
 			? never
@@ -32,10 +32,10 @@ type CreateStoreProps<T extends Props> = {
 } & Pick<Props, "key" | "models"> &
 	Partial<Record<string, unknown>>;
 
-export function createStore<K extends Store<T>, T extends Props>(
-	Type: new (props: T) => K,
-	props?: CreateStoreProps<T>
-): K {
+export function createStore<
+	K extends Store<any>,
+	T extends Record<string, any> = K extends Store<infer P> ? P : never
+>(Type: new (props: StoreProps<T>) => K, props?: CreateStoreProps<T>): K {
 	return {
 		Type,
 		props: props ?? {},
@@ -43,7 +43,7 @@ export function createStore<K extends Store<T>, T extends Props>(
 	} as unknown as K;
 }
 
-export function updateStore<K extends Store<T>, T extends Props>(
+export function updateStore<K extends Store<T>, T extends Record<string, any>>(
 	store: K,
 	props: CreateStoreProps<T>
 ): K {
@@ -58,14 +58,16 @@ export function types<T extends Store>(
 	return config;
 }
 
-export default class Store<PropsType extends Props = Props> {
+export default class Store<
+	PropsType extends Record<string, any> = StoreProps<Props>
+> {
 	static get types(): StoreConfiguration<unknown> {
 		return (this as any)[Symbol.metadata];
 	}
 
-	props!: PropsType;
+	props!: StoreProps<PropsType>;
 
-	constructor(props: PropsType) {
+	constructor(props: StoreProps<PropsType>) {
 		if (!initEnabled) {
 			throw new Error("r-state-tree: Can't initialize store directly");
 		}

@@ -33,6 +33,47 @@ test("can update store props with updateStore", () => {
 	expect(store.props.myProp).toBe(2);
 });
 
+test("can use interface as props without index signature", () => {
+	interface PageStoreProps {
+		pageId: string;
+		title?: string;
+	}
+
+	class PageStore extends Store<PageStoreProps> {
+		get displayTitle() {
+			return this.props.title || `Page ${this.props.pageId}`;
+		}
+	}
+
+	interface TTSStoreProps {
+		voice?: string;
+		pageStore: PageStore;
+	}
+
+	class TTSStore extends Store<TTSStoreProps> {
+		get voiceName() {
+			return this.props.voice || "default";
+		}
+	}
+
+	const pageStore = mount(createStore(PageStore, { pageId: "home" }));
+
+	const ttsStore = mount(
+		createStore(TTSStore, {
+			voice: "nova",
+			pageStore,
+			models: { someModel: null },
+			key: "tts-1",
+		})
+	);
+
+	expect(ttsStore.props.voice).toBe("nova");
+	expect(ttsStore.props.pageStore).toBe(pageStore);
+	expect(ttsStore.props.pageStore.props.pageId).toBe("home");
+	expect(ttsStore.voiceName).toBe("nova");
+	expect(pageStore.displayTitle).toBe("Page home");
+});
+
 test("can create a child store", () => {
 	class S extends Store<any> {
 		@child

@@ -1057,7 +1057,9 @@ describe("model references", () => {
 		const m = M.create();
 		let current;
 
-		effect(() => (current = m.mr));
+		effect(() => {
+			current = m.mr;
+		});
 
 		expect(current).toBe(undefined);
 		m.setModel(0);
