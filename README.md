@@ -18,12 +18,56 @@ This library uses [TC39 Stage 3 Decorators](https://github.com/tc39/proposal-dec
 
 The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
 
+## TypeScript config (Stage 3 decorators)
+
+TypeScript 5+ supports TC39 Stage 3 decorators.
+
+```json
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"experimentalDecorators": false,
+		"useDefineForClassFields": true,
+		"lib": ["es2022", "dom"],
+		"jsx": "react-jsx",
+		"noEmit": true
+	}
+}
+```
+
+- `experimentalDecorators` must be `false` for Stage 3 decorators.
+- `useDefineForClassFields: true` is recommended with modern toolchains targeting ES2022.
+- The library includes a `Symbol.metadata` polyfill via `@tsmetadata/polyfill`.
+
 ## Core concepts
 
 - Stores: application/view state containers. Create with `createStore()`, attach with `mount()`. Compose with `@child` (single or arrays, stable via `{ key }`). React to changes with `effect`/`reaction` and store lifecycles (`storeDidMount`/`storeWillUnmount`). Update reactive `props` via `updateStore()`.
 - Models: domain state containers. Create with `Model.create()`. Persistent via snapshots (`toSnapshot`, `applySnapshot`, `onSnapshot`, diffs via `onSnapshotDiff`). Structure with `@state`, `@child`, identifiers via `@id`, and references via `@modelRef`.
 - Context: pass data through Store/Model trees without prop drilling using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendants.
 - Reactivity: powered by signals. Use `@observable`, `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
+
+## Separation of concerns
+
+- Models: domain state + domain logic. Keep invariants, domain mutations (in-place updates), and computed/derived getters here. Models are serializable; mutate arrays/maps/sets in place and expose methods to add/remove/upsert. Derive values via getters.
+- Stores: application/view state + orchestration. Coordinate routing, timers, reactions, and I/O. Stores call model methods to perform domain changes. Avoid embedding domain rules in stores.
+
+### Why Stores and Models (motivation)
+
+- What is a Model? Persistent domain state plus domain rules. It holds identifiers, references, invariants, and exposes pure domain mutations and derived getters. It is serializable (snapshots), re-hydratable, and safe to reuse across views.
+- What is a Store? Application/view state and orchestration. It wires effects (reactions, timers, I/O), reacts to user intent, and delegates domain changes to Models. Stores are not snapshotted.
+- Why separate?
+  - Snapshots/undo/redo work cleanly when only domain lives in Models.
+  - Views stay simple: UI reads derived getters, calls Store methods; Stores call Model methods.
+  - Reuse: one Model can back multiple Stores/views without UI coupling.
+  - Testability: Models are deterministic and easy to unit test; Stores are thin orchestrators.
+  - Performance/identity: Models mutate in place; Stores manage child identity with `key`.
+- Quick rule of thumb:
+  - If it should be in a snapshot or referenced by id, put it in a Model (`@state`, `@child`, `@id`, `@modelRef`).
+  - If it is ephemeral UI/app state or side-effect orchestration, put it in a Store.
+  - Components should read from one Store; if a component needs multiple sources, compose them into a higher-level Store.
 
 ## Stores
 
@@ -32,9 +76,7 @@ Stores describe reactive state containers composed into a tree.
 ```ts
 import { Store, createStore, mount, child } from "r-state-tree";
 
-class TodoStore extends Store {
-	props = { title: "" };
-
+class TodoStore extends Store<{ title: string }> {
 	get title() {
 		return this.props.title;
 	}
@@ -48,6 +90,26 @@ class AppStore extends Store {
 
 const app = mount(createStore(AppStore));
 app.todo.title; // "Write docs"
+```
+
+### Store creation, props, and typing
+
+- Always create with `createStore()` and attach with `mount()`. Stores cannot be constructed with `new` directly.
+- Prefer no custom constructor. Type stores as `Store<Props>` and access props via `this.props`.
+- If a constructor is necessary, call `super(props)` exactly once and keep it minimal; put effects in `storeDidMount`.
+- Do not shadow or re-declare `props` as a class field; `props` is read-only. Use the generic `Store<{ ... }>` for typing.
+
+```ts
+class ItemStore extends Store<{ id: number; title?: string }> {
+	get id() {
+		return this.props.id;
+	}
+	get title() {
+		return this.props.title ?? "";
+	}
+}
+
+const root = mount(createStore(ItemStore, { id: 1, title: "Hello" }));
 ```
 
 ### Updating props
@@ -73,6 +135,26 @@ class ListStore extends Store {
 	@child get todos() {
 		return this.items.map((title, i) =>
 			createStore(TodoStore, { title, key: i })
+		);
+	}
+}
+```
+
+#### Child store keys and identity
+
+- Pass a stable `key` (e.g., an id) when creating child stores to preserve identity across reorders.
+- `@child` must decorate a getter; child stores are derived from current state on access, and identity is preserved by keys.
+
+```ts
+class ItemsStore extends Store {
+	items = [
+		{ id: 1, title: "A" },
+		{ id: 2, title: "B" },
+	];
+
+	@child get itemStores() {
+		return this.items.map((it) =>
+			createStore(TodoStore, { key: it.id, title: it.title })
 		);
 	}
 }
@@ -154,7 +236,38 @@ batch(() => {
 });
 ```
 
+### Models injection (@model)
+
+Inject domain models into stores via the `models` creation prop and consume them with `@model` on the store. `@model` fields are read-only references.
+
+```ts
+import { Model, Store, model, createStore, mount } from "r-state-tree";
+
+class User extends Model {
+	@id id = 0;
+	@state name = "";
+}
+
+class ProfileStore extends Store {
+	@model user!: User;
+}
+
+const user = User.create({ id: 1, name: "Ada" });
+const profile = mount(createStore(ProfileStore, { models: { user } }));
+profile.user.name; // "Ada"
+```
+
+Type stores as `Store<Props>` and explicitly type `@model` fields for clarity. The `models` prop may also provide arrays of models.
+
 ## Modeling guide
+
+### Store ↔ Component mapping (quick guide)
+
+- Pair each container/screen component with one owning Store; components should read from a single Store.
+- The Store tree overlays the component tree: parents map to parent Stores; children map to `@child` Stores; lists map to arrays of child Stores with stable `key`s.
+- A Store can power multiple components (header/body/sidebar), but a component shouldn’t pull from multiple Stores. If it needs to, introduce a parent/adapter Store that composes and exposes exactly what the component needs.
+- Use Context for cross‑cutting concerns (theme, auth) instead of coupling components to multiple Stores.
+- Keep domain logic in Models; Stores orchestrate and delegate to Model methods, and expose derived getters for the UI.
 
 - Root store: mount a single root Store that composes the application via `@child` properties.
 - View stores: create one Store per view/route/tab. Views render from stores; stores drive view transitions.
@@ -177,20 +290,57 @@ class RootStore extends Store {
 const root = mount(createStore(RootStore));
 ```
 
-Passing models into stores:
+### Patterns: deriving Stores from Models
+
+Derive child stores directly from model arrays with stable keys; delegate mutations to model methods.
 
 ```ts
-class User extends Model {
-	// ... @id, @state, etc.
+class ItemModel extends Model {
+	@id id = 0;
+	@state title = "";
 }
 
-class ProfileStore extends Store {
-	@model user: User; // injected model
+class ListModel extends Model {
+	@child(ItemModel) items: ItemModel[] = [];
+
+	add(id: number, title: string) {
+		this.items.push(ItemModel.create({ id, title }));
+	}
+	remove(id: number) {
+		const i = this.items.findIndex((m) => m.id === id);
+		if (i >= 0) this.items.splice(i, 1);
+	}
+	get titles() {
+		return this.items.map((m) => m.title);
+	}
 }
 
-const user = User.create({ id: 1, name: "Alice" });
-const profile = mount(createStore(ProfileStore, { models: { user } }));
+class ItemStore extends Store {
+	@model item!: ItemModel;
+	get title() {
+		return this.item.title;
+	}
+}
+
+class ListStore extends Store {
+	@model list!: ListModel;
+
+	@child get items() {
+		return this.list.items.map((item) =>
+			createStore(ItemStore, { key: item.id, models: { item } })
+		);
+	}
+
+	addItem(id: number, title: string) {
+		this.list.add(id, title); // delegate to domain
+	}
+}
 ```
+
+## Mutability rules
+
+- Models: prefer in-place mutation for arrays/maps/sets (`push`, `splice`, `set`, etc.). Replace the whole structure only when you intentionally want to swap the instance.
+- Stores: store fields are reactive; in-place mutation is fine. Reassign the entire structure only if you need identity replacement semantics.
 
 ## Observable classes
 
@@ -225,7 +375,7 @@ counter.increment(); // Triggers the effect
 
 ### Plain objects (implicit reactivity)
 
-Plain objects wrapped with `observable()` use implicit reactivity for backward compatibility:
+Plain objects wrapped with `observable()` use implicit reactivity:
 
 ```ts
 import { observable, effect } from "r-state-tree";
@@ -324,6 +474,27 @@ todo.title = "Learn r-state-tree";
 stop();
 ```
 
+### Snapshots and persistence
+
+- Snapshots capture Models (not Stores).
+- Hydrate/persist with `applySnapshot` and `onSnapshot`:
+
+```ts
+const STORAGE_KEY = "list";
+
+// hydrate
+const list = ListModel.create();
+const saved = localStorage.getItem(STORAGE_KEY);
+if (saved) applySnapshot(list, JSON.parse(saved));
+
+// persist
+const off = onSnapshot(list, (snap) => {
+	localStorage.setItem(STORAGE_KEY, JSON.stringify(snap));
+});
+```
+
+Mutate Models through domain methods and let snapshots record changes automatically.
+
 ### Model lifecycle hooks
 
 Models support lifecycle methods:
@@ -349,6 +520,12 @@ class TodoModel extends Model {
 	}
 }
 ```
+
+When to use each:
+
+- `modelDidInit`: initialize/normalize data based on the initial snapshot.
+- `modelDidAttach`: link to other models or read context after the model is part of a tree.
+- `modelWillDetach`: cleanup before the model is removed or replaced.
 
 ### Model decorators
 
@@ -477,6 +654,27 @@ s1.value = 1;
 state.count = 2;
 ```
 
+#### React / Preact usage
+
+- Preact: use `@preact/signals`. Reading `signal.value` inside JSX is reactive; components re-render automatically.
+- React: use `@preact/signals-react`. Call `useSignals()` in a component and read `signal.value` in render; updates re-render the component.
+
+```ts
+// Preact
+function TodoView({ store }: { store: TodoStore }) {
+	return <h1>{store.$title.value}</h1>;
+}
+
+// React
+import { useSignals } from "@preact/signals-react/runtime";
+function TodoView({ store }: { store: TodoStore }) {
+	useSignals();
+	return <h1>{store.$title.value}</h1>;
+}
+```
+
+You can also use `getSignal(store, "title")` instead of `$title`. Use the observers/renderers provided by the signals bindings for your UI library; r-state-tree will participate automatically because Stores/Models are signal-backed.
+
 ### Identifier and reference rules
 
 - `@id` values are unique within a tree. They cannot be cleared to `undefined` after assignment.
@@ -529,6 +727,118 @@ class ProjectModel extends Model {
 	}
 }
 ```
+
+## Do/Don’t guide
+
+Do:
+
+- Keep domain operations in Models
+- Delegate from Stores to Models for domain changes
+- Use `@child` for child stores (getter-based)
+- Use stable `key` values for child stores
+- Mutate model arrays/maps/sets in place
+
+Don’t:
+
+- Shadow or re-declare `props` on stores
+- Instantiate Stores with `new`
+- Perform effectful work in constructors
+- Manually “sync” store state into Models (call model methods instead)
+
+## Compact code samples
+
+Store without a constructor:
+
+```ts
+class ViewStore extends Store<{ q?: string }> {
+	get q() {
+		return this.props.q ?? "";
+	}
+}
+```
+
+Store with an injected `@model`:
+
+```ts
+class ItemStore extends Store {
+	@model item!: ItemModel;
+}
+const item = ItemModel.create({ id: 1, title: "X" });
+const s = mount(createStore(ItemStore, { models: { item } }));
+```
+
+`@child` mapping from a model array (stable keys):
+
+```ts
+class ListStore extends Store {
+	@model list!: ListModel;
+	@child get items() {
+		return this.list.items.map((item) =>
+			createStore(ItemStore, { key: item.id, models: { item } })
+		);
+	}
+}
+```
+
+Model with in-place mutations and a derived getter:
+
+```ts
+class ListModel extends Model {
+	@child(ItemModel) items: ItemModel[] = [];
+	add(m: ItemModel) {
+		this.items.push(m);
+	}
+	get count() {
+		return this.items.length;
+	}
+}
+```
+
+Lifecycle hooks:
+
+```ts
+class M extends Model {
+	modelDidInit() {}
+	modelDidAttach() {}
+	modelWillDetach() {}
+}
+class S extends Store {
+	storeDidMount() {}
+	storeWillUnmount() {}
+}
+```
+
+Snapshot hydrate/persist:
+
+```ts
+const m = ListModel.create();
+const saved = localStorage.getItem("m");
+if (saved) applySnapshot(m, JSON.parse(saved));
+const off = onSnapshot(m, (snap) =>
+	localStorage.setItem("m", JSON.stringify(snap))
+);
+```
+
+## Common pitfalls
+
+- Forgetting stable keys for `@child` arrays causes identity churn.
+- Assuming deep reactivity on undecorated fields of plain classes; use `@observable` for `Observable` classes, or use Stores/Models.
+- Creating child stores in constructors: `@child` must be on getters so identity and lifecycle can be managed by the framework.
+
+## Typing recipes
+
+- Type stores as `Store<Props>`; read `this.props` inside methods/getters.
+- Explicitly type `@model` fields on stores, and pass matching values via the `models` creation prop.
+- When a store has no props, use `class X extends Store {}`.
+
+## Cheat sheet
+
+- Decorators (Models): `@state`, `@id`, `@child`, `@modelRef`
+- Decorators (Stores): `@child`, `@model`
+- Core: `createStore`, `mount`, `unmount`, `updateStore`
+- Snapshots: `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
+- Lifecycle: `storeDidMount`, `storeWillUnmount`, `modelDidInit`, `modelDidAttach`, `modelWillDetach`
+- Best practices: domain in Models; delegate from Stores; stable keys for `@child`; in-place mutations in Models; no effectful constructors; don’t shadow `props`.
 
 ## Testing
 
