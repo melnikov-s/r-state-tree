@@ -1,5 +1,5 @@
-import Store from "./store/Store";
-import Model from "./model/Model";
+import type Store from "./store/Store";
+import type Model from "./model/Model";
 
 export type StoreElement = {
 	Type: new (...args: unknown[]) => Store;

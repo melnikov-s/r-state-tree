@@ -1,4 +1,5 @@
-import { ModelConfiguration, CommonCfgTypes } from "./types";
+import type { ModelConfiguration } from "./types";
+import { CommonCfgTypes } from "./types";
 
 export function getPropertyDescriptor(
 	obj: object,

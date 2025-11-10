@@ -2,7 +2,7 @@ import { CollectionAdministration } from "../collection";
 import { PreactObjectAdministration } from "../preact";
 import { ArrayAdministration } from "../array";
 import { DateAdministration } from "../date";
-import { Administration } from "./Administration";
+import type { Administration } from "./Administration";
 import { isPlainObject } from "./utils";
 import { batch } from "@preact/signals-core";
 

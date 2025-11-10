@@ -35,7 +35,7 @@ export {
 	isObservable,
 	reaction,
 	Signal,
-	ReadonlySignal,
+	type ReadonlySignal,
 	batch,
 	untracked,
 	effect,

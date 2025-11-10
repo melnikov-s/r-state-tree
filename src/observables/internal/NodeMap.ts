@@ -1,10 +1,5 @@
-import {
-	AtomNode,
-	createAtom,
-	ObservedAtomNode,
-	SignalNode,
-	createSignal,
-} from "../preact";
+import { createAtom, createSignal } from "../preact";
+import type { AtomNode, ObservedAtomNode, SignalNode } from "../preact";
 import { isNonPrimitive } from "./utils";
 
 class NodeMap<

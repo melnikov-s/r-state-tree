@@ -2,11 +2,11 @@ import {
 	computed as preactComputed,
 	signal,
 	Signal,
-	ReadonlySignal,
 	batch,
 	effect,
 	untracked,
 } from "@preact/signals-core";
+import type { ReadonlySignal } from "@preact/signals-core";
 
 import { ObjectAdministration } from "./object";
 import {
@@ -146,7 +146,8 @@ export function createAtom(): AtomNode {
 	};
 }
 
-export { effect, signal, batch, untracked, Signal, ReadonlySignal };
+export { effect, signal, batch, untracked, Signal };
+export type { ReadonlySignal };
 
 export function reaction<T>(fn: () => T, callback: (value: T) => void) {
 	let initialized = false;

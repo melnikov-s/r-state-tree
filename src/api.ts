@@ -1,8 +1,9 @@
-import { StoreElement, Snapshot, SnapshotDiff } from "./types";
+import type { StoreElement, Snapshot, SnapshotDiff } from "./types";
 import { getDiff } from "./utils";
-import Store, { allowNewStore } from "./store/Store";
+import type Store from "./store/Store";
+import { allowNewStore } from "./store/Store";
 import { getStoreAdm } from "./store/StoreAdministration";
-import Model from "./model/Model";
+import type Model from "./model/Model";
 import {
 	getModelAdm,
 	getConfigurationFromSnapshot,

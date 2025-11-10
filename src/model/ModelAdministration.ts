@@ -3,23 +3,21 @@ import {
 	createObservableWithCustomAdministration,
 	PreactObjectAdministration,
 	getSource,
-	ComputedNode,
 	batch,
 	createComputed,
-	AtomNode,
 	createAtom,
 	reaction,
 } from "../observables";
+import type { ComputedNode, AtomNode } from "../observables";
 import Model from "../model/Model";
-import {
+import type {
 	ModelConfiguration,
 	IdType,
-	ModelCfgTypes,
-	CommonCfgTypes,
 	Snapshot,
 	SnapshotChange,
 	RefSnapshot,
 } from "../types";
+import { ModelCfgTypes, CommonCfgTypes } from "../types";
 import {
 	getIdentifier,
 	getModelById,
@@ -31,9 +29,9 @@ import {
 import { clone } from "../utils";
 import {
 	ChildModelsAdministration,
-	MutationEvent,
 	observe,
 } from "./ChildModelsAdministration";
+import type { MutationEvent } from "./ChildModelsAdministration";
 
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();

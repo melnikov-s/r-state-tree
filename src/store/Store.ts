@@ -1,4 +1,9 @@
-import { Props, StoreProps, StoreConfiguration, Configuration } from "../types";
+import type {
+	Props,
+	StoreProps,
+	StoreConfiguration,
+	Configuration,
+} from "../types";
 import {
 	getStoreAdm,
 	StoreAdministration,

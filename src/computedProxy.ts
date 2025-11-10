@@ -1,4 +1,5 @@
-import { createComputed, ComputedNode } from "./observables";
+import { createComputed } from "./observables";
+import type { ComputedNode } from "./observables";
 
 export default function <T extends Record<PropertyKey, any>>(
 	computed: ComputedNode<T>

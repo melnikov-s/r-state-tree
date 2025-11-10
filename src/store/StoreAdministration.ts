@@ -1,25 +1,19 @@
 import {
 	getAdministration,
 	PreactObjectAdministration as ObjectAdministration,
-	ListenerNode,
 	createSignal,
 	createListener,
-	SignalNode,
-	ComputedNode,
 	reaction,
 	batch,
 	untracked,
 	createComputed,
 } from "../observables";
-import Store, { allowNewStore } from "./Store";
-import Model from "../model/Model";
-import {
-	StoreConfiguration,
-	StoreElement,
-	Props,
-	CommonCfgTypes,
-	StoreCfgTypes,
-} from "../types";
+import type { ListenerNode, SignalNode, ComputedNode } from "../observables";
+import { allowNewStore } from "./Store";
+import type Store from "./Store";
+import type Model from "../model/Model";
+import type { StoreConfiguration, StoreElement, Props } from "../types";
+import { CommonCfgTypes, StoreCfgTypes } from "../types";
 import { getPropertyDescriptor } from "../utils";
 
 export function updateProps(props: Props, newProps: Props): void {

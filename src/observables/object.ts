@@ -1,10 +1,5 @@
-import {
-	AtomNode,
-	ComputedNode,
-	batch,
-	createAtom,
-	createComputed,
-} from "./preact";
+import { batch, createAtom, createComputed } from "./preact";
+import type { AtomNode, ComputedNode } from "./preact";
 import {
 	getObservable,
 	getSource,
@@ -15,10 +10,10 @@ import {
 import {
 	isPropertyKey,
 	getPropertyDescriptor,
-	PropertyType,
 	getPropertyType,
 	resolveNode,
 } from "./internal/utils";
+import type { PropertyType } from "./internal/utils";
 import { Administration } from "./internal/Administration";
 import { AtomMap, SignalMap } from "./internal/NodeMap";
 

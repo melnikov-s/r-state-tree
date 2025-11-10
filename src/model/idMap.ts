@@ -1,6 +1,6 @@
 import { observable } from "../observables";
-import { IdType } from "../types";
-import Model from "./Model";
+import type { IdType } from "../types";
+import type Model from "./Model";
 import { getModelAdm } from "./ModelAdministration";
 
 const attachedIdMap: WeakMap<

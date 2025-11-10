@@ -1,11 +1,7 @@
 import { batch } from "@preact/signals-core";
-import {
-	AtomNode,
-	createAtom,
-	createObservedAtom,
-	ObservedAtomNode,
-} from "../preact";
-import { SignalMap } from "./NodeMap";
+import { createAtom, createObservedAtom } from "../preact";
+import type { AtomNode, ObservedAtomNode } from "../preact";
+import type { SignalMap } from "./NodeMap";
 import { resolveNode } from "./utils";
 
 let circularRefSet: WeakSet<object> | null = null;

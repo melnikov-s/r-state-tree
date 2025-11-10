@@ -1,4 +1,5 @@
-import { AtomNode, createAtom, batch } from "./preact";
+import { createAtom, batch } from "./preact";
+import type { AtomNode } from "./preact";
 import {
 	getAdministration,
 	getObservable,

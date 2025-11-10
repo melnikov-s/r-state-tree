@@ -1,5 +1,5 @@
 import { getModelAdm, ModelAdministration } from "./ModelAdministration";
-import { Configuration, ModelConfiguration, Snapshot } from "../types";
+import type { Configuration, ModelConfiguration, Snapshot } from "../types";
 import { createObservableWithCustomAdministration } from "../observables";
 
 let initEnabled = false;

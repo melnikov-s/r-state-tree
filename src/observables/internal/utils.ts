@@ -1,4 +1,4 @@
-import { AtomNode, ComputedNode, SignalNode } from "../preact";
+import type { AtomNode, ComputedNode, SignalNode } from "../preact";
 import {
 	ObservableCfgTypes,
 	ModelCfgTypes,
