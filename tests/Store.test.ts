@@ -1254,3 +1254,209 @@ describe("store context", () => {
 		expect(parent.c.gc.val2).toBe("from-parent-2");
 	});
 });
+
+describe("recursive mount diagnostics", () => {
+	class SharedModel extends Model {}
+
+	class RecursiveStore extends Store<{ models: { shared: SharedModel } }> {
+		@model shared!: SharedModel;
+
+		storeDidMount() {
+			// Access the child during mount to trigger recursive creation
+			this.loop;
+		}
+
+		@child get loop() {
+			return createStore(RecursiveStore, { models: { shared: this.shared } });
+		}
+	}
+
+	const mountRecursiveStore = () =>
+		mount(
+			createStore(RecursiveStore, {
+				models: { shared: SharedModel.create() },
+			})
+		);
+
+	test("recursive mount surfaces circular creation error instead of stack overflow", () => {
+		expect(mountRecursiveStore).toThrowError(
+			/detected circular store\/model creation/
+		);
+	});
+
+	test("circular mount error reports guidance to break recursion", () => {
+		try {
+			mountRecursiveStore();
+		} catch (error) {
+			if (error instanceof Error) {
+				expect(error.message).toContain(
+					"detected circular store/model creation"
+				);
+				expect(error.message).toContain("RecursiveStore");
+				expect(error.message).toContain("models: shared");
+				expect(error.message).toContain("storeDidMount");
+				return;
+			}
+			throw error;
+		}
+		throw new Error("expected recursive mount to throw");
+	});
+});
+
+describe("child type validation", () => {
+	test("rejects non-StoreElement values for child property", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get c() {
+				return "invalid" as unknown as ReturnType<typeof createStore<C>>;
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(() => {
+			s.c;
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'c' must be a StoreElement ({ Type, props, key }), an array of StoreElements, or null/undefined. Found: string]`
+		);
+	});
+
+	test("rejects invalid StoreElement objects", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get c() {
+				return { Type: "not a function" } as unknown as ReturnType<
+					typeof createStore<C>
+				>;
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(() => {
+			s.c;
+		}).toThrow();
+	});
+
+	test("allows null for child property", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get c() {
+				return null;
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(s.c).toBe(null);
+	});
+
+	test("allows undefined for child property", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get c() {
+				return undefined as unknown as ReturnType<typeof createStore<C>> | null;
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(s.c).toBe(null);
+	});
+
+	test("allows valid StoreElement for child property", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get c() {
+				return createStore(C, { prop: 1 });
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(s.c).toBeInstanceOf(C);
+		expect(s.c!.props.prop).toBe(1);
+	});
+
+	test("rejects array with non-StoreElement items for child property", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get cs() {
+				return ["invalid", "values"] as unknown as ReturnType<
+					typeof createStore<C>
+				>[];
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(() => {
+			s.cs;
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'cs' must be a StoreElement ({ Type, props, key }), an array of StoreElements, or null/undefined. Found invalid array item: string]`
+		);
+	});
+
+	test("rejects array with invalid StoreElement objects", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get cs() {
+				return [
+					createStore(C, { prop: 1 }),
+					{ Type: "not a function" },
+				] as unknown as ReturnType<typeof createStore<C>>[];
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(() => {
+			s.cs;
+		}).toThrow();
+	});
+
+	test("allows array of StoreElements for child property", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get cs() {
+				return [createStore(C, { prop: 1 }), createStore(C, { prop: 2 })];
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(Array.isArray(s.cs)).toBe(true);
+		expect(s.cs!.length).toBe(2);
+		expect(s.cs![0]).toBeInstanceOf(C);
+		expect(s.cs![1]).toBeInstanceOf(C);
+	});
+
+	test("allows empty array for child property", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@child get cs() {
+				return [];
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(Array.isArray(s.cs)).toBe(true);
+		expect(s.cs!.length).toBe(0);
+	});
+
+	test("validates child property when it changes reactively", () => {
+		class C extends Store<any> {}
+		class S extends Store<any> {
+			@observable shouldReturnInvalid = false;
+
+			@child get c() {
+				if (this.shouldReturnInvalid) {
+					return "invalid" as unknown as ReturnType<typeof createStore<C>>;
+				}
+				return createStore(C, { prop: 1 });
+			}
+		}
+
+		const s = mount(createStore(S));
+		expect(s.c).toBeInstanceOf(C);
+
+		expect(() => {
+			s.shouldReturnInvalid = true;
+			s.c;
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'c' must be a StoreElement ({ Type, props, key }), an array of StoreElements, or null/undefined. Found: string]`
+		);
+	});
+});

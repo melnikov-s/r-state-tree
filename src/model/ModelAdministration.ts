@@ -85,6 +85,37 @@ function getSnapshotRefId(snapshot: RefSnapshot): IdType {
 	return snapshot[keys[0]];
 }
 
+function validateModelChildValue(
+	value: unknown,
+	propertyName: PropertyKey
+): void {
+	if (value === null || value === undefined) {
+		return;
+	}
+
+	if (value instanceof Model) {
+		return;
+	}
+
+	if (Array.isArray(value)) {
+		const invalidItem = value.find((item) => !(item instanceof Model));
+		if (invalidItem !== undefined) {
+			throw new Error(
+				`r-state-tree: child property '${String(
+					propertyName
+				)}' must be a Model instance, an array of Model instances, or null/undefined. Found invalid array item: ${typeof invalidItem}`
+			);
+		}
+		return;
+	}
+
+	throw new Error(
+		`r-state-tree: child property '${String(
+			propertyName
+		)}' must be a Model instance, an array of Model instances, or null/undefined. Found: ${typeof value}`
+	);
+}
+
 export class ModelAdministration extends PreactObjectAdministration<any> {
 	static proxyTraps: ProxyHandler<object> = Object.assign(
 		{},
@@ -120,6 +151,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							return true;
 						}
 						case CommonCfgTypes.child: {
+							validateModelChildValue(value, name);
 							if (Array.isArray(value)) {
 								adm.setModels(name, value);
 								return true;
@@ -246,6 +278,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private setModel(name: PropertyKey, newModel: Model | null): void {
+		validateModelChildValue(newModel, name);
 		const currentValue = this.proxy[name];
 
 		if (currentValue === newModel) {
@@ -273,6 +306,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private setModels(name: PropertyKey, newModelsSource: Model[]): void {
+		validateModelChildValue(newModelsSource, name);
 		const newModels = createObservableWithCustomAdministration(
 			[] as Model[],
 			ChildModelsAdministration
