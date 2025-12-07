@@ -115,6 +115,59 @@ export function getObservable<T>(value: T): T {
 	return value;
 }
 
+// Shallow observable map - tracks which observables are shallow
+const shallowObservables: WeakSet<object> = new WeakSet();
+
+export function isShallowObservable(obj: unknown): boolean {
+	if (!obj || typeof obj !== "object") return false;
+	return shallowObservables.has(obj);
+}
+
+export function getShallowObservable<T>(value: T): T {
+	if (!value) {
+		return value;
+	}
+
+	// Already has an administration - return the existing proxy
+	const existingAdm = getAdministration(value);
+	if (existingAdm) {
+		return existingAdm.proxy as unknown as T;
+	}
+
+	if (
+		(typeof value === "object" || typeof value === "function") &&
+		!Object.isFrozen(value)
+	) {
+		const obj = value as unknown as object;
+
+		let Adm: (new (obj: any) => Administration) | null = null;
+
+		// For shallow observables, only wrap collections (arrays, maps, sets)
+		// Plain objects should NOT be wrapped - this allows structuredClone
+		// and prevents nested property tracking
+		if (Array.isArray(obj)) {
+			Adm = ArrayAdministration;
+		} else if (obj instanceof Map || obj instanceof WeakMap) {
+			Adm = CollectionAdministration;
+		} else if (obj instanceof Set || obj instanceof WeakSet) {
+			Adm = CollectionAdministration;
+		}
+		// Plain objects and Date are NOT wrapped for shallow observables
+
+		if (Adm) {
+			const adm = new Adm(obj);
+			administrationMap.set(adm.proxy, adm);
+			administrationMap.set(adm.source, adm);
+			// Mark this observable as shallow
+			shallowObservables.add(adm.proxy);
+			return adm.proxy as unknown as T;
+		}
+	}
+
+	// For non-collections, return raw value
+	return value;
+}
+
 export function isObservable(obj: unknown): boolean {
 	if (!obj || typeof obj !== "object") return false;
 

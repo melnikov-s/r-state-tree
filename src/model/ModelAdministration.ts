@@ -132,7 +132,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							adm.setId(name as string, value as IdType);
 							break;
 						}
-						case ModelCfgTypes.state: {
+						case ModelCfgTypes.state:
+						case ModelCfgTypes.stateShallow:
+						case ModelCfgTypes.stateSignal: {
 							adm.setState(name as string, value);
 							break;
 						}
@@ -491,6 +493,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		return Object.keys(this.configuration).reduce((json: any, key) => {
 			switch (this.configuration[key].type) {
 				case ModelCfgTypes.state:
+				case ModelCfgTypes.stateShallow:
+				case ModelCfgTypes.stateSignal:
 				case ModelCfgTypes.id:
 					json[key] = clone(getSource(this.proxy[key]));
 					break;
@@ -562,6 +566,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 				switch (type) {
 					case ModelCfgTypes.state:
+					case ModelCfgTypes.stateShallow:
+					case ModelCfgTypes.stateSignal:
 						this.proxy[key] = value;
 						break;
 					case ModelCfgTypes.modelRef:

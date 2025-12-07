@@ -154,3 +154,199 @@ test("constructor has observable instance", () => {
 	expect(weakSet.has(c)).toBe(true);
 	expect.assertions(2);
 });
+
+describe("@observable.shallow", () => {
+	test("shallow observable container is reactive", () => {
+		class C extends Observable {
+			@observable.shallow items: { value: number }[] = [];
+		}
+
+		const c = new C();
+		let count = 0;
+
+		effect(() => {
+			c.items.length;
+			count++;
+		});
+
+		c.items.push({ value: 1 });
+		expect(count).toBe(2);
+	});
+
+	test("shallow observable does not make pushed items observable", () => {
+		class C extends Observable {
+			@observable.shallow items: { value: number }[] = [];
+		}
+
+		const c = new C();
+		c.items.push({ value: 1 });
+
+		expect(isObservable(c.items[0])).toBe(false);
+	});
+
+	test("shallow observable does not make nested object properties observable", () => {
+		class C extends Observable {
+			@observable.shallow data: { nested: { value: number } } = {
+				nested: { value: 1 },
+			};
+		}
+
+		const c = new C();
+		let count = 0;
+
+		effect(() => {
+			c.data.nested.value;
+			count++;
+		});
+
+		c.data.nested.value = 2;
+		expect(count).toBe(1);
+
+		c.data = { nested: { value: 3 } };
+		expect(count).toBe(2);
+	});
+
+	test("shallow observable container tracks array mutations", () => {
+		class C extends Observable {
+			@observable.shallow items: number[] = [];
+		}
+
+		const c = new C();
+		let count = 0;
+
+		effect(() => {
+			c.items.length;
+			count++;
+		});
+
+		c.items.push(1);
+		expect(count).toBe(2);
+		c.items.pop();
+		expect(count).toBe(3);
+	});
+
+	test("shallow observable works with Map", () => {
+		class C extends Observable {
+			@observable.shallow map = new Map<string, { value: number }>();
+		}
+
+		const c = new C();
+		let count = 0;
+
+		effect(() => {
+			c.map.size;
+			count++;
+		});
+
+		c.map.set("a", { value: 1 });
+		expect(count).toBe(2);
+
+		expect(isObservable(c.map.get("a"))).toBe(false);
+	});
+
+	test("shallow observable allows structuredClone of values", () => {
+		class C extends Observable {
+			@observable.shallow items: { value: number }[] = [];
+		}
+
+		const c = new C();
+		c.items.push({ value: 1 });
+
+		expect(() => structuredClone(c.items[0])).not.toThrow();
+	});
+
+	test("can mix regular and shallow observables in same class", () => {
+		class C extends Observable {
+			@observable deepItems: { value: number }[] = [];
+			@observable.shallow shallowItems: { value: number }[] = [];
+		}
+
+		const c = new C();
+		c.deepItems.push({ value: 1 });
+		c.shallowItems.push({ value: 2 });
+
+		expect(isObservable(c.deepItems[0])).toBe(true);
+		expect(isObservable(c.shallowItems[0])).toBe(false);
+	});
+});
+
+describe("@observable.signal", () => {
+	test("signal observable triggers on assignment", () => {
+		class C extends Observable {
+			@observable.signal items: number[] = [];
+		}
+
+		const c = new C();
+		let count = 0;
+
+		effect(() => {
+			c.items;
+			count++;
+		});
+
+		c.items = [1, 2, 3];
+		expect(count).toBe(2);
+	});
+
+	test("signal observable does NOT trigger on array mutations", () => {
+		class C extends Observable {
+			@observable.signal items: number[] = [];
+		}
+
+		const c = new C();
+		let count = 0;
+
+		effect(() => {
+			c.items;
+			count++;
+		});
+
+		c.items.push(1);
+		expect(count).toBe(1);
+
+		c.items.pop();
+		expect(count).toBe(1);
+
+		c.items = [...c.items, 2];
+		expect(count).toBe(2);
+	});
+
+	test("signal observable value is NOT observable", () => {
+		class C extends Observable {
+			@observable.signal data: { value: number } = { value: 1 };
+		}
+
+		const c = new C();
+
+		expect(isObservable(c.data)).toBe(false);
+	});
+
+	test("signal observable nested properties are not tracked", () => {
+		class C extends Observable {
+			@observable.signal data: { nested: { value: number } } = {
+				nested: { value: 1 },
+			};
+		}
+
+		const c = new C();
+		let count = 0;
+
+		effect(() => {
+			c.data.nested.value;
+			count++;
+		});
+
+		c.data.nested.value = 2;
+		expect(count).toBe(1);
+	});
+
+	test("signal observable allows structuredClone", () => {
+		class C extends Observable {
+			@observable.signal data: { value: number } = { value: 1 };
+		}
+
+		const c = new C();
+
+		expect(() => structuredClone(c.data)).not.toThrow();
+	});
+});

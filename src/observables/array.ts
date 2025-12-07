@@ -5,6 +5,7 @@ import {
 	getObservable,
 	getSource,
 	isObservable,
+	isShallowObservable,
 } from "./internal/lookup";
 import { Administration } from "./internal/Administration";
 import { SignalMap } from "./internal/NodeMap";
@@ -184,6 +185,11 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 	get(index: number): T | undefined {
 		this.atom.reportObserved();
 		this.valuesMap.reportObserved(index, this.source[index]);
+
+		// For shallow observables, don't wrap child values
+		if (isShallowObservable(this.proxy)) {
+			return this.source[index];
+		}
 
 		return getObservable(this.source[index]);
 	}

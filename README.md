@@ -42,6 +42,19 @@ TypeScript 5+ supports TC39 Stage 3 decorators.
 - `useDefineForClassFields: true` is recommended with modern toolchains targeting ES2022.
 - The library includes a `Symbol.metadata` polyfill via `@tsmetadata/polyfill`.
 
+### Vite / esbuild config (SSR)
+
+When using Vite or esbuild for SSR, ensure the target is set to `es2022` to support Stage 3 decorators:
+
+```ts
+// vite.config.ts
+export default defineConfig({
+	esbuild: {
+		target: "es2022",
+	},
+});
+```
+
 ## Core concepts
 
 - Stores: application/view state containers. Create with `createStore()`, attach with `mount()`. Compose with `@child` (single or arrays, stable via `{ key }`). React to changes with `effect`/`reaction` and store lifecycles (`storeDidMount`/`storeWillUnmount`). Update reactive `props` via `updateStore()`.
@@ -387,6 +400,55 @@ effect(() => {
 });
 
 state.count++; // Triggers the effect
+```
+
+### Shallow and signal observables
+
+Control the depth of reactivity with `@observable.shallow` and `@observable.signal`:
+
+| Decorator | Container Observable? | Values Observable? | Triggers on... |
+|-----------|----------------------|-------------------|----------------|
+| `@observable` | ✅ Yes | ✅ Yes (deep) | mutations + assignment |
+| `@observable.shallow` | ✅ Yes | ❌ No | mutations + assignment |
+| `@observable.signal` | ❌ No | ❌ No | assignment only |
+
+```ts
+import { Observable, observable, effect, isObservable } from "r-state-tree";
+
+class DataStore extends Observable {
+	// Deep observable - items pushed are also observable
+	@observable deepItems: { value: number }[] = [];
+
+	// Shallow - container is observable, but pushed items are NOT
+	@observable.shallow shallowItems: { value: number }[] = [];
+
+	// Signal - only assignment triggers, mutations do not
+	@observable.signal signalItems: number[] = [];
+}
+
+const store = new DataStore();
+
+// Shallow: items pushed are NOT observable (safe for structuredClone)
+store.shallowItems.push({ value: 1 });
+console.log(isObservable(store.shallowItems[0])); // false
+
+// Signal: mutations don't trigger effects
+effect(() => store.signalItems.length);
+store.signalItems.push(1); // Does NOT trigger effect
+store.signalItems = [1, 2]; // DOES trigger effect
+```
+
+**Use cases:**
+- `@observable.shallow`: Store external data that may need `structuredClone()`, or when you want change detection on the container but not deep reactivity
+- `@observable.signal`: Maximum performance when you're replacing values rather than mutating them
+
+Models support the same modifiers with `@state`:
+
+```ts
+class M extends Model {
+	@state.shallow items: { value: number }[] = []; // Container tracked, items not
+	@state.signal data: SomeType = null; // Only assignment tracked
+}
 ```
 
 ## Observables (low‑level)
@@ -824,6 +886,31 @@ const off = onSnapshot(m, (snap) =>
 - Forgetting stable keys for `@child` arrays causes identity churn.
 - Assuming deep reactivity on undecorated fields of plain classes; use `@observable` for `Observable` classes, or use Stores/Models.
 - Creating child stores in constructors: `@child` must be on getters so identity and lifecycle can be managed by the framework.
+- Passing `models` into child stores during mount can create a recursive mount loop. If a child needs parent models, create the child store/model inside `storeDidMount` instead of wiring it through `models` during the mount cycle.
+
+### Circular store/model creation
+
+When child stores are created during mount with `models` that point back into the parent, it is easy to trigger an endless mount loop. The runtime now guards this by throwing a descriptive error (for example, `detected circular store/model creation while mounting ParentStore -> ChildStore.loop -> ...`). If you see this, move child creation into `storeDidMount` or break the cycle so that models are produced after the parent finishes mounting.
+
+## LLM implementation checklist
+
+- Do not thread context data via props. Provide contexts at the parent and consume them in children. Passing `getX` callbacks for resource/page/video/skill is a red flag—consume contexts instead.
+- Avoid aggregating contexts into a single `ctx` object; consume where needed or expose small, focused getters.
+- Only create stores in three places: root, `@child` getters, or immediately before mounting. Avoid standalone factory helpers; inline `createStore` in `@child` getters.
+- Do not wrap `createStore` calls with `as Record<string, unknown>`; fix typing instead.
+- Domain/persistent state belongs in Models; UI/app orchestration in Stores. Keep UI terms out of domain models—name domain concepts (e.g., `ChatThreadsModel`).
+- If state is persistent/rehydratable, model it and derive stores from the model; keep purely view/ephemeral state in stores.
+- Use r-state-tree snapshots (`toSnapshot`/`applySnapshot`) instead of hand-rolled `serialize`/`rehydrate` unless a different shape is required.
+- Keep `onPersist` only when syncing store state into a backing model; otherwise prefer snapshot listeners.
+- Pure, stateless helpers belong in utility modules, not as store methods. If a method does not touch `this`, extract it; keep coupled helpers in the store.
+- Provide stable, rarely changing resource/view/video/page data via context (resourceId, resourceType, totalPages, current page/display mode, page offsets, document title, skill/detail, video info). Children should consume context directly.
+- Use `@child` getters to create child stores with stable keys; avoid constructor creation. Pass only what the child needs; avoid prop drilling context.
+- Eliminate blanket casts; fix types and let inference work. Avoid `any`.
+- For `createStore` props, extend `Record<string, unknown>` only if needed; otherwise rely on proper prop types and context.
+- Avoid barrel files if they cause import confusion; prefer direct imports.
+- Keep file boundaries clean: one model per file; avoid piling multiple models together.
+- Do not shadow `props` or use constructors for work better suited to `storeDidMount`.
+- Use `@model` for injected models; `@child` for child stores; stable keys for arrays.
 
 ## Typing recipes
 

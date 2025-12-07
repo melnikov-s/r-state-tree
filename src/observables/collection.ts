@@ -5,6 +5,7 @@ import {
 	getSource,
 	getAdministration,
 	isObservable,
+	isShallowObservable,
 } from "./internal/lookup";
 import { Administration } from "./internal/Administration";
 import { AtomMap, SignalMap } from "./internal/NodeMap";
@@ -210,6 +211,10 @@ export class CollectionAdministration<K, V = K> extends Administration<
 
 		if (has) {
 			this.valuesMap!.reportObserved(key, value);
+			// For shallow observables, don't wrap values
+			if (isShallowObservable(this.proxy)) {
+				return value;
+			}
 			return getObservable(value);
 		}
 

@@ -8,6 +8,7 @@ import {
 	applySnapshot,
 	effect,
 	reaction,
+	isObservable,
 } from "../src/index";
 
 test("can create a model", () => {
@@ -1177,5 +1178,335 @@ describe("model references", () => {
 		expect(m.mr).toEqual([]); // Filters out all undefined
 		m.restoreModel2();
 		expect(m.mr).toEqual([m.mc2]); // Only valid models
+	});
+});
+
+describe("child type validation", () => {
+	test("rejects non-Model values for child property", () => {
+		class MC extends Model {}
+		class M extends Model {
+			@child(MC) child: MC;
+		}
+
+		const m = M.create();
+
+		expect(() => {
+			m.child = "invalid" as unknown as MC;
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'child' must be a Model instance, an array of Model instances, or null/undefined. Found: string]`
+		);
+
+		expect(() => {
+			m.child = 123 as unknown as MC;
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'child' must be a Model instance, an array of Model instances, or null/undefined. Found: number]`
+		);
+
+		expect(() => {
+			m.child = {} as unknown as MC;
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'child' must be a Model instance, an array of Model instances, or null/undefined. Found: object]`
+		);
+	});
+
+	test("allows null and undefined for child property", () => {
+		class MC extends Model {}
+		class M extends Model {
+			@child(MC) child: MC | null;
+		}
+
+		const m = M.create();
+
+		expect(() => {
+			m.child = null;
+		}).not.toThrow();
+
+		expect(() => {
+			m.child = undefined as unknown as MC | null;
+		}).not.toThrow();
+	});
+
+	test("allows Model instance for child property", () => {
+		class MC extends Model {}
+		class M extends Model {
+			@child(MC) child: MC;
+		}
+
+		const m = M.create();
+		const childModel = MC.create();
+
+		expect(() => {
+			m.child = childModel;
+		}).not.toThrow();
+		expect(m.child).toBe(childModel);
+	});
+
+	test("rejects array with non-Model items for child property", () => {
+		class MC extends Model {}
+		class M extends Model {
+			@child(MC) children: MC[];
+		}
+
+		const m = M.create();
+
+		expect(() => {
+			m.children = ["invalid", "values"] as unknown as MC[];
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'children' must be a Model instance, an array of Model instances, or null/undefined. Found invalid array item: string]`
+		);
+
+		expect(() => {
+			m.children = [MC.create(), "invalid"] as unknown as MC[];
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'children' must be a Model instance, an array of Model instances, or null/undefined. Found invalid array item: string]`
+		);
+
+		expect(() => {
+			m.children = [123, 456] as unknown as MC[];
+		}).toThrowErrorMatchingInlineSnapshot(
+			`[Error: r-state-tree: child property 'children' must be a Model instance, an array of Model instances, or null/undefined. Found invalid array item: number]`
+		);
+	});
+
+	test("allows array of Model instances for child property", () => {
+		class MC extends Model {}
+		class M extends Model {
+			@child(MC) children: MC[];
+		}
+
+		const m = M.create();
+		const children = [MC.create(), MC.create()];
+
+		expect(() => {
+			m.children = children;
+		}).not.toThrow();
+		expect(m.children).toEqual(children);
+	});
+
+	test("allows empty array for child property", () => {
+		class MC extends Model {}
+		class M extends Model {
+			@child(MC) children: MC[];
+		}
+
+		const m = M.create();
+
+		expect(() => {
+			m.children = [];
+		}).not.toThrow();
+		expect(m.children).toEqual([]);
+	});
+});
+
+describe("@state.shallow", () => {
+	test("shallow state container is reactive", () => {
+		class M extends Model {
+			@state.shallow items: { value: number }[] = [];
+
+			addItem(value: number) {
+				this.items.push({ value });
+			}
+		}
+
+		const m = M.create();
+		let count = 0;
+
+		effect(() => {
+			m.items.length;
+			count++;
+		});
+
+		m.addItem(1);
+		expect(count).toBe(2);
+	});
+
+	test("shallow state does not make pushed items observable", () => {
+		class M extends Model {
+			@state.shallow items: { value: number }[] = [];
+
+			addItem(value: number) {
+				this.items.push({ value });
+			}
+		}
+
+		const m = M.create();
+		m.addItem(1);
+
+		expect(isObservable(m.items[0])).toBe(false);
+	});
+
+	test("shallow state is included in snapshots", () => {
+		class M extends Model {
+			@state.shallow items: { value: number }[] = [];
+
+			addItem(value: number) {
+				this.items.push({ value });
+			}
+		}
+
+		const m = M.create();
+		m.addItem(1);
+		m.addItem(2);
+
+		const snapshot = toSnapshot(m);
+		expect(snapshot.items).toEqual([{ value: 1 }, { value: 2 }]);
+	});
+
+	test("shallow state can be restored from snapshot", () => {
+		class M extends Model {
+			@state.shallow items: { value: number }[] = [];
+		}
+
+		const m = M.create();
+		applySnapshot(m, { items: [{ value: 1 }, { value: 2 }] });
+
+		expect(m.items).toEqual([{ value: 1 }, { value: 2 }]);
+		expect(isObservable(m.items[0])).toBe(false);
+	});
+
+	test("shallow state allows structuredClone of values", () => {
+		class M extends Model {
+			@state.shallow data: { value: number } = { value: 1 };
+		}
+
+		const m = M.create();
+
+		expect(() => structuredClone(m.data)).not.toThrow();
+	});
+});
+
+describe("@state.signal", () => {
+	test("signal state triggers on assignment", () => {
+		class M extends Model {
+			@state.signal items: number[] = [];
+
+			setItems(items: number[]) {
+				this.items = items;
+			}
+		}
+
+		const m = M.create();
+		let count = 0;
+
+		reaction(
+			() => m.items,
+			() => count++
+		);
+
+		m.setItems([1, 2, 3]);
+		expect(count).toBe(1);
+	});
+
+	test("signal state does NOT trigger on array mutations", () => {
+		class M extends Model {
+			@state.signal items: number[] = [];
+
+			pushItem(item: number) {
+				this.items.push(item);
+			}
+
+			setItems(items: number[]) {
+				this.items = items;
+			}
+		}
+
+		const m = M.create();
+		let count = 0;
+
+		reaction(
+			() => m.items,
+			() => count++
+		);
+
+		m.pushItem(1);
+		expect(count).toBe(0);
+
+		m.setItems([1, 2]);
+		expect(count).toBe(1);
+	});
+
+	test("signal state value is NOT observable", () => {
+		class M extends Model {
+			@state.signal data: { value: number } = { value: 1 };
+		}
+
+		const m = M.create();
+
+		expect(isObservable(m.data)).toBe(false);
+	});
+
+	test("signal state is included in snapshots", () => {
+		class M extends Model {
+			@state.signal items: number[] = [];
+
+			setItems(items: number[]) {
+				this.items = items;
+			}
+		}
+
+		const m = M.create();
+		m.setItems([1, 2, 3]);
+
+		const snapshot = toSnapshot(m);
+		expect(snapshot.items).toEqual([1, 2, 3]);
+	});
+
+	test("signal state can be restored from snapshot", () => {
+		class M extends Model {
+			@state.signal items: number[] = [];
+		}
+
+		const m = M.create();
+		applySnapshot(m, { items: [1, 2, 3] });
+
+		expect(m.items).toEqual([1, 2, 3]);
+		expect(isObservable(m.items)).toBe(false);
+	});
+
+	test("signal state allows structuredClone", () => {
+		class M extends Model {
+			@state.signal data: { nested: { value: number } } = {
+				nested: { value: 1 },
+			};
+		}
+
+		const m = M.create();
+
+		expect(() => structuredClone(m.data)).not.toThrow();
+	});
+
+	test("can mix regular and signal state in same model", () => {
+		class M extends Model {
+			@state regularItems: number[] = [];
+			@state.signal signalItems: number[] = [];
+
+			pushRegular(item: number) {
+				this.regularItems.push(item);
+			}
+
+			pushSignal(item: number) {
+				this.signalItems.push(item);
+			}
+		}
+
+		const m = M.create();
+		let regularCount = 0;
+		let signalCount = 0;
+
+		effect(() => {
+			m.regularItems.length;
+			regularCount++;
+		});
+
+		effect(() => {
+			m.signalItems.length;
+			signalCount++;
+		});
+
+		m.pushRegular(1);
+		expect(regularCount).toBe(2);
+
+		m.pushSignal(1);
+		expect(signalCount).toBe(1);
 	});
 });

@@ -22,7 +22,12 @@ export function isPropertyKey(val: unknown): val is string | number | symbol {
 	);
 }
 
-export type PropertyType = "action" | "computed" | "observable";
+export type PropertyType =
+	| "action"
+	| "computed"
+	| "observable"
+	| "observableShallow"
+	| "observableSignal";
 
 export function getPropertyType(
 	key: PropertyKey,
@@ -61,6 +66,12 @@ export function getPropertyType(
 		switch (config.type) {
 			case ObservableCfgTypes.computed:
 				return "computed";
+			case ObservableCfgTypes.observableShallow:
+			case ModelCfgTypes.stateShallow:
+				return "observableShallow";
+			case ObservableCfgTypes.observableSignal:
+			case ModelCfgTypes.stateSignal:
+				return "observableSignal";
 			case ModelCfgTypes.state:
 			case ObservableCfgTypes.observable:
 			case ModelCfgTypes.id:

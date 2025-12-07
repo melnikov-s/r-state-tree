@@ -2,6 +2,7 @@ import { batch, createAtom, createComputed } from "./preact";
 import type { AtomNode, ComputedNode } from "./preact";
 import {
 	getObservable,
+	getShallowObservable,
 	getSource,
 	getAction,
 	getAdministration,
@@ -166,6 +167,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 		switch (type) {
 			case "observable":
+			case "observableShallow":
 			case "action": {
 				if (key in this.source) {
 					this.valuesMap.reportObserved(key, this.source[key]);
@@ -183,7 +185,26 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 					return getObservable(this.get(key));
 				}
 
+				if (type === "observableShallow") {
+					return getShallowObservable(this.get(key));
+				}
+
 				return getAction(this.get(key) as unknown as Function);
+			}
+			case "observableSignal": {
+				// For signal, we track the property but return the raw value
+				if (key in this.source) {
+					this.valuesMap.reportObserved(key, this.source[key]);
+				}
+
+				this.atom.reportObserved();
+
+				if (this.atom.observing) {
+					this.hasMap.reportObserved(key);
+				}
+
+				// Return raw value - no observable wrapping
+				return this.get(key);
 			}
 			case "computed": {
 				return this.callComputed(key);

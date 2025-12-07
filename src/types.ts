@@ -35,6 +35,8 @@ export enum CommonCfgTypes {
 
 export enum ModelCfgTypes {
 	state = "state",
+	stateShallow = "stateShallow",
+	stateSignal = "stateSignal",
 	id = "id",
 	modelRef = "modelRef",
 }
@@ -45,6 +47,8 @@ export enum StoreCfgTypes {
 
 export enum ObservableCfgTypes {
 	observable = "observable",
+	observableShallow = "observableShallow",
+	observableSignal = "observableSignal",
 	computed = "computed",
 }
 
@@ -107,6 +111,14 @@ export const stateType: ConfigurationType = {
 	type: ModelCfgTypes.state,
 };
 
+export const stateShallowType: ConfigurationType = {
+	type: ModelCfgTypes.stateShallow,
+};
+
+export const stateSignalType: ConfigurationType = {
+	type: ModelCfgTypes.stateSignal,
+};
+
 export const modelRefType = Object.assign(
 	function (childType: Function): ConfigurationType {
 		return { type: ModelCfgTypes.modelRef, childType };
@@ -121,6 +133,14 @@ export const modelType: ConfigurationType = {
 
 export const observableType: ConfigurationType = {
 	type: ObservableCfgTypes.observable,
+};
+
+export const observableShallowType: ConfigurationType = {
+	type: ObservableCfgTypes.observableShallow,
+};
+
+export const observableSignalType: ConfigurationType = {
+	type: ObservableCfgTypes.observableSignal,
 };
 
 export const computedType: ConfigurationType = {

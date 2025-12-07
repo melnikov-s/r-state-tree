@@ -273,12 +273,10 @@ export type PreactObservable<T> = T extends Function
 	  };
 
 // observable can be used both as a decorator and as a function
-export function observable<T>(obj: T): PreactObservable<T>;
-export function observable(
-	value: undefined,
-	context: ClassFieldDecoratorContext
-): void;
-export function observable(value: any, context?: any): any {
+// Also supports .shallow and .signal modifiers for decorator use
+function observableImpl<T>(obj: T): PreactObservable<T>;
+function observableImpl(value: undefined, context: ClassFieldDecoratorContext): void;
+function observableImpl(value: any, context?: any): any {
 	// If context exists and has 'kind', it's being used as a decorator
 	if (context && typeof context === "object" && "kind" in context) {
 		// Decorator behavior - set metadata
@@ -289,6 +287,27 @@ export function observable(value: any, context?: any): any {
 	// Otherwise, it's the regular observable wrapping function
 	return getObservable(value) as any;
 }
+
+function shallowDecorator(value: any, context: ClassFieldDecoratorContext): any {
+	if (context && typeof context === "object" && "kind" in context) {
+		context.metadata![context.name!] = { type: "observableShallow" };
+		return value;
+	}
+	throw new Error("observable.shallow can only be used as a decorator");
+}
+
+function signalDecorator(value: any, context: ClassFieldDecoratorContext): any {
+	if (context && typeof context === "object" && "kind" in context) {
+		context.metadata![context.name!] = { type: "observableSignal" };
+		return value;
+	}
+	throw new Error("observable.signal can only be used as a decorator");
+}
+
+export const observable = Object.assign(observableImpl, {
+	shallow: shallowDecorator,
+	signal: signalDecorator,
+});
 
 // computed can be used both as a decorator and as a function
 export function computed<T>(
