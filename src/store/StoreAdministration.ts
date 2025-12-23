@@ -7,6 +7,8 @@ import {
 	batch,
 	untracked,
 	createComputed,
+	getObservable,
+	isObservable,
 } from "../observables";
 import type { ListenerNode, SignalNode, ComputedNode } from "../observables";
 import { allowNewStore } from "./Store";
@@ -73,7 +75,9 @@ export function updateProps(props: Props, newProps: Props): void {
 			});
 
 			if (newProps.models) {
-				if (!props.models) props.models = {};
+				if (!props.models || !isObservable(props.models)) {
+					props.models = getObservable(props.models || {});
+				}
 				Object.assign(props.models, newProps.models);
 			}
 		});
@@ -392,7 +396,9 @@ export class StoreAdministration<
 	}
 
 	private getModelRef(name: PropertyKey): Model | Model[] | null {
-		return this.proxy.props.models?.[name as string] ?? null;
+		const models = this.proxy.props.models;
+		const ref = models?.[name as string] ?? null;
+		return ref;
 	}
 
 	isRoot(): boolean {

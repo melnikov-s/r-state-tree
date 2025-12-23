@@ -82,6 +82,10 @@ class NodeMap<
 	reportChanged(key: K, value?: unknown): void {
 		return this.get(key)?.reportChanged(value);
 	}
+
+	keys(): Iterable<unknown> {
+		return this.map?.keys() ?? [];
+	}
 }
 
 export class AtomMap<K = unknown> extends NodeMap<K, AtomNode> {

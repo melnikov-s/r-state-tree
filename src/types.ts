@@ -1,5 +1,6 @@
 import type Store from "./store/Store";
 import type Model from "./model/Model";
+import type { Signal } from "@preact/signals-core";
 
 export type StoreElement = {
 	Type: new (...args: unknown[]) => Store;
@@ -35,8 +36,6 @@ export enum CommonCfgTypes {
 
 export enum ModelCfgTypes {
 	state = "state",
-	stateShallow = "stateShallow",
-	stateSignal = "stateSignal",
 	id = "id",
 	modelRef = "modelRef",
 }
@@ -46,9 +45,6 @@ export enum StoreCfgTypes {
 }
 
 export enum ObservableCfgTypes {
-	observable = "observable",
-	observableShallow = "observableShallow",
-	observableSignal = "observableSignal",
 	computed = "computed",
 }
 
@@ -67,15 +63,51 @@ export type ModelConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type StoreConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type Configuration<T> = ModelConfiguration<T> | StoreConfiguration<T>;
 
-// Don't evaluate property types to avoid circular references
-// Snapshot types are primarily for documentation - actual snapshot logic
-// uses the configuration object, not TypeScript types
-type SnapshotValue<T> = T extends Model
+/**
+ * Types that are explicitly rejected in snapshots.
+ * Runtime guards enforce this; storing these in `@state` throws on `toSnapshot()`.
+ */
+type NonSnapshotable =
+	| Map<unknown, unknown>
+	| Set<unknown>
+	| WeakMap<object, unknown>
+	| WeakSet<object>
+	| RegExp
+	| Error
+	| Promise<unknown>;
+
+/**
+ * Converts a type to its snapshot representation.
+ *
+ * Snapshot contract (JSON-only):
+ * - Primitives (string, number, boolean, null, undefined) pass through.
+ * - Arrays are recursively converted.
+ * - Plain objects are recursively converted (see note below).
+ * - Date → string (ISO format).
+ * - Signal<T> → SnapshotValue<T> (unwraps to the signal's value type, recursively converted).
+ * - Model → Snapshot<Model>.
+ * - Map/Set/WeakMap/WeakSet/RegExp/Error/Promise/bigint/symbol/function → never (rejected at runtime).
+ *
+ * Note: TypeScript cannot fully enforce the "plain object" constraint at compile time.
+ * This type models object recursion for Record/object types, but runtime guards will
+ * reject class instances and other non-plain objects with a descriptive error.
+ */
+export type SnapshotValue<T> = T extends bigint | symbol | Function
+	? never // Rejected at runtime; never here causes type errors
+	: T extends NonSnapshotable
+	? never // Rejected at runtime; never here causes type errors
+	: T extends Signal<infer U>
+	? SnapshotValue<U> // Signals unwrap to their value type
+	: T extends Model
 	? Snapshot<T>
+	: T extends Date
+	? string // Dates serialize to ISO strings
 	: T extends Array<infer R>
 	? R extends Model
 		? Array<Snapshot<R>>
-		: T
+		: Array<SnapshotValue<R>>
+	: T extends object
+	? { [K in keyof T]: SnapshotValue<T[K]> } // Recursively convert object properties
 	: T;
 
 export type Snapshot<T extends Model = Model> = {
@@ -111,14 +143,6 @@ export const stateType: ConfigurationType = {
 	type: ModelCfgTypes.state,
 };
 
-export const stateShallowType: ConfigurationType = {
-	type: ModelCfgTypes.stateShallow,
-};
-
-export const stateSignalType: ConfigurationType = {
-	type: ModelCfgTypes.stateSignal,
-};
-
 export const modelRefType = Object.assign(
 	function (childType: Function): ConfigurationType {
 		return { type: ModelCfgTypes.modelRef, childType };
@@ -129,18 +153,6 @@ export const modelRefType = Object.assign(
 export const idType: ConfigurationType = { type: ModelCfgTypes.id };
 export const modelType: ConfigurationType = {
 	type: StoreCfgTypes.model,
-};
-
-export const observableType: ConfigurationType = {
-	type: ObservableCfgTypes.observable,
-};
-
-export const observableShallowType: ConfigurationType = {
-	type: ObservableCfgTypes.observableShallow,
-};
-
-export const observableSignalType: ConfigurationType = {
-	type: ObservableCfgTypes.observableSignal,
 };
 
 export const computedType: ConfigurationType = {

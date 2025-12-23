@@ -110,14 +110,15 @@ class ObservableListener<T> {
 }
 
 export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
-	set(index: number, newValue: T): void {
+	set(index: number, newValue: T): boolean {
 		return batch(() => {
-			super.set(index, newValue);
+			const result = super.set(index, newValue);
 
 			const sourceValue = getSource(newValue);
 			if (this.source[index] !== sourceValue) {
 				notifyArrayUpdate(this.proxy, index, this.source[index], sourceValue);
 			}
+			return result;
 		});
 	}
 

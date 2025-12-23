@@ -10,6 +10,7 @@ import {
 	onSnapshotDiff,
 } from "./api";
 import { createContext } from "./context";
+import { toObservableTree } from "./toObservableTree";
 
 export {
 	createStore,
@@ -23,6 +24,7 @@ export {
 	toSnapshot,
 	applySnapshot,
 	createContext,
+	toObservableTree,
 };
 
 export {
@@ -39,11 +41,17 @@ export {
 	batch,
 	untracked,
 	effect,
-	Observable,
 	signal,
+	Observable,
 } from "./observables";
 
 export * from "./decorators";
 
-export type { Configuration, Snapshot, IdType, SnapshotDiff } from "./types";
+export type {
+	Configuration,
+	Snapshot,
+	SnapshotValue,
+	IdType,
+	SnapshotDiff,
+} from "./types";
 export type { Context } from "./context";

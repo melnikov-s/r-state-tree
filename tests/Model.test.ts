@@ -6,9 +6,12 @@ import {
 	state,
 	toSnapshot,
 	applySnapshot,
+	onSnapshot,
 	effect,
 	reaction,
 	isObservable,
+	observable,
+	signal,
 } from "../src/index";
 
 test("can create a model", () => {
@@ -467,9 +470,10 @@ describe("model identifiers", () => {
 		}
 
 		const mp = MP.create();
-		expect(mp.m).toBe(mp.mr);
+		// With shallow behavior, use deep equality for Model comparisons
+		expect(mp.m).toStrictEqual(mp.mr);
 		mp.m.setId();
-		expect(mp.m).toBe(mp.mr);
+		expect(mp.m).toStrictEqual(mp.mr);
 	});
 
 	test("correct id shows up in snapshot after being re-assigned", () => {
@@ -953,7 +957,8 @@ describe("model references", () => {
 
 		const m = M.create();
 		m.setRef();
-		expect(m.mc).toBe(m.mr);
+		// With shallow behavior, use deep equality for Model comparisons
+		expect(m.mc).toStrictEqual(m.mr);
 	});
 
 	test("can't assing a model without an id to a reference", () => {
@@ -989,7 +994,8 @@ describe("model references", () => {
 		const m = M.create();
 		expect(m.mr).toBe(undefined);
 		m.setChild();
-		expect(m.mr).toBe(m.mc);
+		// With shallow behavior, use deep equality for Model comparisons
+		expect(m.mr).toStrictEqual(m.mc);
 	});
 
 	test("model ref will become undefined when model is detached", () => {
@@ -1012,7 +1018,8 @@ describe("model references", () => {
 		const m = M.create();
 		expect(m.mr).toBe(undefined);
 		m.setRef();
-		expect(m.mc).toBe(m.mr);
+		// With shallow behavior, use deep equality for Model comparisons
+		expect(m.mc).toStrictEqual(m.mr);
 		m.clearModel();
 		expect(m.mr).toBe(undefined);
 	});
@@ -1037,7 +1044,8 @@ describe("model references", () => {
 
 		const m = M.create();
 		m.setRef();
-		expect(m.mc[0]).toBe(m.mr);
+		// With shallow behavior, use deep equality for Model comparisons
+		expect(m.mc[0]).toStrictEqual(m.mr);
 		m.clearModel();
 		expect(m.mr).toBe(undefined);
 	});
@@ -1064,9 +1072,10 @@ describe("model references", () => {
 
 		expect(current).toBe(undefined);
 		m.setModel(0);
-		expect(current).toBe(m.mc[0]);
+		// With shallow behavior, use deep equality for Model comparisons
+		expect(current).toStrictEqual(m.mc[0]);
 		m.setModel(1);
-		expect(current).toBe(m.mc[1]);
+		expect(current).toStrictEqual(m.mc[1]);
 		m.setModel(-1);
 		expect(current).toBe(undefined);
 	});
@@ -1101,7 +1110,8 @@ describe("model references", () => {
 		expect(m.mc).toBe(null);
 		m.resetModel();
 		expect(m.mc).not.toBe(null);
-		expect(m.mr).toBe(m.mc);
+		// With shallow behavior, use deep equality for Model comparisons
+		expect(m.mr).toStrictEqual(m.mc);
 	});
 
 	test("model ref is NOT restored when model is re-attached to a another tree root", () => {
@@ -1298,13 +1308,15 @@ describe("child type validation", () => {
 	});
 });
 
-describe("@state.shallow", () => {
-	test("shallow state container is reactive", () => {
+// `@state` is shallow-reactive (assignment triggers reactivity) and participates in snapshots.
+// Values stored in `@state` are not deep-wrapped. Treat plain objects/arrays as immutable, or
+// store `observable()` containers / `signal()` values if you need in-place mutation + snapshot updates.
+describe("@state (snapshots; shallow by default)", () => {
+	test("@state fields are reactive on assignment (property-level)", () => {
 		class M extends Model {
-			@state.shallow items: { value: number }[] = [];
-
-			addItem(value: number) {
-				this.items.push({ value });
+			@state title = "a";
+			setTitle(t: string) {
+				this.title = t;
 			}
 		}
 
@@ -1312,32 +1324,130 @@ describe("@state.shallow", () => {
 		let count = 0;
 
 		effect(() => {
-			m.items.length;
+			m.title;
 			count++;
 		});
 
-		m.addItem(1);
+		m.setTitle("b");
 		expect(count).toBe(2);
 	});
 
-	test("shallow state does not make pushed items observable", () => {
+	test("toSnapshot updates after @state assignment (no stale cache)", () => {
 		class M extends Model {
-			@state.shallow items: { value: number }[] = [];
+			@state title = "a";
+			setTitle(t: string) {
+				this.title = t;
+			}
+		}
 
+		const m = M.create();
+		expect(toSnapshot(m)).toStrictEqual({ title: "a" });
+		m.setTitle("b");
+		expect(toSnapshot(m)).toStrictEqual({ title: "b" });
+	});
+
+	test("@state + observable() container mutations update snapshots", () => {
+		class M extends Model {
+			@state items: { value: number }[] = observable([]);
 			addItem(value: number) {
 				this.items.push({ value });
 			}
 		}
 
 		const m = M.create();
+		expect(toSnapshot(m)).toStrictEqual({ items: [] });
 		m.addItem(1);
+		expect(toSnapshot(m)).toStrictEqual({ items: [{ value: 1 }] });
 
+		// Items are NOT wrapped (shallow behavior)
 		expect(isObservable(m.items[0])).toBe(false);
 	});
 
-	test("shallow state is included in snapshots", () => {
+	test("@state + nested observable() containers update snapshots on deep mutation", () => {
 		class M extends Model {
-			@state.shallow items: { value: number }[] = [];
+			@state data = observable({ nested: observable({ value: 1 }) });
+		}
+
+		const m = M.create();
+		expect(toSnapshot(m)).toStrictEqual({ data: { nested: { value: 1 } } });
+		m.data.nested.value++;
+		expect(toSnapshot(m)).toStrictEqual({ data: { nested: { value: 2 } } });
+	});
+
+	test("@state + signal() serializes current value and stays up to date", () => {
+		class M extends Model {
+			@state count = signal(0);
+		}
+
+		const m = M.create();
+		expect(toSnapshot(m)).toStrictEqual({ count: 0 });
+		m.count.value = 1;
+		expect(toSnapshot(m)).toStrictEqual({ count: 1 });
+	});
+
+	test("raw in-place mutation does NOT trigger onSnapshot; reassignment does", () => {
+		class M extends Model {
+			@state tags: string[] = [];
+
+			pushTag(tag: string) {
+				this.tags.push(tag); // in-place
+			}
+
+			reassignTags(tags: string[]) {
+				this.tags = tags;
+			}
+		}
+
+		const m = M.create();
+		const snapshots: any[] = [];
+		const off = onSnapshot(m, (snap) => snapshots.push(snap));
+
+		// In-place mutation: onSnapshot does NOT fire
+		m.pushTag("a");
+		expect(snapshots.length).toBe(0);
+
+		// toSnapshot also returns the stale cached snapshot (from when listener was set up)
+		// because the snapshot is a memoized computed and no reactive dependencies changed
+		expect(toSnapshot(m)).toStrictEqual({ tags: [] });
+
+		// Reassignment: onSnapshot fires and cache is invalidated
+		m.reassignTags(["a", "b"]);
+		expect(snapshots.length).toBe(1);
+		expect(snapshots[0]).toStrictEqual({ tags: ["a", "b"] });
+
+		// Now toSnapshot reflects the new value
+		expect(toSnapshot(m)).toStrictEqual({ tags: ["a", "b"] });
+
+		off();
+	});
+
+	test("observable() container in @state triggers onSnapshot on mutation", () => {
+		class M extends Model {
+			@state items: { id: number }[] = observable([]);
+
+			addItem(id: number) {
+				this.items.push({ id });
+			}
+		}
+
+		const m = M.create();
+		const snapshots: any[] = [];
+		const off = onSnapshot(m, (snap) => snapshots.push(snap));
+
+		m.addItem(1);
+		expect(snapshots.length).toBe(1);
+		expect(snapshots[0]).toStrictEqual({ items: [{ id: 1 }] });
+
+		m.addItem(2);
+		expect(snapshots.length).toBe(2);
+		expect(snapshots[1]).toStrictEqual({ items: [{ id: 1 }, { id: 2 }] });
+
+		off();
+	});
+
+	test("state is included in snapshots", () => {
+		class M extends Model {
+			@state items: { value: number }[] = [];
 
 			addItem(value: number) {
 				this.items.push({ value });
@@ -1352,161 +1462,322 @@ describe("@state.shallow", () => {
 		expect(snapshot.items).toEqual([{ value: 1 }, { value: 2 }]);
 	});
 
-	test("shallow state can be restored from snapshot", () => {
+	test("state can be restored from snapshot", () => {
 		class M extends Model {
-			@state.shallow items: { value: number }[] = [];
+			@state items: { value: number }[] = [];
 		}
 
 		const m = M.create();
 		applySnapshot(m, { items: [{ value: 1 }, { value: 2 }] });
 
 		expect(m.items).toEqual([{ value: 1 }, { value: 2 }]);
+		// Items are NOT wrapped (shallow behavior)
 		expect(isObservable(m.items[0])).toBe(false);
 	});
 
-	test("shallow state allows structuredClone of values", () => {
+	test("state allows structuredClone of values", () => {
 		class M extends Model {
-			@state.shallow data: { value: number } = { value: 1 };
+			@state data: { value: number } = { value: 1 };
 		}
 
 		const m = M.create();
 
+		// Should NOT throw - values are plain objects
 		expect(() => structuredClone(m.data)).not.toThrow();
 	});
 });
 
-describe("@state.signal", () => {
-	test("signal state triggers on assignment", () => {
-		class M extends Model {
-			@state.signal items: number[] = [];
-
-			setItems(items: number[]) {
-				this.items = items;
-			}
-		}
-
-		const m = M.create();
-		let count = 0;
-
-		reaction(
-			() => m.items,
-			() => count++
-		);
-
-		m.setItems([1, 2, 3]);
-		expect(count).toBe(1);
-	});
-
-	test("signal state does NOT trigger on array mutations", () => {
-		class M extends Model {
-			@state.signal items: number[] = [];
-
-			pushItem(item: number) {
-				this.items.push(item);
+describe("snapshot serialization rules (JSON-only)", () => {
+	describe("Date serialization", () => {
+		test("Date serializes to ISO string in snapshots", () => {
+			class M extends Model {
+				@state createdAt: Date = new Date("2024-01-15T10:30:00.000Z");
 			}
 
-			setItems(items: number[]) {
-				this.items = items;
-			}
-		}
+			const m = M.create();
+			const snapshot = toSnapshot(m);
 
-		const m = M.create();
-		let count = 0;
-
-		reaction(
-			() => m.items,
-			() => count++
-		);
-
-		m.pushItem(1);
-		expect(count).toBe(0);
-
-		m.setItems([1, 2]);
-		expect(count).toBe(1);
-	});
-
-	test("signal state value is NOT observable", () => {
-		class M extends Model {
-			@state.signal data: { value: number } = { value: 1 };
-		}
-
-		const m = M.create();
-
-		expect(isObservable(m.data)).toBe(false);
-	});
-
-	test("signal state is included in snapshots", () => {
-		class M extends Model {
-			@state.signal items: number[] = [];
-
-			setItems(items: number[]) {
-				this.items = items;
-			}
-		}
-
-		const m = M.create();
-		m.setItems([1, 2, 3]);
-
-		const snapshot = toSnapshot(m);
-		expect(snapshot.items).toEqual([1, 2, 3]);
-	});
-
-	test("signal state can be restored from snapshot", () => {
-		class M extends Model {
-			@state.signal items: number[] = [];
-		}
-
-		const m = M.create();
-		applySnapshot(m, { items: [1, 2, 3] });
-
-		expect(m.items).toEqual([1, 2, 3]);
-		expect(isObservable(m.items)).toBe(false);
-	});
-
-	test("signal state allows structuredClone", () => {
-		class M extends Model {
-			@state.signal data: { nested: { value: number } } = {
-				nested: { value: 1 },
-			};
-		}
-
-		const m = M.create();
-
-		expect(() => structuredClone(m.data)).not.toThrow();
-	});
-
-	test("can mix regular and signal state in same model", () => {
-		class M extends Model {
-			@state regularItems: number[] = [];
-			@state.signal signalItems: number[] = [];
-
-			pushRegular(item: number) {
-				this.regularItems.push(item);
-			}
-
-			pushSignal(item: number) {
-				this.signalItems.push(item);
-			}
-		}
-
-		const m = M.create();
-		let regularCount = 0;
-		let signalCount = 0;
-
-		effect(() => {
-			m.regularItems.length;
-			regularCount++;
+			expect(snapshot.createdAt).toBe("2024-01-15T10:30:00.000Z");
+			expect(typeof snapshot.createdAt).toBe("string");
 		});
 
-		effect(() => {
-			m.signalItems.length;
-			signalCount++;
+		test("Date in nested object serializes to ISO string", () => {
+			class M extends Model {
+				@state data = { timestamp: new Date("2024-06-20T15:00:00.000Z") };
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.data).toEqual({
+				timestamp: "2024-06-20T15:00:00.000Z",
+			});
 		});
 
-		m.pushRegular(1);
-		expect(regularCount).toBe(2);
+		test("Date in array serializes to ISO string", () => {
+			class M extends Model {
+				@state dates: Date[] = [
+					new Date("2024-01-01T00:00:00.000Z"),
+					new Date("2024-12-31T23:59:59.999Z"),
+				];
+			}
 
-		m.pushSignal(1);
-		expect(signalCount).toBe(1);
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.dates).toEqual([
+				"2024-01-01T00:00:00.000Z",
+				"2024-12-31T23:59:59.999Z",
+			]);
+		});
+	});
+
+	describe("Signal serialization", () => {
+		test("signals serialize to their current .value in snapshots", () => {
+			class M extends Model {
+				@state count = signal(42);
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.count).toBe(42);
+			expect(typeof snapshot.count).toBe("number");
+		});
+
+		test("signal with object value serializes the object", () => {
+			class M extends Model {
+				@state data = signal({ nested: { value: 123 } });
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.data).toEqual({ nested: { value: 123 } });
+		});
+
+		test("signal with array value serializes the array", () => {
+			class M extends Model {
+				@state items = signal([1, 2, 3]);
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.items).toEqual([1, 2, 3]);
+		});
+
+		test("signal with Date value serializes to ISO string", () => {
+			class M extends Model {
+				@state when = signal(new Date("2024-03-15T12:00:00.000Z"));
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.when).toBe("2024-03-15T12:00:00.000Z");
+		});
+	});
+
+	describe("Non-plain object rejection", () => {
+		test("Map in @state throws on snapshot", () => {
+			class M extends Model {
+				@state data = new Map([["key", "value"]]);
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support Map at path "data"/
+			);
+		});
+
+		test("Set in @state throws on snapshot", () => {
+			class M extends Model {
+				@state items = new Set([1, 2, 3]);
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support Set at path "items"/
+			);
+		});
+
+		test("WeakMap in @state throws on snapshot", () => {
+			class M extends Model {
+				@state cache = new WeakMap();
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support WeakMap at path "cache"/
+			);
+		});
+
+		test("WeakSet in @state throws on snapshot", () => {
+			class M extends Model {
+				@state visited = new WeakSet();
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support WeakSet at path "visited"/
+			);
+		});
+
+		test("class instance in @state throws on snapshot", () => {
+			class CustomClass {
+				value = 42;
+			}
+
+			class M extends Model {
+				@state instance = new CustomClass();
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support class instance \(CustomClass\) at path "instance"/
+			);
+		});
+
+		test("nested Map throws with correct path", () => {
+			class M extends Model {
+				@state data = { level1: { level2: new Map() } };
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support Map at path "data\.level1\.level2"/
+			);
+		});
+
+		test("Map in array throws with correct path", () => {
+			class M extends Model {
+				@state items: any[] = [{ nested: new Map() }];
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support Map at path "items\[0\]\.nested"/
+			);
+		});
+
+		test("RegExp in @state throws on snapshot", () => {
+			class M extends Model {
+				@state pattern = /test/gi;
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support RegExp at path "pattern"/
+			);
+		});
+
+		test("Error in @state throws on snapshot", () => {
+			class M extends Model {
+				@state lastError = new Error("oops");
+			}
+
+			const m = M.create();
+
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support Error at path "lastError"/
+			);
+		});
+	});
+
+	describe("Non-JSON primitive rejection", () => {
+		test("bigint in @state throws on snapshot", () => {
+			class M extends Model {
+				@state id = 1n;
+			}
+
+			const m = M.create();
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support bigint at path "id"/
+			);
+		});
+
+		test("symbol in @state throws on snapshot", () => {
+			class M extends Model {
+				@state token = Symbol("t");
+			}
+
+			const m = M.create();
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support symbol at path "token"/
+			);
+		});
+
+		test("function in @state throws on snapshot", () => {
+			class M extends Model {
+				@state fn = () => 1;
+			}
+
+			const m = M.create();
+			expect(() => toSnapshot(m)).toThrowError(
+				/r-state-tree: snapshots do not support function at path "fn"/
+			);
+		});
+	});
+
+	describe("Valid snapshot values", () => {
+		test("plain objects are allowed", () => {
+			class M extends Model {
+				@state data = { a: 1, b: { c: 2 } };
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.data).toEqual({ a: 1, b: { c: 2 } });
+		});
+
+		test("arrays are allowed", () => {
+			class M extends Model {
+				@state items = [1, "two", { three: 3 }];
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.items).toEqual([1, "two", { three: 3 }]);
+		});
+
+		test("primitives are allowed", () => {
+			class M extends Model {
+				@state str = "hello";
+				@state num = 42;
+				@state bool = true;
+				@state nil: null = null;
+			}
+
+			const m = M.create();
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.str).toBe("hello");
+			expect(snapshot.num).toBe(42);
+			expect(snapshot.bool).toBe(true);
+			expect(snapshot.nil).toBe(null);
+		});
+
+		test("null prototype objects are allowed", () => {
+			class M extends Model {
+				@state data = Object.create(null);
+			}
+
+			const m = M.create();
+			m.data.key = "value";
+			const snapshot = toSnapshot(m);
+
+			expect(snapshot.data).toEqual({ key: "value" });
+		});
 	});
 });

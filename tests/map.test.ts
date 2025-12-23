@@ -18,24 +18,9 @@ const values = (map: Map<any, any>): any[] => {
 	return keys(map).map((key) => map.get(key));
 };
 
-test("map values are deeply observable", () => {
-	const o = { prop: "value" };
-	const m = map();
-	let count = 0;
-	m.set(o, o);
-	expect(isObservable(m.get(o))).toBe(true);
+// Removed: map values are deeply observable - no longer applies with shallow behavior
 
-	effect(() => {
-		m.get(o).prop;
-		count++;
-	});
-
-	m.get(o).prop = "newValue";
-	expect(count).toBe(2);
-	expect(o.prop).toBe("newValue");
-});
-
-test("map keys returns observable objects", () => {
+test("map keys returns raw (non-observable) items", () => {
 	const target = {};
 	let ran = false;
 	const m = map();
@@ -43,13 +28,14 @@ test("map keys returns observable objects", () => {
 
 	Array.from(m.keys()).forEach((t) => {
 		ran = true;
-		expect(isObservable(t)).toBe(true);
+		// Shallow behavior: keys are NOT wrapped
+		expect(isObservable(t)).toBe(false);
 	});
 
 	expect(ran).toBe(true);
 });
 
-test("map values returns observable objects", () => {
+test("map values returns raw (non-observable) items", () => {
 	const target = {};
 	let ran = false;
 	const m = map();
@@ -57,25 +43,27 @@ test("map values returns observable objects", () => {
 
 	Array.from(m.values()).forEach((t) => {
 		ran = true;
-		expect(isObservable(t)).toBe(true);
+		// Shallow behavior: values are NOT wrapped
+		expect(isObservable(t)).toBe(false);
 	});
 
 	expect(ran).toBe(true);
 });
 
-test("map forEach returns observable key and value", () => {
+test("map forEach returns raw (non-observable) key and value", () => {
 	const target = {};
 	const m = map();
 	m.set(target, target);
 	expect(
 		m.forEach((v, k) => {
-			expect(isObservable(k)).toBe(true);
-			expect(isObservable(v)).toBe(true);
+			// Shallow behavior: keys and values are NOT wrapped
+			expect(isObservable(k)).toBe(false);
+			expect(isObservable(v)).toBe(false);
 		})
 	);
 });
 
-test("set entries returns observable objects", () => {
+test("map entries returns raw (non-observable) items", () => {
 	const target = {};
 	let ran = false;
 	const m = map();
@@ -83,8 +71,9 @@ test("set entries returns observable objects", () => {
 
 	Array.from(m.entries()).forEach(([k, v]) => {
 		ran = true;
-		expect(isObservable(k)).toBe(true);
-		expect(isObservable(v)).toBe(true);
+		// Shallow behavior: keys and values are NOT wrapped
+		expect(isObservable(k)).toBe(false);
+		expect(isObservable(v)).toBe(false);
 	});
 
 	expect(ran).toBe(true);
@@ -109,32 +98,28 @@ test("map equality for observed and target objects", () => {
 	expect(m.size).toBe(0);
 });
 
-test("map can be initialized with observable values", () => {
+test("map can store and find observable values", () => {
 	const o1 = observable({});
 	const o2 = observable({});
-	const o3 = {};
+	const plain = {};
 
 	const m = map(
 		new Map([
 			[o1, o1],
 			[o2, o2],
-			[o3, o3],
+			[plain, plain],
 		])
 	);
 	expect(m.has(o1)).toBe(true);
-	expect(m.has(source(o2))).not.toBe(true);
-	expect(m.has(o1)).toBe(true);
 	expect(m.has(o2)).toBe(true);
-	m.set(o2, o2);
+	expect(m.has(plain)).toBe(true);
 	expect(m.size).toBe(3);
-	expect(m.has(observable(o3))).toBe(true);
-	m.delete(observable(o3));
-	expect(m.size).toBe(2);
-	m.delete(source(o1));
-	expect(m.size).toBe(2);
+
 	m.delete(o1);
-	expect(m.size).toBe(1);
+	expect(m.size).toBe(2);
 	m.delete(o2);
+	expect(m.size).toBe(1);
+	m.delete(plain);
 	expect(m.size).toBe(0);
 });
 
@@ -142,6 +127,7 @@ test("does not overwrite observable values", () => {
 	const o1 = observable({});
 
 	const m = map(new Map([[o1, o1]]));
+	// If the user seeded the backing Map with proxies, we do not sanitize it.
 	expect(source(m).get(o1)).toBe(o1);
 	m.set(o1, o1);
 	expect(source(m).get(o1)).toBe(o1);
@@ -168,6 +154,24 @@ test("WeakMap is reactive", () => {
 	expect(m.get(target)).toBe(1);
 });
 
+test("WeakMap with function key is reactive", () => {
+	const m = weakMap();
+	const fnKey = () => {};
+	const obsVal = observable({ a: 1 });
+	let count = 0;
+
+	effect(() => {
+		count++;
+		m.get(fnKey);
+	});
+
+	m.set(fnKey, obsVal);
+	expect(count).toBe(2);
+	// Should return the proxy because it was explicitly assigned an observable
+	expect(isObservable(m.get(fnKey))).toBe(true);
+	expect(m.get(fnKey)).toBe(obsVal);
+});
+
 test("instanceof WeakMap", () => {
 	const m = weakMap();
 	expect(m instanceof WeakMap).toBe(true);
@@ -181,14 +185,14 @@ test("WeakMap does not report to have Map methods", () => {
 	expect((m as any).forEach).toBe(undefined);
 });
 
-test("does not trigger a change when same observable is set on map initialized with observable values", () => {
+test("does not trigger a change when same value is set on map", () => {
 	const o1 = observable({ prop: 1 });
 	const o2 = observable({ prop: 2 });
 
 	const m = map(
 		new Map([
-			[source(o1), source(o1)],
-			[source(o2), source(o2)],
+			[o1, o1],
+			[o2, o2],
 		])
 	);
 
@@ -198,13 +202,12 @@ test("does not trigger a change when same observable is set on map initialized w
 		count++;
 	});
 	expect(count).toBe(1);
-	expect(m.get(o1)).toBe(o1);
+	// Setting same observable to same key should not trigger change
 	m.set(o1, o1);
 	expect(count).toBe(1);
-	m.set(o1, source(o1));
-	expect(count).toBe(1);
+	// Setting different value should trigger
 	m.set(o1, o2);
-	expect(count).toBe(1);
+	expect(count).toBe(2);
 });
 
 test("[mobx-test] observe value", function () {
@@ -750,4 +753,488 @@ test("[mobx-test] iterators should be resilient to concurrent delete operation",
 	testIterator("keys");
 	testIterator("values");
 	testIterator("entries");
+});
+
+describe("Parent Ownership (Strict Shallow)", () => {
+	test("same source in two maps should have independent observability", () => {
+		const raw = { value: 1 };
+		const obs = observable(raw);
+
+		// Map A gets the observable as value
+		const mapA = map<string, any>();
+		mapA.set("key", obs);
+
+		// Map B gets the raw source as value
+		const mapB = map<string, any>();
+		mapB.set("key", source(obs));
+
+		// Map A should return the observable proxy
+		expect(isObservable(mapA.get("key"))).toBe(true);
+		expect(mapA.get("key")).toBe(obs);
+
+		// Map B should return the raw object (NOT the observable)
+		expect(isObservable(mapB.get("key"))).toBe(false);
+		expect(mapB.get("key")).toBe(raw);
+	});
+
+	test("observable assignment is tracked per-key", () => {
+		const raw1 = { value: 1 };
+		const raw2 = { value: 2 };
+		const obs1 = observable(raw1);
+
+		const m = map<string, any>();
+		m.set("a", obs1); // Observable at key "a"
+		m.set("b", raw2); // Raw at key "b"
+
+		expect(isObservable(m.get("a"))).toBe(true);
+		expect(isObservable(m.get("b"))).toBe(false);
+	});
+
+	test("source in map allows structuredClone", () => {
+		const raw = { value: 1 };
+		const obs = observable(raw);
+
+		const m = map<string, any>();
+		m.set("key", source(obs)); // Set the raw source
+
+		// Should NOT throw - it's a plain object
+		expect(() => structuredClone(m.get("key"))).not.toThrow();
+	});
+
+	test("source map contains raw values not proxies", () => {
+		const raw = { value: 1 };
+		const obs = observable(raw);
+
+		const m = map<string, any>();
+		m.set("key", obs);
+
+		// The source map should contain the raw value
+		const sourceMap = source(m);
+		expect(isObservable(sourceMap.get("key"))).toBe(false);
+	});
+});
+
+describe("Detailed Map behavior", () => {
+	describe("Basic ownership + purity", () => {
+		test("Value stores raw in source", () => {
+			const m = map<string, any>();
+			const raw = { id: 1 };
+			const obs = observable(raw);
+			m.set("k", obs);
+
+			expect(m.get("k")).toBe(obs);
+			expect(source(m).get("k")).toBe(raw);
+			expect(isObservable(source(m).get("k"))).toBe(false);
+		});
+
+		test("Per-map independence", () => {
+			const raw = { id: 1 };
+			const obs = observable(raw);
+			const mA = map();
+			const mB = map();
+
+			mA.set("k", obs);
+			mB.set("k", source(obs));
+
+			expect(isObservable(mA.get("k"))).toBe(true);
+			expect(isObservable(mB.get("k"))).toBe(false);
+		});
+
+		test("Same raw under two keys", () => {
+			const raw = { id: 1 };
+			const obs = observable(raw);
+			const m = map();
+
+			m.set("a", obs);
+			m.set("b", source(obs));
+
+			expect(isObservable(m.get("a"))).toBe(true);
+			expect(isObservable(m.get("b"))).toBe(false);
+		});
+
+		test("Reassignment clears", () => {
+			const obs = observable({ id: 1 });
+			const m = map();
+			m.set("k", obs);
+
+			expect(isObservable(m.get("k"))).toBe(true);
+			m.set("k", source(obs));
+			expect(isObservable(m.get("k"))).toBe(false);
+		});
+
+		test("delete clears tracking", () => {
+			const obs = observable({ id: 1 });
+			const m = map();
+			m.set("k", obs);
+
+			expect(isObservable(m.get("k"))).toBe(true);
+			m.delete("k");
+			m.set("k", source(obs));
+			expect(isObservable(m.get("k"))).toBe(false);
+		});
+
+		test("clear clears all tracking", () => {
+			const obs = observable({ id: 1 });
+			const m = map();
+			m.set("a", obs);
+			m.clear();
+			m.set("a", source(obs));
+			expect(isObservable(m.get("a"))).toBe(false);
+		});
+	});
+
+	describe("Iteration must match get", () => {
+		test("for..of m / m.entries()", () => {
+			const obs1 = observable({ id: 1 });
+			const raw2 = { id: 2 };
+			const m = map(
+				new Map([
+					["a", obs1],
+					["b", raw2],
+				])
+			);
+
+			for (const [k, v] of m) {
+				expect(v).toBe(m.get(k));
+				expect(isObservable(v)).toBe(k === "a");
+			}
+
+			for (const [k, v] of m.entries()) {
+				expect(v).toBe(m.get(k));
+			}
+		});
+
+		test("m.values()", () => {
+			const obs1 = observable({ id: 1 });
+			const m = map(new Map([["a", obs1]]));
+			const vals = Array.from(m.values());
+			expect(vals[0]).toBe(obs1);
+		});
+
+		test("m.forEach", () => {
+			const obs1 = observable({ id: 1 });
+			const m = map(new Map([["a", obs1]]));
+			m.forEach((v, k) => {
+				expect(v).toBe(m.get(k));
+				expect(isObservable(v)).toBe(true);
+			});
+		});
+	});
+
+	describe("Observable keys", () => {
+		test("Observable object key stored as raw key", () => {
+			const rawKey = { id: "key" };
+			const keyObs = observable(rawKey);
+			const m = map();
+			m.set(keyObs, 1);
+
+			expect(source(m).has(rawKey)).toBe(true);
+			expect(source(m).has(keyObs)).toBe(false);
+			expect(m.get(keyObs)).toBe(1);
+			expect(m.get(rawKey)).toBe(1);
+		});
+
+		test("Normalization on initialization", () => {
+			const rawKey = { id: "key" };
+			const keyObs = observable(rawKey);
+			const rawVal = { id: "val" };
+			const valObs = observable(rawVal);
+
+			const m = map(new Map([[keyObs, valObs]]));
+			// Must not sanitize / rewrite user-provided proxy keys/values.
+			expect(source(m).has(keyObs)).toBe(true);
+			expect(source(m).has(rawKey)).toBe(false);
+			expect(source(m).get(keyObs)).toBe(valObs);
+
+			// But observable lookups must work with both raw and proxy keys.
+			expect(m.get(keyObs)).toBe(valObs);
+			expect(m.get(rawKey)).toBe(valObs);
+
+			// If a user explicitly seeds proxies into the source, structuredClone may throw.
+			expect(() => structuredClone(source(m))).toThrow();
+		});
+	});
+
+	test("Symbol key behavior", () => {
+		const m = map<PropertyKey, unknown>();
+		const sym = Symbol("k");
+		const raw = { id: 1 };
+		const obs = observable(raw);
+
+		m.set(sym, obs);
+
+		expect(m.get(sym)).toBe(obs);
+		expect(isObservable(m.get(sym))).toBe(true);
+		expect(source(m).get(sym)).toBe(raw);
+		expect(isObservable(source(m).get(sym))).toBe(false);
+
+		m.delete(sym);
+		m.set(sym, raw);
+		expect(m.get(sym)).toBe(raw);
+		expect(isObservable(m.get(sym))).toBe(false);
+	});
+
+	describe("undefined values correctness", () => {
+		test("Presence vs absence", () => {
+			const m = map();
+			m.set("k", undefined);
+			expect(m.has("k")).toBe(true);
+			expect(m.get("k")).toBe(undefined);
+			expect(m.has("missing")).toBe(false);
+
+			const obs = observable({ id: 1 });
+			m.set("k", obs);
+			expect(isObservable(m.get("k"))).toBe(true);
+			m.set("k", undefined);
+			// After setting to undefined, it should no longer be tracked as observable
+			expect(isObservable(m.get("k"))).toBe(false);
+		});
+	});
+
+	test("WeakMap basic functional behavior", () => {
+		const wm = weakMap();
+		const key = {};
+		const obs = observable({ id: 1 });
+		wm.set(key, obs);
+
+		expect(wm.get(key)).toBe(obs);
+		expect(isObservable(wm.get(key))).toBe(true);
+	});
+
+	test("WeakMap source purity (value stored unwrapped)", () => {
+		const wm = weakMap<object, unknown>();
+		const key = {};
+		const raw = { id: 1 };
+		const obs = observable(raw);
+
+		wm.set(key, obs);
+
+		expect(wm.get(key)).toBe(obs);
+		expect(isObservable(wm.get(key))).toBe(true);
+
+		expect(source(wm).get(key)).toBe(raw);
+		expect(isObservable(source(wm).get(key))).toBe(false);
+	});
+
+	test("WeakMap ownership tracks per-key correctly", () => {
+		const wm = weakMap<object, unknown>();
+		const key1 = { id: "key1" };
+		const key2 = { id: "key2" };
+		const raw = { value: 42 };
+		const obs = observable(raw);
+
+		wm.set(key1, obs);
+		wm.set(key2, source(obs));
+
+		expect(wm.get(key1)).toBe(obs);
+		expect(isObservable(wm.get(key1))).toBe(true);
+
+		expect(wm.get(key2)).toBe(raw);
+		expect(isObservable(wm.get(key2))).toBe(false);
+
+		expect(source(wm).get(key1)).toBe(raw);
+		expect(source(wm).get(key2)).toBe(raw);
+
+		expect(() => structuredClone(source(wm).get(key1))).not.toThrow();
+	});
+
+	test("WeakMap delete clears ownership tracking", () => {
+		const wm = weakMap<object, unknown>();
+		const key = { id: "key" };
+		const raw = { value: 42 };
+		const obs = observable(raw);
+
+		wm.set(key, obs);
+		expect(isObservable(wm.get(key))).toBe(true);
+
+		wm.delete(key);
+		wm.set(key, source(obs));
+		expect(isObservable(wm.get(key))).toBe(false);
+	});
+
+	test("WeakMap reassignment changes ownership", () => {
+		const wm = weakMap<object, unknown>();
+		const key = { id: "key" };
+		const raw = { value: 42 };
+		const obs = observable(raw);
+
+		wm.set(key, obs);
+		expect(isObservable(wm.get(key))).toBe(true);
+
+		wm.set(key, source(obs));
+		expect(isObservable(wm.get(key))).toBe(false);
+
+		wm.set(key, obs);
+		expect(isObservable(wm.get(key))).toBe(true);
+	});
+});
+
+describe("WeakMap GC behavior (requires --expose-gc)", () => {
+	const gc = (globalThis as { gc?: () => void }).gc;
+	const describeGC = gc ? describe : describe.skip;
+
+	describeGC("WeakMap does not retain keys via tracking", () => {
+		test("key can be garbage collected when no strong refs remain", async () => {
+			const wm = weakMap<object, unknown>();
+			const obs = observable({ value: 42 });
+			let collected = false;
+			const registry = new FinalizationRegistry(() => {
+				collected = true;
+			});
+
+			(() => {
+				const key = { id: "ephemeral" };
+				registry.register(key, undefined);
+				wm.set(key, obs);
+			})();
+
+			for (let i = 0; i < 10 && !collected; i++) {
+				gc!();
+				await new Promise((r) => setTimeout(r, 10));
+			}
+
+			expect(collected).toBe(true);
+		});
+	});
+});
+
+describe("has() per-key tracking", () => {
+	test("has() is reactive inside effects", () => {
+		const m = map<string, number>();
+		let count = 0;
+		let hasX = false;
+
+		effect(() => {
+			hasX = m.has("x");
+			count++;
+		});
+
+		expect(count).toBe(1);
+		expect(hasX).toBe(false);
+
+		m.set("x", 1);
+		expect(count).toBe(2);
+		expect(hasX).toBe(true);
+
+		m.delete("x");
+		expect(count).toBe(3);
+		expect(hasX).toBe(false);
+	});
+
+	test("has() triggers effect only for watched keys after first run", () => {
+		const m = map<string, number>();
+		let count = 0;
+
+		// Effect watches key "a"
+		effect(() => {
+			m.has("a");
+			count++;
+		});
+
+		expect(count).toBe(1);
+
+		// First run subscribes to the per-key atom for "a"
+		// Subsequent changes to other keys should not trigger
+		m.set("b", 2);
+		// Note: After first run, per-key tracking is established for "a"
+		// Changes to "b" should not trigger on subsequent runs
+		// But on first run, we're subscribed to "a" already
+		expect(count).toBe(1); // "b" doesn't trigger effect
+
+		m.set("a", 1);
+		expect(count).toBe(2); // "a" triggers effect
+	});
+
+	test("has() works correctly with reactions", () => {
+		const m = map<string, number>();
+		const results: boolean[] = [];
+
+		const dispose = reaction(
+			() => m.has("key"),
+			(value) => results.push(value)
+		);
+
+		// Initially key doesn't exist, but reaction doesn't fire for initial value
+		expect(results).toEqual([]);
+
+		m.set("key", 1);
+		expect(results).toEqual([true]);
+
+		m.delete("key");
+		expect(results).toEqual([true, false]);
+
+		dispose();
+	});
+
+	test("Map#set chaining", () => {
+		const m = map<string, number>();
+		expect(m.set("a", 1)).toBe(m);
+		expect(m.set("a", 1).set("b", 2)).toBe(m);
+		expect(m.get("a")).toBe(1);
+		expect(m.get("b")).toBe(2);
+	});
+});
+
+test("iterator reflects mutations during iteration (Map)", () => {
+	const m = map(new Map([["a", 1]]));
+	const iterator = m.keys();
+	m.set("b", 2);
+	expect(iterator.next().value).toBe("a");
+	expect(iterator.next().value).toBe("b");
+	expect(iterator.next().done).toBe(true);
+});
+
+test("iterator reflect deletions during iteration (Map)", () => {
+	const m = map(
+		new Map([
+			["a", 1],
+			["b", 2],
+		])
+	);
+	const iterator = m.keys();
+	expect(iterator.next().value).toBe("a");
+	m.delete("b");
+	expect(iterator.next().done).toBe(true);
+});
+
+describe("Uninstrumented collection methods (Branding check safety)", () => {
+	test("Map properties that are functions should not throw incompatible receiver", () => {
+		const m = map(new Map([["a", 1]]));
+
+		// Mock a native-like method on Map prototype
+		const originalMethod = (Map.prototype as any).someNewMapMethod;
+		(Map.prototype as any).someNewMapMethod = function () {
+			if (!(this instanceof Map)) {
+				throw new TypeError(
+					"Method Map.prototype.someNewMapMethod called on incompatible receiver"
+				);
+			}
+			return Array.from(this.entries());
+		};
+
+		try {
+			let result;
+			expect(() => {
+				result = (m as any).someNewMapMethod();
+			}).not.toThrow();
+			expect(result).toEqual([["a", 1]]);
+		} finally {
+			delete (Map.prototype as any).someNewMapMethod;
+		}
+	});
+
+	test("Fluent uninstrumented Map methods should return the proxy", () => {
+		const m = map(new Map());
+
+		(Map.prototype as any).fluentMapMethod = function () {
+			return this;
+		};
+
+		try {
+			const result = (m as any).fluentMapMethod();
+			expect(result).toBe(m);
+		} finally {
+			delete (Map.prototype as any).fluentMapMethod;
+		}
+	});
 });

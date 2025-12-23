@@ -164,9 +164,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							adm.setId(name as string, value as IdType);
 							break;
 						}
-						case ModelCfgTypes.state:
-						case ModelCfgTypes.stateShallow:
-						case ModelCfgTypes.stateSignal: {
+						case ModelCfgTypes.state: {
 							adm.setState(name as string, value);
 							break;
 						}
@@ -249,12 +247,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private setState(name: string, value: unknown): void {
 		const oldValue = this.source[name];
 		if (value !== oldValue) {
-			PreactObjectAdministration.proxyTraps.set!(
-				this.source,
-				name,
-				value,
-				this.proxy
-			);
+			batch(() => {
+				PreactObjectAdministration.proxyTraps.set!(
+					this.source,
+					name,
+					value,
+					this.proxy
+				);
+			});
 		}
 	}
 
@@ -328,10 +328,12 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		} else if (Array.isArray(currentValue)) {
 			// Handle normal array replacement
 			const oldModels = currentValue as Model[];
-			const newModelSet = new Set(newModels);
+			// Use getSource to normalize comparison - currentValue may contain proxies
+			const newModelSet = new Set(newModels.map((m) => getSource(m)));
 
 			oldModels.forEach(
-				(child) => newModelSet.has(child) || getModelAdm(child).detach()
+				(child) =>
+					newModelSet.has(getSource(child)) || getModelAdm(child).detach()
 			);
 
 			// unsub from old model trace
@@ -362,10 +364,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		);
 
 		newModels.forEach((child) => {
+			// Use getSource to normalize comparison - currentValue may contain proxies
 			const oldModelSet = Array.isArray(currentValue)
-				? new Set(currentValue as Model[])
+				? new Set((currentValue as Model[]).map((m) => getSource(m)))
 				: new Set();
-			if (!oldModelSet.has(child)) {
+			if (!oldModelSet.has(getSource(child))) {
 				const internalModel = getModelAdm(child);
 				internalModel.attach(this, name);
 			}
@@ -526,11 +529,12 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private toJSON(): Snapshot<Model> {
 		return Object.keys(this.configuration).reduce((json: any, key) => {
 			switch (this.configuration[key].type) {
-				case ModelCfgTypes.state:
-				case ModelCfgTypes.stateShallow:
-				case ModelCfgTypes.stateSignal:
+				case ModelCfgTypes.state: {
+					json[key] = clone(this.proxy[key], key);
+					break;
+				}
 				case ModelCfgTypes.id:
-					json[key] = clone(getSource(this.proxy[key]));
+					json[key] = clone(getSource(this.proxy[key]), key);
 					break;
 				case ModelCfgTypes.modelRef:
 					const model: Model[] | Model | undefined = this.proxy[key];
@@ -600,8 +604,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 				switch (type) {
 					case ModelCfgTypes.state:
-					case ModelCfgTypes.stateShallow:
-					case ModelCfgTypes.stateSignal:
 						this.proxy[key] = value;
 						break;
 					case ModelCfgTypes.modelRef:

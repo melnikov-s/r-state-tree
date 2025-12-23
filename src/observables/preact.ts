@@ -1,6 +1,6 @@
 import {
 	computed as preactComputed,
-	signal,
+	signal as preactSignal,
 	Signal,
 	batch,
 	effect,
@@ -13,7 +13,6 @@ import {
 	getAdministration,
 	getInternalNode,
 	getObservable,
-	getObservableClassInstance,
 	getSource,
 } from "./internal/lookup";
 
@@ -21,28 +20,7 @@ export { isObservable } from "./index";
 
 export class PreactObjectAdministration<
 	T extends object
-> extends ObjectAdministration<T> {
-	static proxyTraps: ProxyHandler<object> = Object.assign(
-		{},
-		ObjectAdministration.proxyTraps,
-		{
-			get(target, prop, proxy) {
-				if (
-					!(prop in target) &&
-					(typeof prop === "string" || typeof prop === "number") &&
-					String(prop)[0] === "$"
-				) {
-					return getSignal(proxy, prop.substring(1) as keyof typeof target);
-				}
-
-				return ObjectAdministration.proxyTraps.get?.apply(
-					null,
-					arguments as any
-				);
-			},
-		} as ProxyHandler<object>
-	);
-}
+> extends ObjectAdministration<T> {}
 
 export interface AtomNode {
 	reportObserved(): void;
@@ -112,7 +90,7 @@ export function createObservedAtom() {
 }
 
 export function createSignal<T>(initialValue: T): SignalNode<T> {
-	const s = signal(initialValue);
+	const s = preactSignal(initialValue);
 
 	return {
 		node: s,
@@ -133,7 +111,7 @@ export function createSignal<T>(initialValue: T): SignalNode<T> {
 
 export function createAtom(): AtomNode {
 	let value = 0;
-	const s = signal(value);
+	const s = preactSignal(value);
 
 	return {
 		node: s,
@@ -146,7 +124,7 @@ export function createAtom(): AtomNode {
 	};
 }
 
-export { effect, signal, batch, untracked, Signal };
+export { effect, batch, untracked, Signal };
 export type { ReadonlySignal };
 
 export function reaction<T>(fn: () => T, callback: (value: T) => void) {
@@ -250,64 +228,15 @@ export function createComputed<T>(
 	};
 }
 
-export type PreactObservable<T> = T extends Function
-	? T
-	: T extends Map<infer K, infer V>
-	? Map<K, PreactObservable<V>>
-	: T extends Array<infer V>
-	? Array<PreactObservable<V>>
-	: T extends Set<infer V>
-	? Set<PreactObservable<V>>
-	: T extends WeakSet<infer V>
-	? WeakSet<PreactObservable<V>>
-	: T extends WeakMap<infer K, infer V>
-	? WeakMap<K, PreactObservable<V>>
-	: {
-			[key in keyof T]: T[key] extends object
-				? PreactObservable<T[key]>
-				: T[key];
-	  } & {
-			readonly [key in keyof T as T[key] extends object
-				? never
-				: `$${string & key}`]?: Signal<T[key]>;
-	  };
+export type PreactObservable<T> = T;
 
-// observable can be used both as a decorator and as a function
-// Also supports .shallow and .signal modifiers for decorator use
-function observableImpl<T>(obj: T): PreactObservable<T>;
-function observableImpl(value: undefined, context: ClassFieldDecoratorContext): void;
-function observableImpl(value: any, context?: any): any {
-	// If context exists and has 'kind', it's being used as a decorator
-	if (context && typeof context === "object" && "kind" in context) {
-		// Decorator behavior - set metadata
-		context.metadata![context.name!] = { type: "observable" };
-		return value;
-	}
-
-	// Otherwise, it's the regular observable wrapping function
-	return getObservable(value) as any;
+export function observable<T>(obj: T): PreactObservable<T> {
+	return getObservable(obj) as PreactObservable<T>;
 }
 
-function shallowDecorator(value: any, context: ClassFieldDecoratorContext): any {
-	if (context && typeof context === "object" && "kind" in context) {
-		context.metadata![context.name!] = { type: "observableShallow" };
-		return value;
-	}
-	throw new Error("observable.shallow can only be used as a decorator");
+export function signal<T>(value: T): Signal<T> {
+	return preactSignal(value);
 }
-
-function signalDecorator(value: any, context: ClassFieldDecoratorContext): any {
-	if (context && typeof context === "object" && "kind" in context) {
-		context.metadata![context.name!] = { type: "observableSignal" };
-		return value;
-	}
-	throw new Error("observable.signal can only be used as a decorator");
-}
-
-export const observable = Object.assign(observableImpl, {
-	shallow: shallowDecorator,
-	signal: signalDecorator,
-});
 
 // computed can be used both as a decorator and as a function
 export function computed<T>(
@@ -330,11 +259,6 @@ export function computed(value: any, context?: any): any {
 export function source<T>(obj: PreactObservable<T> | T): T {
 	return getSource(obj) as T;
 }
-export class Observable {
-	constructor() {
-		return getObservableClassInstance(this);
-	}
-}
 
 export function reportChanged<T extends object>(obj: T): T {
 	const adm = getAdministration(obj);
@@ -343,13 +267,10 @@ export function reportChanged<T extends object>(obj: T): T {
 	return obj;
 }
 
-export function reportObserved<T extends object>(
-	obj: T,
-	opts?: { deep?: boolean }
-): T {
+export function reportObserved<T extends object>(obj: T): T {
 	const adm = getAdministration(obj);
 
-	adm.reportObserved(opts?.deep);
+	adm.reportObserved();
 
 	return obj;
 }

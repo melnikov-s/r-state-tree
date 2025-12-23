@@ -1,13 +1,5 @@
 import "@tsmetadata/polyfill";
-import {
-	childType,
-	modelType,
-	modelRefType,
-	idType,
-	stateType,
-	stateShallowType,
-	stateSignalType,
-} from "./types";
+import { childType, modelType, modelRefType, idType, stateType } from "./types";
 
 function makeDecorator(type: unknown): any {
 	return function <T>(value: T, context: DecoratorContext): T {
@@ -37,10 +29,4 @@ export const child = makeChildDecorator(childType);
 export const modelRef = makeChildDecorator(modelRefType);
 export const model = makeDecorator(modelType);
 export const id = makeDecorator(idType);
-
-// state decorator with .shallow and .signal modifiers
-export const state = Object.assign(makeDecorator(stateType), {
-	shallow: makeDecorator(stateShallowType),
-	signal: makeDecorator(stateSignalType),
-});
-
+export const state = makeDecorator(stateType);

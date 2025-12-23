@@ -7,12 +7,17 @@ import {
 	reportChanged,
 	isObservable,
 } from "../src";
+import { createComputed, createSignal } from "../src/observables";
+import {
+	getInternalNode,
+	getAdministration,
+} from "../src/observables/internal/lookup";
 
 function object<T extends object>(obj: T = {} as T): Record<string, any> {
 	return observable(obj);
 }
 
-test("observable values do not get stored on the original target", () => {
+test("observables can be stored and retrieved", () => {
 	const target = { prop: undefined };
 	const o = object(target);
 	const oTarget = { prop: "value" };
@@ -20,9 +25,6 @@ test("observable values do not get stored on the original target", () => {
 
 	o.prop = c;
 	expect(o.prop).toBe(c);
-	expect(target.prop).not.toBe(c);
-	expect(target.prop).toEqual(o.prop);
-	expect(target.prop).toBe(oTarget);
 });
 
 test("does not overwrite observable values", () => {
@@ -31,10 +33,12 @@ test("does not overwrite observable values", () => {
 	const o = object({ o1 });
 	o.o1 = o1;
 
+	// If the user seeded the source object with a proxy, it must be preserved.
 	expect(source(o).o1).toBe(o1);
 });
 
-test("observable values do not get stored on the original target (Object.assign)", () => {
+// With shallow behavior, nested objects are NOT wrapped automatically
+test("observable values can be assigned via Object.assign", () => {
 	const target = { prop: undefined };
 	const o = object(target);
 	const oTarget = { prop: "value" };
@@ -42,9 +46,6 @@ test("observable values do not get stored on the original target (Object.assign)
 
 	Object.assign(o, { prop: c });
 	expect(o.prop).toBe(c);
-	expect(target.prop).not.toBe(c);
-	expect(target.prop).toEqual(o.prop);
-	expect(target.prop).toBe(oTarget);
 });
 
 test("getters on the object become computed", () => {
@@ -88,32 +89,9 @@ test("observable value is updated when target is updated", () => {
 	expect("prop" in target).toBe(false);
 });
 
-test("observable objects are deeply observed", () => {
-	const o = object({
-		obj: { prop: "value ", obj: { prop: "value " } },
-		arr: [1, 2, 3],
-	});
-
-	let count = 0;
-
-	effect(() => {
-		o.obj.prop;
-		o.arr.length;
-		"objB" in o && "obj" in o.objB && o.objB.obj.prop;
-		count++;
-	});
-
-	o.obj.prop = "newValue";
-	expect(count).toBe(2);
-	o.arr.push(4);
-	expect(count).toBe(3);
-	o.objB = {};
-	expect(count).toBe(4);
-	o.objB.obj = {};
-	expect(count).toBe(5);
-	o.objB.obj.prop = "value";
-	expect(count).toBe(6);
-});
+// REMOVED: "observable objects are deeply observed" test
+// With shallow behavior, nested objects are NOT automatically wrapped as observable
+// Container mutations are tracked but nested property changes are not
 
 test("does not respond to no-op", () => {
 	let count = 0;
@@ -576,4 +554,477 @@ test("[mobx-test] deleting / recreate prop", () => {
 	delete value.foo;
 	value.foo = "def";
 	expect(events).toEqual([undefined, undefined, "def"]);
+});
+
+describe("Source Purity (Unwrap-on-Write)", () => {
+	test("assigning an observable to an object property unwraps it in the source", () => {
+		const nested = observable({ count: 1 });
+		const store = observable({ nested: null as any });
+
+		// Assign observable
+		store.nested = nested;
+
+		// 1. Consumer gets the proxy back
+		expect(isObservable(store.nested)).toBe(true);
+		expect(store.nested).toBe(nested); // Should be the exact same instance
+
+		// 2. Source should contain the RAW data, not the proxy
+		const sourceObj = source(store);
+		const nestedSource = source(nested);
+
+		expect(isObservable(sourceObj.nested)).toBe(false); // Fails currently (is true)
+		expect(sourceObj.nested).toBe(nestedSource);
+		expect(sourceObj.nested).not.toBe(nested);
+	});
+
+	test("pushing an observable to an array unwraps it in the source", () => {
+		const item = observable({ id: 1 });
+		const list = observable([] as any[]);
+
+		list.push(item);
+
+		// 1. Consumer gets the proxy back
+		expect(isObservable(list[0])).toBe(true);
+		expect(list[0]).toBe(item);
+
+		// 2. Source should contain RAW data
+		const sourceList = source(list);
+
+		expect(isObservable(sourceList[0])).toBe(false); // Fails currently
+		expect(sourceList[0]).toBe(source(item));
+	});
+
+	test("setting an observable in a map unwraps it in the source", () => {
+		const key = "key";
+		const val = observable({ id: 1 });
+		const map = observable(new Map());
+
+		map.set(key, val);
+
+		// 1. Consumer gets proxy
+		expect(isObservable(map.get(key))).toBe(true);
+		expect(map.get(key)).toBe(val);
+
+		// 2. Source should contain RAW data
+		const sourceMap = source(map) as Map<any, any>;
+		const valSource = source(val);
+
+		expect(isObservable(sourceMap.get(key))).toBe(false); // Fails currently
+		expect(sourceMap.get(key)).toBe(valSource);
+	});
+
+	test("making an object observable in one store affects another store holding the same raw reference", () => {
+		const raw = { id: 1 };
+
+		const store1 = observable({ item: null as any });
+		const store2 = observable({ item: null as any });
+
+		// 1. Assign observable wrapper to store1
+		// This registers 'raw' in the global administration map
+		store1.item = observable(raw);
+
+		// 2. Assign RAW object to store2
+		store2.item = raw;
+
+		// Check store1 (Expected to be observable)
+		expect(isObservable(store1.item)).toBe(true);
+		expect(source(store1.item)).toBe(raw); // Source purity preserved
+
+		// Check store2
+		// Desired behavior: Should NOT be observable (Strict Shallow Identity)
+		const isStore2ItemObservable = isObservable(store2.item);
+
+		expect(isStore2ItemObservable).toBe(false);
+	});
+});
+
+describe("Detailed ObjectAdministration behavior", () => {
+	test("Property stores raw in source", () => {
+		const parent = observable({ child: null as any });
+		const rawChild = { name: "child" };
+		const obsChild = observable(rawChild);
+
+		parent.child = obsChild;
+
+		expect(parent.child).toBe(obsChild);
+		expect(source(parent).child).toBe(rawChild);
+		expect(isObservable(source(parent).child)).toBe(false);
+	});
+
+	test("Per-object independence", () => {
+		const raw = { value: 1 };
+		const obs = observable(raw);
+
+		const a = observable({ child: null as any });
+		const b = observable({ child: null as any });
+
+		a.child = obs;
+		b.child = source(obs);
+
+		expect(isObservable(a.child)).toBe(true);
+		expect(isObservable(b.child)).toBe(false);
+	});
+
+	test("Same raw at two props", () => {
+		const raw = { value: 1 };
+		const obs = observable(raw);
+		const obj = observable({ a: null as any, b: null as any });
+
+		obj.a = obs;
+		obj.b = source(obs);
+
+		expect(isObservable(obj.a)).toBe(true);
+		expect(isObservable(obj.b)).toBe(false);
+	});
+
+	test("Reassignment clears/sets tracking", () => {
+		const raw = { value: 1 };
+		const obs = observable(raw);
+		const obj = observable({ child: null as any });
+
+		obj.child = obs;
+		expect(isObservable(obj.child)).toBe(true);
+
+		obj.child = source(obs);
+		expect(isObservable(obj.child)).toBe(false);
+
+		obj.child = obs;
+		expect(isObservable(obj.child)).toBe(true);
+	});
+
+	test("Delete clears tracking", () => {
+		const raw = { value: 1 };
+		const obs = observable(raw);
+		const obj = observable({ child: null as any }) as any;
+
+		obj.child = obs;
+		expect(isObservable(obj.child)).toBe(true);
+
+		delete obj.child;
+		obj.child = source(obs);
+		expect(isObservable(obj.child)).toBe(false);
+	});
+
+	test("Initialization does not sanitize user-provided proxies", () => {
+		const rawChild = { name: "child" };
+		const obsChild = observable(rawChild);
+
+		const obj = observable({ child: obsChild });
+
+		expect(isObservable(obj.child)).toBe(true);
+		expect(obj.child).toBe(obsChild);
+		expect(source(obj).child).toBe(obsChild);
+		expect(isObservable(source(obj).child)).toBe(true);
+
+		// If a user explicitly seeds proxies into the source, structuredClone may throw.
+		expect(() => structuredClone(source(obj))).toThrow();
+	});
+
+	test("Symbol property ownership + source purity", () => {
+		const sym = Symbol("child");
+		const rawChild = { name: "child" };
+		const obsChild = observable(rawChild);
+
+		const obj = observable({} as Record<PropertyKey, unknown>);
+
+		obj[sym] = obsChild;
+		expect(obj[sym]).toBe(obsChild);
+		expect(isObservable(obj[sym])).toBe(true);
+
+		expect(source(obj)[sym]).toBe(rawChild);
+		expect(isObservable(source(obj)[sym])).toBe(false);
+
+		// Delete clears tracking
+		delete obj[sym];
+		obj[sym] = rawChild;
+		expect(obj[sym]).toBe(rawChild);
+		expect(isObservable(obj[sym])).toBe(false);
+	});
+});
+
+describe("Proxy trap invariants", () => {
+	test("Non-extensible object set should fail", () => {
+		const o = observable({} as any);
+		Object.preventExtensions(source(o));
+
+		// Assignment should return false or throw in strict mode
+		// Vitest tests run in strict mode (ESM), so this should throw
+		expect(() => {
+			o.x = 1;
+		}).toThrow(TypeError);
+
+		expect(Reflect.set(o, "y", 2)).toBe(false);
+		expect("y" in o).toBe(false);
+	});
+
+	test("Sealed object delete should fail", () => {
+		const o = observable({ x: 1 } as any);
+		Object.seal(source(o));
+
+		// Deletion should return false or throw
+		expect(() => {
+			delete o.x;
+		}).toThrow(TypeError);
+
+		expect(Reflect.deleteProperty(o, "x")).toBe(false);
+		expect("x" in o).toBe(true);
+	});
+
+	test("Non-writable property set should fail", () => {
+		const target = {};
+		Object.defineProperty(target, "x", {
+			value: 1,
+			writable: false,
+			configurable: true,
+		});
+		const o = observable(target as any);
+
+		expect(() => {
+			o.x = 2;
+		}).toThrow(TypeError);
+
+		expect(o.x).toBe(1);
+	});
+
+	test("Change notifications only happen if mutation succeeds", () => {
+		const o = observable({ x: 1 } as any);
+		Object.preventExtensions(source(o));
+
+		let count = 0;
+		effect(() => {
+			o.y;
+			count++;
+		});
+
+		expect(count).toBe(1);
+
+		// This should fail to set 'y'
+		try {
+			o.y = 2;
+		} catch (e) {}
+
+		// Should NOT increment because 'y' was never successfully added
+		expect(count).toBe(1);
+	});
+});
+
+describe("Setter-only accessors on plain objects", () => {
+	test("reading a setter-only accessor returns undefined and does not throw", () => {
+		const obj = {};
+		let setterValue: any;
+		Object.defineProperty(obj, "prop", {
+			set(v) {
+				setterValue = v;
+			},
+			configurable: true,
+			enumerable: true,
+		});
+
+		const o = observable(obj) as any;
+		expect(() => o.prop).not.toThrow();
+		expect(o.prop).toBe(undefined);
+	});
+
+	test("writing to a setter-only accessor invokes the setter and does not throw", () => {
+		const obj = {};
+		let setterValue: any;
+		Object.defineProperty(obj, "prop", {
+			set(v) {
+				setterValue = v;
+			},
+			configurable: true,
+			enumerable: true,
+		});
+
+		const o = observable(obj) as any;
+		expect(() => {
+			o.prop = "value";
+		}).not.toThrow();
+		expect(setterValue).toBe("value");
+	});
+});
+
+describe("Proxy Correctness", () => {
+	describe("Receiver Semantics", () => {
+		test("should correctly handle receiver in prototype chains (get)", () => {
+			const proto = object({ x: 1 });
+			const child = Object.create(proto);
+
+			expect(child.x).toBe(1);
+			expect(Reflect.get(proto, "x", child)).toBe(1);
+		});
+
+		test("should correctly handle receiver in prototype chains (set)", () => {
+			const proto = object({ x: 1 });
+			const child = Object.create(proto);
+
+			// Should define own property on child, not mutate proto
+			child.x = 2;
+			expect(child.x).toBe(2);
+			expect(proto.x).toBe(1);
+			expect(Object.hasOwnProperty.call(child, "x")).toBe(true);
+		});
+
+		test("should trigger reactivity on proto when child reads inherited property", () => {
+			const proto = object({ x: 1 });
+			const child = Object.create(proto);
+			const spy = vi.fn();
+
+			reaction(() => {
+				spy(child.x);
+			});
+
+			expect(spy).toHaveBeenCalledWith(1);
+			proto.x = 2;
+			expect(spy).toHaveBeenCalledWith(2);
+		});
+	});
+
+	describe("defineProperty Reactivity", () => {
+		test("should trigger reactivity when Object.defineProperty is used", () => {
+			const obj = object({ x: 1 });
+			const spy = vi.fn();
+
+			reaction(() => {
+				spy(Object.keys(obj));
+			});
+
+			expect(spy).toHaveBeenLastCalledWith(["x"]);
+
+			// Add a new property via defineProperty
+			Object.defineProperty(obj, "y", {
+				value: 2,
+				enumerable: true,
+				configurable: true,
+				writable: true,
+			});
+
+			expect(obj.y).toBe(2);
+			expect(spy).toHaveBeenLastCalledWith(["x", "y"]);
+		});
+
+		test("should track value changes made via defineProperty", () => {
+			const obj = object({ x: 1 });
+			const spy = vi.fn();
+
+			reaction(() => {
+				spy(obj.x);
+			});
+
+			expect(spy).toHaveBeenLastCalledWith(1);
+
+			Object.defineProperty(obj, "x", { value: 100 });
+
+			expect(obj.x).toBe(100);
+			expect(spy).toHaveBeenLastCalledWith(100);
+		});
+	});
+
+	describe("Proxy Invariants", () => {
+		test("should respect non-configurable non-writable data properties", () => {
+			const target: any = {};
+			Object.defineProperty(target, "fixed", {
+				value: { nested: 1 },
+				writable: false,
+				configurable: false,
+			});
+
+			const proxy = object(target);
+
+			// Invariant: If a property is non-configurable and non-writable,
+			// the proxy MUST return the exact same value as the target.
+			// It cannot return a proxy wrapper.
+			expect(proxy.fixed).toBe(target.fixed);
+			expect(proxy.fixed).toEqual({ nested: 1 });
+		});
+	});
+
+	describe("Object.prototype Keys", () => {
+		test("should be reactive if they are own properties", () => {
+			const obj = object({ toString: "custom" });
+			const spy = vi.fn();
+
+			reaction(() => {
+				spy(obj.toString);
+			});
+
+			expect(spy).toHaveBeenLastCalledWith("custom");
+
+			obj.toString = "updated";
+			expect(spy).toHaveBeenLastCalledWith("updated");
+		});
+
+		test("should handle hasOwnProperty masking", () => {
+			const obj = object({
+				hasOwnProperty: () => "fake",
+			});
+
+			expect(obj.hasOwnProperty("anything")).toBe("fake");
+
+			// Should properly track it
+			const spy = vi.fn();
+			reaction(() => spy((obj as any).hasOwnProperty("x")));
+			expect(spy).toHaveBeenCalledWith("fake");
+
+			obj.hasOwnProperty = () => "updated";
+			expect(spy).toHaveBeenCalledWith("updated");
+		});
+	});
+
+	describe("Prototype getter receiver semantics", () => {
+		test("prototype getters use correct receiver", () => {
+			const proto = object({
+				get x() {
+					return (this as any).y;
+				},
+			});
+			const child = Object.create(proto) as any;
+			child.y = 2;
+			expect(child.x).toBe(2);
+		});
+
+		test("Reflect.get uses correct receiver", () => {
+			const proto = object({
+				get x() {
+					return (this as any).y;
+				},
+			});
+			const child = { y: 2 };
+			expect(Reflect.get(proto, "x", child)).toBe(2);
+		});
+	});
+});
+
+describe("SignalMap per-key cleanup", () => {
+	test("per-key signal nodes are cleaned up when object becomes unobserved", () => {
+		const obj = observable({ x: 1 });
+		const dispose1 = effect(() => void obj.x);
+		const node1 = getInternalNode(obj, "x");
+		dispose1();
+		const dispose2 = effect(() => void obj.x);
+		const node2 = getInternalNode(obj, "x");
+		expect(node2).not.toBe(node1); // Node was cleared and recreated
+		dispose2();
+	});
+});
+
+describe("Administration.reportObserved bounded atoms", () => {
+	test("reportObserved() does not allocate unbounded atoms", () => {
+		const obj = observable({ x: 1 });
+		const adm = getAdministration(obj) as any;
+
+		// Call reportObserved many times
+		for (let i = 0; i < 100; i++) {
+			adm.reportObserved();
+		}
+
+		// Should have at most 1 cached atom, not 100
+		expect(adm.forceObservedAtom).toBeDefined();
+		// The old array should not exist
+		expect(adm.forceObservedAtoms).toBeUndefined();
+
+		// Trigger mutation to flush
+		obj.x++;
+		expect(adm.forceObservedAtom).toBeUndefined();
+	});
 });

@@ -3,9 +3,9 @@ export {
 	getSource,
 	isObservable,
 	getObservable,
-	getObservableClassInstance,
 	getInternalNode,
 	createObservableWithCustomAdministration,
+	Observable,
 } from "./internal/lookup";
 export { ArrayAdministration } from "./array";
 export { CollectionAdministration } from "./collection";
@@ -34,5 +34,4 @@ export {
 	type ReadonlySignal,
 	effect,
 	signal,
-	Observable,
 } from "./preact";

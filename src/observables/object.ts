@@ -1,8 +1,6 @@
 import { batch, createAtom, createComputed } from "./preact";
 import type { AtomNode, ComputedNode } from "./preact";
 import {
-	getObservable,
-	getShallowObservable,
 	getSource,
 	getAction,
 	getAdministration,
@@ -24,43 +22,59 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	valuesMap: SignalMap<PropertyKey>;
 	computedMap!: Map<PropertyKey, ComputedNode<T[keyof T]>>;
 	types: Map<PropertyKey, PropertyType | null>;
+	isWriting: boolean = false;
 
 	static proxyTraps: ProxyHandler<object> = {
 		has(target, name) {
 			const adm = getAdministration(target);
 
-			if (!(name in Object.prototype) && isPropertyKey(name))
+			if (
+				isPropertyKey(name) &&
+				(!(name in Object.prototype) ||
+					Object.prototype.hasOwnProperty.call(adm.source, name))
+			)
 				return adm.has(name);
 			return Reflect.has(adm.source, name);
 		},
 
 		get(target, name) {
 			const adm = getAdministration(target);
+			// Check if the property is physically present on the source.
+			// Ideally we want to let `Reflect.has` decide, but we need to intercept
+			// standard object methods if they are NOT own properties (to hide administration).
+			// If they ARE own properties (e.g. user defined toString), we should track them.
 			if (
-				!(name in Object.prototype) &&
 				isPropertyKey(name) &&
+				(!(name in Object.prototype) ||
+					Object.prototype.hasOwnProperty.call(adm.source, name)) &&
 				(typeof adm.source !== "function" || name !== "prototype")
 			) {
-				return adm.read(name);
+				return adm.read(name, arguments[2]);
 			}
 
-			return Reflect.get(adm.source, name, adm.proxy);
+			return Reflect.get(adm.source, name, arguments[2]);
 		},
 
 		set(target, name, value) {
 			if (!isPropertyKey(name)) return false;
 
-			const adm = getAdministration(target);
-			adm.write(name, value);
+			const adm = getAdministration(target) as ObjectAdministration<any>;
+			const receiver = arguments[3];
 
-			return true;
+			// If receiver is the proxy itself, use the administration write path (reactive)
+			if (receiver === adm.proxy) {
+				return adm.write(name, value);
+			}
+
+			// Otherwise (prototype chain access), perform a standard Reflect.set on the receiver.
+			// This ensures the property is set on the child object (receiver), not the prototype (validating tests).
+			return Reflect.set(adm.source, name, value, receiver);
 		},
 
 		deleteProperty(target, name) {
 			if (!isPropertyKey(name)) return false;
-			const adm = getAdministration(target);
-			adm.remove(name);
-			return true;
+			const adm = getAdministration(target) as ObjectAdministration<any>;
+			return adm.remove(name);
 		},
 
 		ownKeys(target) {
@@ -72,13 +86,58 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 			return Reflect.ownKeys(adm.source);
 		},
+
+		defineProperty(target, name, descriptor) {
+			const adm = getAdministration(target) as ObjectAdministration<any>;
+
+			if (adm.isWriting) {
+				return Reflect.defineProperty(adm.source, name, descriptor);
+			}
+
+			const result = Reflect.defineProperty(adm.source, name, descriptor);
+
+			if (result) {
+				// We must trigger reactivity for the property update.
+				// Since we don't know exactly what changed (value vs config), we:
+				// 1. Invalidate tracking for this property (type cache) so it is re-evaluated
+				// 2. Report a value change to any listeners
+				// 3. Report keys/has change if it was a new property
+
+				batch(() => {
+					adm.types.delete(name);
+
+					// If it was a new property or status changed, notify map/keys
+					// We can't cheaply know if it was new without checking before, but generic "flushChange" and key updates are safe.
+					adm.flushChange();
+					adm.keysAtom.reportChanged();
+					adm.hasMap.reportChanged(name);
+
+					// If it's a value change, we should notify the value listeners.
+					// We read the new value from source to report it.
+					// If it's a value change, we should notify the value listeners.
+					// We read the new value from source to report it.
+					if ("value" in descriptor) {
+						if (isObservable(descriptor.value)) {
+							adm.explicitObservables.add(name);
+						} else {
+							adm.explicitObservables.delete(name);
+						}
+						adm.valuesMap.reportChanged(name, descriptor.value);
+					} else {
+						// For accessor changes or meta-only changes, also report generic change
+						adm.valuesMap.reportChanged(name, undefined); // Signal a potential change
+					}
+				});
+			}
+			return result;
+		},
 	};
 
 	constructor(source: T = {} as T) {
 		super(source);
 		this.keysAtom = createAtom();
 		this.hasMap = new AtomMap(this.atom);
-		this.valuesMap = new SignalMap();
+		this.valuesMap = new SignalMap(this.atom);
 		this.types = new Map();
 	}
 
@@ -86,10 +145,8 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return Reflect.get(this.source, key, this.proxy);
 	}
 
-	private set(key: PropertyKey, value: T[keyof T]): void {
-		batch(() => {
-			Reflect.set(this.source, key, value, this.proxy);
-		});
+	private set(key: PropertyKey, value: T[keyof T]): boolean {
+		return batch(() => Reflect.set(this.source, key, value, this.proxy));
 	}
 
 	private getComputed(key: keyof T): ComputedNode<T[keyof T]> {
@@ -125,19 +182,6 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return type;
 	}
 
-	protected reportObserveDeep(): void {
-		Object.getOwnPropertyNames(this.source).forEach((name) => {
-			const type = this.getType(name as keyof T);
-
-			if (type === "observable") {
-				const value = this.source[name as keyof T];
-				if (value && typeof value === "object") {
-					getAdministration(getObservable(value))?.reportObserved();
-				}
-			}
-		});
-	}
-
 	reportChanged(): void {
 		this.types.clear();
 		super.reportChanged();
@@ -157,17 +201,16 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return resolveNode(this.valuesMap.getOrCreate(key, this.source[key]));
 	}
 
-	read(key: keyof T): unknown {
+	read(key: keyof T, receiver: any = this.proxy): unknown {
 		const type = this.getType(key);
 
 		// Non-reactive property - just return the raw value
 		if (type === null) {
-			return this.get(key);
+			return Reflect.get(this.source, key, receiver);
 		}
 
 		switch (type) {
 			case "observable":
-			case "observableShallow":
 			case "action": {
 				if (key in this.source) {
 					this.valuesMap.reportObserved(key, this.source[key]);
@@ -182,56 +225,79 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				}
 
 				if (type === "observable") {
-					return getObservable(this.get(key));
+					const value = Reflect.get(this.source, key, receiver);
+
+					// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
+					// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
+					const shouldWrap =
+						this.explicitObservables.has(key) || isObservable(value);
+
+					if (
+						shouldWrap &&
+						value &&
+						typeof value === "object" &&
+						!Object.isFrozen(value)
+					) {
+						// Check Proxy Invariants:
+						// If the property is non-configurable and non-writable, we MUST return the original value.
+						// We cannot return a proxy wrapper.
+						const desc = getPropertyDescriptor(this.source, key);
+						if (desc && !desc.configurable && !desc.writable) {
+							return value;
+						}
+
+						const existingAdm = getAdministration(value);
+						if (existingAdm) {
+							return existingAdm.proxy;
+						}
+					}
+					return value;
 				}
 
-				if (type === "observableShallow") {
-					return getShallowObservable(this.get(key));
-				}
-
-				return getAction(this.get(key) as unknown as Function);
-			}
-			case "observableSignal": {
-				// For signal, we track the property but return the raw value
-				if (key in this.source) {
-					this.valuesMap.reportObserved(key, this.source[key]);
-				}
-
-				this.atom.reportObserved();
-
-				if (this.atom.observing) {
-					this.hasMap.reportObserved(key);
-				}
-
-				// Return raw value - no observable wrapping
-				return this.get(key);
+				return getAction(
+					Reflect.get(this.source, key, receiver) as unknown as Function
+				);
 			}
 			case "computed": {
-				return this.callComputed(key);
+				if (receiver === this.proxy) {
+					return this.callComputed(key);
+				}
+				this.atom.reportObserved();
+				return Reflect.get(this.source, key, receiver);
 			}
 			default:
 				throw new Error(`unknown type passed to configure`);
 		}
 	}
 
-	write(key: keyof T, newValue: T[keyof T]): void {
+	private explicitObservables = new Set<PropertyKey>();
+
+	write(key: keyof T, newValue: T[keyof T]): boolean {
 		const type = this.getType(key);
 
 		// Non-reactive property - just set the value directly
 		if (type === null) {
-			this.set(key, newValue);
-			return;
+			return this.set(key, newValue);
 		}
 
 		// if this property is a setter
 		if (type === "computed") {
-			batch(() => this.set(key, newValue));
-			return;
+			return batch(() => this.set(key, newValue));
 		}
 
 		const had = key in this.source;
 		const oldValue: T[keyof T] = this.get(key);
 		const targetValue = getSource(newValue);
+
+		const oldExplicit = this.explicitObservables.has(key);
+		const newExplicit = isObservable(newValue);
+
+		// Update strict shallow tracking
+		if (newExplicit) {
+			this.explicitObservables.add(key);
+		} else {
+			this.explicitObservables.delete(key);
+		}
 
 		if (
 			(type === "action" && typeof newValue !== "function") ||
@@ -240,13 +306,21 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			this.types.delete(key);
 		}
 
-		if (
+		const changed =
 			!had ||
+			(!isObservable(oldValue) && oldExplicit !== newExplicit) ||
 			(isObservable(oldValue)
 				? oldValue !== newValue
-				: oldValue !== targetValue)
-		) {
-			this.set(key, targetValue);
+				: oldValue !== targetValue);
+
+		if (changed) {
+			this.isWriting = true;
+			try {
+				const result = this.set(key, targetValue as T[keyof T]);
+				if (!result) return false;
+			} finally {
+				this.isWriting = false;
+			}
 
 			batch(() => {
 				this.flushChange();
@@ -256,7 +330,10 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				}
 				this.valuesMap.reportChanged(key, newValue);
 			});
+			return true;
 		}
+
+		return true;
 	}
 
 	has(key: keyof T): boolean {
@@ -269,17 +346,20 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return key in this.source;
 	}
 
-	remove(key: keyof T): void {
-		if (!(key in this.source)) return;
+	remove(key: keyof T): boolean {
+		if (!(key in this.source)) return true;
 
-		delete this.source[key];
-		batch(() => {
-			this.flushChange();
-			this.valuesMap.reportChanged(key, undefined);
-			this.keysAtom.reportChanged();
-			this.hasMap.reportChanged(key);
+		const result = Reflect.deleteProperty(this.source, key);
+		if (result) {
+			batch(() => {
+				this.flushChange();
+				this.valuesMap.reportChanged(key, undefined);
+				this.keysAtom.reportChanged();
+				this.hasMap.reportChanged(key);
 
-			this.valuesMap.delete(key);
-		});
+				this.valuesMap.delete(key);
+			});
+		}
+		return result;
 	}
 }

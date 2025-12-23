@@ -1,4 +1,3 @@
-import { batch } from "@preact/signals-core";
 import { createAtom, createObservedAtom } from "../preact";
 import type { AtomNode, ObservedAtomNode } from "../preact";
 import type { SignalMap } from "./NodeMap";
@@ -14,7 +13,7 @@ export class Administration<T extends object = any> {
 
 	protected valuesMap?: SignalMap;
 	protected isObserved = false;
-	private forceObservedAtoms?: AtomNode[];
+	private forceObservedAtom?: AtomNode;
 
 	constructor(source: T) {
 		this.atom = createObservedAtom();
@@ -26,13 +25,9 @@ export class Administration<T extends object = any> {
 	}
 
 	protected flushChange(): void {
-		if (this.forceObservedAtoms?.length) {
-			batch(() => {
-				for (let i = 0; i < this.forceObservedAtoms!.length; i++) {
-					this.forceObservedAtoms![i].reportChanged();
-				}
-			});
-			this.forceObservedAtoms = undefined;
+		if (this.forceObservedAtom) {
+			this.forceObservedAtom.reportChanged();
+			this.forceObservedAtom = undefined;
 		}
 	}
 
@@ -44,9 +39,7 @@ export class Administration<T extends object = any> {
 		this.atom.reportChanged();
 	}
 
-	protected reportObserveDeep(): void {}
-
-	reportObserved(deep = false): void {
+	reportObserved(): void {
 		const entry = circularRefSet == null;
 		if (entry) {
 			circularRefSet = new WeakSet();
@@ -56,15 +49,10 @@ export class Administration<T extends object = any> {
 
 		circularRefSet!.add(this);
 
-		const atom = createAtom();
-		if (!this.forceObservedAtoms) {
-			this.forceObservedAtoms = [];
+		if (!this.forceObservedAtom) {
+			this.forceObservedAtom = createAtom();
 		}
-		this.forceObservedAtoms.push(atom);
-		atom.reportObserved();
-		if (deep) {
-			this.reportObserveDeep();
-		}
+		this.forceObservedAtom.reportObserved();
 
 		if (entry) {
 			circularRefSet = null;

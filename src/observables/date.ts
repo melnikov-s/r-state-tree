@@ -28,6 +28,8 @@ function addDateSetMethod(method: PropertyKey): void {
 			const adm = getAdministration(this)! as Administration<Date>;
 			const res = (adm.source as any)[method].apply(adm.source, arguments);
 			adm.atom.reportChanged();
+			// Also flush coarse observers (used by reportObserved, e.g. snapshots)
+			(adm as any).flushChange();
 			return res;
 		};
 }

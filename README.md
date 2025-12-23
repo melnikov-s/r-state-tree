@@ -60,7 +60,7 @@ export default defineConfig({
 - Stores: application/view state containers. Create with `createStore()`, attach with `mount()`. Compose with `@child` (single or arrays, stable via `{ key }`). React to changes with `effect`/`reaction` and store lifecycles (`storeDidMount`/`storeWillUnmount`). Update reactive `props` via `updateStore()`.
 - Models: domain state containers. Create with `Model.create()`. Persistent via snapshots (`toSnapshot`, `applySnapshot`, `onSnapshot`, diffs via `onSnapshotDiff`). Structure with `@state`, `@child`, identifiers via `@id`, and references via `@modelRef`.
 - Context: pass data through Store/Model trees without prop drilling using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendants.
-- Reactivity: powered by signals. Use `@observable`, `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
+- Reactivity: powered by signals. Use `observable()`, `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
 
 ## Separation of concerns
 
@@ -352,39 +352,130 @@ class ListStore extends Store {
 
 ## Mutability rules
 
-- Models: prefer in-place mutation for arrays/maps/sets (`push`, `splice`, `set`, etc.). Replace the whole structure only when you intentionally want to swap the instance.
-- Stores: store fields are reactive; in-place mutation is fine. Reassign the entire structure only if you need identity replacement semantics.
+- Models: model fields are shallow-reactive, but values are not auto-wrapped. For raw `@state` arrays/objects, prefer **reassignment** (immutability) so snapshots stay up to date. If you want in-place mutation (`push`, `splice`, `set`, etc.) to trigger updates and snapshot invalidation, store an `observable()` container (or `signal()`) in `@state`.
+- Stores: store fields are shallow-reactive. Use `observable()` containers (or `signal()`) when you want in-place mutations of nested values/collections to trigger updates.
 
-## Observable classes
+### `Observable` base class
 
-For reactive class instances outside the Model/Store system, use `@observable` and `@computed` decorators:
+For class instances that need to be reactive, extending the `Observable` base class is the supported pattern. This ensures compatibility with ES `#private` fields and built-in brand checks because the observable is created in the base constructor, allowing derived field initializers (including `#private`) to run on the observable.
 
 ```ts
-import { Observable, observable, computed, effect } from "r-state-tree";
+import { Observable, effect } from "r-state-tree";
 
 class Counter extends Observable {
-	@observable count = 0;
-	@observable step = 1;
+	count = 0; // Public fields are automatically reactive
+	#internal = 0; // Private fields also work perfectly
 
-	@computed get doubled() {
-		return this.count * 2;
+	get total() {
+		return this.count + this.#internal;
 	}
 
 	increment() {
-		this.count += this.step;
+		this.count++;
+		this.#internal++;
 	}
 }
 
 const counter = new Counter();
 
+// Use an effect to track and react to property changes
 effect(() => {
-	console.log("Count:", counter.count, "Doubled:", counter.doubled);
+	console.log(`Visible: ${counter.count}, Total: ${counter.total}`);
 });
 
-counter.increment(); // Triggers the effect
+counter.increment();
 ```
 
-**Important:** Class instances require explicit `@observable` and `@computed` decorators. Properties without decorators are **not** reactive.
+> [!IMPORTANT] > **Why `extends Observable`?**
+> ES `#private` fields are brand-checked. If you wrap a class instance with `observable()` _after_ it has been created (post-hoc wrapping), or if you return an observable from a standard constructor, the private state is installed on the original `this`, but methods run with the observable as `this`, causing `TypeError: Cannot read private member`.
+>
+> `extends Observable` solves this by returning the observable from `super()`, so derived classes initialize their private fields directly on the observable receiver.
+
+### Limitations of `observable(instance)`
+
+The `observable()` function is selective about what it makes observable. It wraps **supported containers** only:
+
+- Plain objects
+- Arrays
+- Maps and Sets
+- Dates
+
+**Functions are not observable containers**. Calling `observable(fn)` returns the function unchanged with a dev-mode warning. However, functions stored as properties on observable objects are still automatically **batched as actions** when called—this existing behavior is preserved, just not via `observable(fn)` directly.
+
+If you pass an arbitrary class instance, built-in (like `URL`, `RegExp`, `Promise`, or DOM objects), or frozen object to `observable()`, it will **return the object unchanged** and emit a warning in development mode.
+
+This design prevents “silent failure” where an observable object appears to work but throws `TypeError` when accessing private members or internal slots. For your own classes, use `extends Observable`. For third-party or built-in objects, use composition:
+
+```ts
+// ❌ Post-hoc wrapping - returns raw URL, not an observable
+const url = observable(new URL("..."));
+
+// ✅ Composition - wrap a container instead
+const state = observable({ url: new URL("...") });
+```
+
+Wrap values with `observable()` for reactivity. Collections (arrays, maps, sets) track mutations:
+
+```ts
+import { observable, effect, isObservable } from "r-state-tree";
+
+class DataStore {
+	// Wrap state with observable() for reactivity
+	state = observable({ count: 0 });
+
+	// Wrap array with observable() to track push/pop/splice etc.
+	items = observable([]);
+}
+
+const store = new DataStore();
+
+effect(() => {
+	console.log("Items length:", store.items.length);
+});
+
+store.items.push({ value: 1 }); // Triggers effect
+console.log(isObservable(store.items[0])); // false - shallow by default
+```
+
+### Shallow behavior
+
+All observables are **shallow by default**. Only the container's own properties are tracked—nested values are NOT wrapped:
+
+- Collections (Arrays, Maps, Sets) wrapped with `observable()` track mutations
+- Plain objects assigned to properties are NOT wrapped (helps preserve `structuredClone` compatibility for stored values)
+- Nested object properties do NOT trigger effects unless explicitly wrapped
+
+**Mental model: reactive property, explicit reactive value**
+
+- Reading/writing a property on an observable container (including Stores/Models) is reactive.
+- The _value_ you store is not auto-wrapped. If you store a plain object/array, mutating inside it won’t trigger reactions; wrap nested values with `observable()` (or use `signal()`), or use `toObservableTree` for a one-time deep wrap of an existing JSON-like structure.
+
+**What gets tracked in shallow mode:**
+
+| Expression              | Tracked?      | Why                                              |
+| ----------------------- | ------------- | ------------------------------------------------ |
+| `data.nested`           | ✅ Yes        | Property access on the observable container      |
+| `data.nested.value`     | ❌ No         | `data.nested` is a plain object, not observable  |
+| `data.nested = { ... }` | ✅ Triggers   | Reassigns a property on the observable container |
+| `data.nested.value = 2` | ❌ No trigger | Mutates a plain object; container unchanged      |
+
+```ts
+const data = observable({ nested: { value: 1 } });
+
+effect(() => {
+	data.nested.value; // Reads `data.nested` (tracked), then reads `.value` (not tracked)
+});
+
+data.nested.value = 2; // Does NOT trigger — mutating a plain object
+data.nested = { value: 3 }; // DOES trigger — reassigning a property on the observable
+```
+
+To make `nested` reactive, wrap it explicitly:
+
+```ts
+const data = observable({ nested: observable({ value: 1 }) });
+data.nested.value = 2; // Now triggers — `nested` is also observable
+```
 
 ### Plain objects (implicit reactivity)
 
@@ -402,68 +493,31 @@ effect(() => {
 state.count++; // Triggers the effect
 ```
 
-### Shallow and signal observables
-
-Control the depth of reactivity with `@observable.shallow` and `@observable.signal`:
-
-| Decorator | Container Observable? | Values Observable? | Triggers on... |
-|-----------|----------------------|-------------------|----------------|
-| `@observable` | ✅ Yes | ✅ Yes (deep) | mutations + assignment |
-| `@observable.shallow` | ✅ Yes | ❌ No | mutations + assignment |
-| `@observable.signal` | ❌ No | ❌ No | assignment only |
-
-```ts
-import { Observable, observable, effect, isObservable } from "r-state-tree";
-
-class DataStore extends Observable {
-	// Deep observable - items pushed are also observable
-	@observable deepItems: { value: number }[] = [];
-
-	// Shallow - container is observable, but pushed items are NOT
-	@observable.shallow shallowItems: { value: number }[] = [];
-
-	// Signal - only assignment triggers, mutations do not
-	@observable.signal signalItems: number[] = [];
-}
-
-const store = new DataStore();
-
-// Shallow: items pushed are NOT observable (safe for structuredClone)
-store.shallowItems.push({ value: 1 });
-console.log(isObservable(store.shallowItems[0])); // false
-
-// Signal: mutations don't trigger effects
-effect(() => store.signalItems.length);
-store.signalItems.push(1); // Does NOT trigger effect
-store.signalItems = [1, 2]; // DOES trigger effect
-```
-
-**Use cases:**
-- `@observable.shallow`: Store external data that may need `structuredClone()`, or when you want change detection on the container but not deep reactivity
-- `@observable.signal`: Maximum performance when you're replacing values rather than mutating them
-
-Models support the same modifiers with `@state`:
-
-```ts
-class M extends Model {
-	@state.shallow items: { value: number }[] = []; // Container tracked, items not
-	@state.signal data: SomeType = null; // Only assignment tracked
-}
-```
-
 ## Observables (low‑level)
 
 Create reactive structures outside Stores/Models. Supported: Objects, Arrays, Map, Set, WeakMap, WeakSet.
 
-- Track reads with `effect`/`reaction`. Nested values are tracked when you access them inside your effects.
-- Access raw values via `source(observable)`; check if something is reactive with `isObservable(value)`.
+- Track reads with `effect`/`reaction`. Observables are **shallow**: reads are tracked on the observable container, but nested object mutations do **not** trigger unless you explicitly wrap nested values with `observable()` (or use signals).
+- Access backing values via `source(value)`; check if something is reactive with `isObservable(value)`.
+- Rule of thumb: `source(...)` returns the backing data, **not** a sanitizer—it's only observable-free if you didn't manually seed observables into the backing source.
 - Arrays: reading specific indices (`arr[i]`) or `length` tracks those; common mutators (`push/pop/shift/unshift/splice/reverse/sort/fill`) are reactive; non-index and symbol keys are not reactive.
+
+### `source()` and structuredClone
+
+`source(x)` returns the backing value behind an observable. It is **not** a “observable stripper”.
+
+**One-way rule (important):**
+
+- If you mutate through the observable wrapper (e.g. `obj.prop = observable(child)`), r-state-tree stores the **raw backing value** in `source(obj).prop` (unwrap-on-write).
+- If you manually mutate backing sources yourself (e.g. `source(obj).prop = observable(child)`), r-state-tree does **not** sanitize or rewrite your data. In that case, `source(...)` may contain observables.
+
+If you need to pass values to APIs that require cloneable data (e.g. `structuredClone`, `postMessage`), avoid seeding observables into backing sources. Prefer reading via `source(...)` and keep your stored values plain/cloneable.
 
 ```ts
 import { observable, effect, computed, reaction } from "r-state-tree";
 
 // Object
-const state = observable({ count: 0, nested: { value: 1 } });
+const state = observable({ count: 0, nested: observable({ value: 1 }) });
 
 effect(() => {
 	// tracks reads
@@ -506,9 +560,85 @@ reaction(
 state.count++;
 ```
 
+### Derived collections and identity preservation
+
+Native methods that return copies of a collection—such as `Array.prototype.slice`, `filter`, and `concat`, or `Set.prototype.union` and `intersection`—behave according to the **Explicit Architecture**:
+
+- **Raw Return**: The returned container is a plain JavaScript object (raw, non-observable).
+- **Identity Preservation**: Each element in the returned container maintains the same identity it had in the observable source. If an element was an observable (because it was explicitly owned), it remains an observable in the raw result.
+
+This ensures that "derived" state is not automatically made reactive, while still allowing observers to maintain reference stability with existing objects in your state tree.
+
+```ts
+const item = observable({ id: 1 });
+const arr = observable([item, { id: 2 }]);
+
+// slice() returns a plain array
+const sliced = arr.slice();
+isObservable(sliced); // false
+
+// Identity is preserved
+sliced[0] === item; // true (same observable identity)
+
+// If you want the result to be reactive, wrap it explicitly
+const reactiveSlice = observable(arr.slice());
+```
+
+### Recursively wrapping nested values (`toObservableTree`)
+
+By default, `observable()` is **shallow**: only the top-level container is wrapped, and nested objects/arrays are not. This is intentional for performance and `structuredClone` compatibility.
+
+`toObservableTree` performs a **one-time initial pass** that wraps all existing nested plain objects and arrays with `observable()`. After the initial wrap, the returned observables behave exactly like normal shallow observables — new assignments are **not** auto-wrapped.
+
+```ts
+import { toObservableTree, effect, source, isObservable } from "r-state-tree";
+
+// Initial pass wraps all existing nested plain objects/arrays
+const tree = toObservableTree({
+	user: { name: "Alice", tags: ["admin", "active"] },
+	settings: { theme: "dark" },
+});
+
+effect(() => {
+	// Existing nested values are observable and tracked
+	console.log(tree.user.name);
+	console.log(tree.user.tags[0]);
+});
+
+// Mutations to initially-wrapped values trigger effects
+tree.user.name = "Bob"; // triggers
+tree.user.tags[0] = "superadmin"; // triggers
+
+// NEW assignments are NOT auto-wrapped (normal shallow behavior)
+tree.newProp = { foo: 1 };
+isObservable(tree.newProp); // false — not wrapped
+
+// Source is observable-free and clonable *as long as you don't manually seed observables*
+// into backing data structures. r-state-tree unwraps observables on writes performed
+// through observable containers, but it does not sanitize user-mutated backing sources.
+const snapshot = structuredClone(source(tree));
+```
+
+**Key behavior:**
+
+- **One-time pass**: Only values present at call time are wrapped. New assignments afterward behave like normal `observable()` (shallow).
+- **Not MobX-style "deep"**: This does NOT change the observable's behavior. It's just a convenience for wrapping an existing structure upfront.
+
+**When to use:**
+
+- Hydrating API/JSON responses where you want all nested values observable from the start
+- Cases where manually wrapping each nested object would be tedious
+
+**Constraints:**
+
+- Input must be JSON-like and **acyclic** (no circular references)
+- Only plain objects and arrays are wrapped; other types (Map, Set, Date, class instances, RegExp, Error, etc.) are left as-is and not traversed
+
 ## Models and snapshots
 
 Models capture persistent state with snapshot utilities.
+
+**Important:** `@state` is **shallow-reactive** at the property level (assignments track), but values are **not auto-wrapped**. If you need nested mutations to be reactive (and to invalidate snapshot caches on in-place mutation), store `observable()` containers or `signal()` values inside `@state`.
 
 ```ts
 import {
@@ -534,6 +664,94 @@ const stop = onSnapshot(todo, (snapshot) => {
 
 todo.title = "Learn r-state-tree";
 stop();
+```
+
+### Snapshot data contract
+
+**Snapshots are JSON-only**: they contain primitives, arrays, plain objects, and Dates (serialized as ISO strings).
+
+- **Primitives**: `string`, `number`, `boolean`, `null`, `undefined` pass through.
+- **Arrays**: recursively cloned.
+- **Plain objects**: recursively cloned (prototype must be `Object.prototype` or `null`).
+- **Dates**: serialize to ISO strings (e.g., `"2024-01-15T10:30:00.000Z"`).
+- **Signals**: serialize to their current `.value` (recursively cloned).
+- **Map/Set/WeakMap/WeakSet and other non-plain objects are rejected** with a descriptive error. Convert them to plain structures before storing in `@state`.
+
+```ts
+class Event extends Model {
+	@state title = "Meeting";
+	@state createdAt = new Date(); // Date → ISO string in snapshot
+}
+
+const event = Event.create();
+toSnapshot(event);
+// { title: "Meeting", createdAt: "2024-01-15T10:30:00.000Z" }
+```
+
+If you store a `Map` or class instance in `@state`, snapshotting will throw:
+
+```ts
+class M extends Model {
+	@state cache = new Map(); // ❌ Will throw on toSnapshot()
+}
+// Error: r-state-tree: snapshots do not support Map at path "cache". ...
+```
+
+Convert to a plain structure instead:
+
+```ts
+class M extends Model {
+	@state cache: Record<string, unknown> = {}; // ✅ Plain object
+}
+```
+
+### Snapshot invalidation rules
+
+Snapshots are **memoized computeds**. Once a snapshot is observed (via `onSnapshot`, `onSnapshotDiff`, or `toSnapshot`), subsequent calls return the cached value unless a reactive dependency changes.
+
+Because snapshots are **memoized computeds** and observables are **shallow**, the snapshot cache is invalidated only by:
+
+1. **Reassigning** the `@state` field itself.
+2. **Mutating observable containers** (`observable()`) or **signals** (`signal()`) stored in the field.
+
+**Rule:** Treat raw `@state` values (plain objects/arrays) as immutable. If you mutate them in place without reassignment, the snapshot cache goes stale—`onSnapshot` won't fire and `toSnapshot` returns the old cached value.
+
+```ts
+class M extends Model {
+	@state tags: string[] = [];
+
+	// ❌ In-place mutation — snapshot cache goes stale
+	addTagBroken(tag: string) {
+		this.tags.push(tag);
+	}
+
+	// ✅ Reassign — invalidates cache, onSnapshot fires
+	addTagReassign(tag: string) {
+		this.tags = [...this.tags, tag];
+	}
+}
+```
+
+If you need in-place mutations **and** snapshot updates, wrap the value in `observable()` or use `signal()`:
+
+```ts
+class M extends Model {
+	// ✅ observable() container — in-place mutations invalidate cache
+	@state items: { id: number }[] = observable([]);
+
+	addItem(id: number) {
+		this.items.push({ id }); // onSnapshot fires
+	}
+}
+
+class Counter extends Model {
+	// ✅ signal() — .value updates invalidate cache
+	@state count = signal(0);
+
+	increment() {
+		this.count.value++; // onSnapshot fires
+	}
+}
 ```
 
 ### Snapshots and persistence
@@ -685,8 +903,10 @@ class ContainerModel extends Model {
 - Context
   - `createContext`, type `Context`
 - Reactivity and observables
-  - `observable`, `computed`, `effect`, `reaction`, `batch`, `untracked`, `Observable`
+  - `observable`, `computed`, `effect`, `reaction`, `batch`, `untracked`
   - Utilities: `isObservable`, `source`, `reportObserved`, `reportChanged`
+- Advanced
+  - `toObservableTree` — recursively wrap nested values in a JSON-like structure
 - Signals interop
   - `signal`, `getSignal`, types `Signal`, `ReadonlySignal`
 
@@ -694,7 +914,7 @@ class ContainerModel extends Model {
 
 r-state-tree is built on `@preact/signals-core`. You can interoperate with signals directly:
 
-- Per-property signals via `$prop` on observable objects (including Stores/Models), or `getSignal(obj, key)`.
+- Per-property signals via `getSignal(obj, key)`.
 - Re-exported utilities: `signal`, `computed`, `effect`, `batch`, `untracked`, and types `Signal`, `ReadonlySignal`.
 
 ```ts
@@ -702,17 +922,14 @@ import { observable, effect, getSignal } from "r-state-tree";
 
 const state = observable({ count: 0 });
 
-// Either form returns a Signal<number>
-const s1 = state.$count;
-const s2 = getSignal(state, "count");
+const countSignal = getSignal(state, "count");
 
 effect(() => {
-	// Use s1.value (or s2.value) in your UI binding
-	console.log("count:", s1.value);
+	console.log("count:", countSignal.value);
 });
 
 // Update via signal or through the object
-s1.value = 1;
+countSignal.value = 1;
 state.count = 2;
 ```
 
@@ -724,18 +941,20 @@ state.count = 2;
 ```ts
 // Preact
 function TodoView({ store }: { store: TodoStore }) {
-	return <h1>{store.$title.value}</h1>;
+	const titleSignal = getSignal(store, "title");
+	return <h1>{titleSignal.value}</h1>;
 }
 
 // React
 import { useSignals } from "@preact/signals-react/runtime";
 function TodoView({ store }: { store: TodoStore }) {
 	useSignals();
-	return <h1>{store.$title.value}</h1>;
+	const titleSignal = getSignal(store, "title");
+	return <h1>{titleSignal.value}</h1>;
 }
 ```
 
-You can also use `getSignal(store, "title")` instead of `$title`. Use the observers/renderers provided by the signals bindings for your UI library; r-state-tree will participate automatically because Stores/Models are signal-backed.
+Use the observers/renderers provided by the signals bindings for your UI library; r-state-tree will participate automatically because Stores/Models are signal-backed.
 
 ### Identifier and reference rules
 
@@ -798,7 +1017,8 @@ Do:
 - Delegate from Stores to Models for domain changes
 - Use `@child` for child stores (getter-based)
 - Use stable `key` values for child stores
-- Mutate model arrays/maps/sets in place
+- Mutate **`@child` model collections** and **`observable()` containers** in place (push/splice/set/add/etc.)
+- Treat **raw `@state` arrays/objects** as immutable: use reassignment so snapshots stay up to date (or store an `observable()` container / `signal()` inside `@state`)
 
 Don’t:
 
@@ -884,7 +1104,9 @@ const off = onSnapshot(m, (snap) =>
 ## Common pitfalls
 
 - Forgetting stable keys for `@child` arrays causes identity churn.
-- Assuming deep reactivity on undecorated fields of plain classes; use `@observable` for `Observable` classes, or use Stores/Models.
+- Assuming **deep** reactivity: nested plain objects/arrays are not reactive unless you explicitly wrap them (or use `toObservableTree` for initial hydration).
+- Mutating raw `@state` arrays/objects in place (`push`, `obj.x = 1`) and expecting snapshots to update. Snapshots are memoized; use reassignment or store `observable()` containers / `signal()` values in `@state`.
+- Passing observables to third‑party APIs that expect cloneable/serializable values (e.g. `structuredClone`). Use `source(value)` to get the backing value. It will be observable-free for values written via r-state-tree’s observable APIs (unwrap-on-write), but `source(...)` is **not** guaranteed observable-free if you manually seed observables into backing sources.
 - Creating child stores in constructors: `@child` must be on getters so identity and lifecycle can be managed by the framework.
 - Passing `models` into child stores during mount can create a recursive mount loop. If a child needs parent models, create the child store/model inside `storeDidMount` instead of wiring it through `models` during the mount cycle.
 

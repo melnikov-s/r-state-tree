@@ -22,19 +22,16 @@ export function isPropertyKey(val: unknown): val is string | number | symbol {
 	);
 }
 
-export type PropertyType =
-	| "action"
-	| "computed"
-	| "observable"
-	| "observableShallow"
-	| "observableSignal";
+export type PropertyType = "action" | "computed" | "observable";
 
 export function getPropertyType(
 	key: PropertyKey,
 	obj: object
 ): PropertyType | null {
 	// Check if this is a class instance with metadata (not a plain object)
-	const hasMetadata = (obj.constructor as any)[Symbol.metadata] !== undefined;
+	const ctor = (obj as any).constructor as any;
+	const hasMetadata =
+		ctor != null && (ctor as any)[Symbol.metadata] !== undefined;
 
 	// Get property descriptor
 	const descriptor = getPropertyDescriptor(obj, key);
@@ -45,35 +42,30 @@ export function getPropertyType(
 	}
 
 	// Check if it's a getter/setter
-	const isGetter =
+	const isAccessor =
 		descriptor &&
 		(typeof descriptor.get === "function" ||
 			typeof descriptor.set === "function");
 
 	// For plain objects (no metadata), use implicit behavior
 	if (!hasMetadata) {
-		if (isGetter) {
+		if (descriptor?.get) {
 			return "computed";
+		}
+		if (isAccessor) {
+			return null;
 		}
 		return "observable";
 	}
 
-	// For class instances, check decorator metadata
+	// For class instances, check decorator metadata first
 	const metadata = (obj.constructor as any)[Symbol.metadata];
-	if (metadata && metadata[key]) {
-		const config = metadata[key];
-
+	const config = metadata?.[key];
+	if (config) {
 		switch (config.type) {
 			case ObservableCfgTypes.computed:
 				return "computed";
-			case ObservableCfgTypes.observableShallow:
-			case ModelCfgTypes.stateShallow:
-				return "observableShallow";
-			case ObservableCfgTypes.observableSignal:
-			case ModelCfgTypes.stateSignal:
-				return "observableSignal";
 			case ModelCfgTypes.state:
-			case ObservableCfgTypes.observable:
 			case ModelCfgTypes.id:
 			case ModelCfgTypes.modelRef:
 			case CommonCfgTypes.child:
@@ -82,7 +74,7 @@ export function getPropertyType(
 		}
 	}
 
-	return null;
+	return isAccessor ? null : "observable";
 }
 
 export function getPropertyDescriptor(

@@ -5,7 +5,7 @@ export default defineConfig({
 		globals: true,
 		environment: "node",
 		include: ["tests/**/*.test.ts"],
-		setupFiles: ["@tsmetadata/polyfill"],
+		setupFiles: ["@tsmetadata/polyfill", "./tests/setup.ts"],
 		coverage: {
 			provider: "v8",
 		},

@@ -3,8 +3,8 @@ import { PreactObjectAdministration } from "../preact";
 import { ArrayAdministration } from "../array";
 import { DateAdministration } from "../date";
 import type { Administration } from "./Administration";
-import { isPlainObject } from "./utils";
 import { batch } from "@preact/signals-core";
+import { isPlainObject } from "./utils";
 
 const administrationMap: WeakMap<object, Administration> = new WeakMap();
 
@@ -52,8 +52,15 @@ export function getAction<T extends Function>(fn: T): T {
 
 export function getObservableClassInstance<T extends object>(value: T): T {
 	const adm = new PreactObjectAdministration(value);
+	administrationMap.set(adm.proxy, adm);
 	administrationMap.set(adm.source, adm);
 	return adm.proxy as unknown as T;
+}
+
+export class Observable {
+	constructor() {
+		return getObservableClassInstance(this);
+	}
 }
 
 export function getObservableIfExists<T>(value: T): T | undefined {
@@ -75,55 +82,11 @@ export function createObservableWithCustomAdministration<T>(
 	return adm.proxy as unknown as T;
 }
 
+/**
+ * Wraps a value as an observable container.
+ * All objects are wrapped as observable proxies for explicit reactivity.
+ */
 export function getObservable<T>(value: T): T {
-	if (!value) {
-		return value;
-	}
-
-	const adm = getAdministration(value);
-
-	if (adm) {
-		return adm.proxy as unknown as T;
-	}
-
-	if (
-		(typeof value === "object" || typeof value === "function") &&
-		!Object.isFrozen(value)
-	) {
-		const obj = value as unknown as object;
-
-		let Adm: new (obj: any) => Administration = PreactObjectAdministration;
-
-		if (Array.isArray(obj)) {
-			Adm = ArrayAdministration;
-		} else if (obj instanceof Map || obj instanceof WeakMap) {
-			Adm = CollectionAdministration;
-		} else if (obj instanceof Set || obj instanceof WeakSet) {
-			Adm = CollectionAdministration;
-		} else if (obj instanceof Date) {
-			Adm = DateAdministration;
-		} else if (!isPlainObject(value)) {
-			return value;
-		}
-
-		const adm = new Adm(obj);
-		administrationMap.set(adm.proxy, adm);
-		administrationMap.set(adm.source, adm);
-		return adm.proxy as unknown as T;
-	}
-
-	return value;
-}
-
-// Shallow observable map - tracks which observables are shallow
-const shallowObservables: WeakSet<object> = new WeakSet();
-
-export function isShallowObservable(obj: unknown): boolean {
-	if (!obj || typeof obj !== "object") return false;
-	return shallowObservables.has(obj);
-}
-
-export function getShallowObservable<T>(value: T): T {
 	if (!value) {
 		return value;
 	}
@@ -134,37 +97,72 @@ export function getShallowObservable<T>(value: T): T {
 		return existingAdm.proxy as unknown as T;
 	}
 
-	if (
-		(typeof value === "object" || typeof value === "function") &&
-		!Object.isFrozen(value)
-	) {
+	// Functions are NOT observable containers.
+	// They are still batched when read as actions from observable objects, but observable(fn) is not supported.
+	if (typeof value === "function") {
+		if (process.env.NODE_ENV !== "production") {
+			console.warn(
+				`r-state-tree: functions are not observable containers. ` +
+					`The function will be returned unchanged. ` +
+					`Note: functions read from observable objects are still automatically batched as actions.`
+			);
+		}
+		return value;
+	}
+
+	if (typeof value === "object") {
 		const obj = value as unknown as object;
 
 		let Adm: (new (obj: any) => Administration) | null = null;
 
-		// For shallow observables, only wrap collections (arrays, maps, sets)
-		// Plain objects should NOT be wrapped - this allows structuredClone
-		// and prevents nested property tracking
-		if (Array.isArray(obj)) {
-			Adm = ArrayAdministration;
-		} else if (obj instanceof Map || obj instanceof WeakMap) {
+		// Wrap all supported types as observable proxies
+		// Shallow behavior: the container is observable, but nested values are NOT wrapped when read
+		//
+		// Note: Map/Set/Date are wrapped even if frozen because Object.freeze only prevents
+		// property additions/deletions on the object shell, but internal slots remain mutable.
+		// A frozen Map can still be mutated via map.set(), etc.
+		if (obj instanceof Map || obj instanceof WeakMap) {
 			Adm = CollectionAdministration;
 		} else if (obj instanceof Set || obj instanceof WeakSet) {
 			Adm = CollectionAdministration;
+		} else if (obj instanceof Date) {
+			Adm = DateAdministration;
+		} else if (!Object.isFrozen(obj)) {
+			// Plain objects and arrays are only wrapped if not frozen
+			if (Array.isArray(obj)) {
+				Adm = ArrayAdministration;
+			} else if (isPlainObject(obj)) {
+				// Plain objects get observable proxies
+				Adm = PreactObjectAdministration;
+			}
 		}
-		// Plain objects and Date are NOT wrapped for shallow observables
 
 		if (Adm) {
 			const adm = new Adm(obj);
 			administrationMap.set(adm.proxy, adm);
 			administrationMap.set(adm.source, adm);
-			// Mark this observable as shallow
-			shallowObservables.add(adm.proxy);
 			return adm.proxy as unknown as T;
+		}
+
+		// Non-plain objects (class instances, built-ins like URL/RegExp) are NOT wrapped.
+		// This avoids issues with #private fields and internal slots/brand checks.
+		if (process.env.NODE_ENV !== "production" && !Object.isFrozen(obj)) {
+			const proto = Object.getPrototypeOf(obj);
+			const typeName =
+				proto?.constructor?.name && proto.constructor.name !== "Object"
+					? `instance of ${proto.constructor.name}`
+					: "non-plain object";
+
+			console.warn(
+				`r-state-tree: observable() was called with a ${typeName}. ` +
+					`This object will NOT be made observable because proxying arbitrary class instances ` +
+					`can break #private fields and built-in brand checks. ` +
+					`To make a class observable, use 'class MyClass extends Observable'.`
+			);
 		}
 	}
 
-	// For non-collections, return raw value
+	// For other types (primitives, frozen objects, etc.), return raw value
 	return value;
 }
 
