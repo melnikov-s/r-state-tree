@@ -21,7 +21,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	hasMap: AtomMap<PropertyKey>;
 	valuesMap: SignalMap<PropertyKey>;
 	computedMap!: Map<PropertyKey, ComputedNode<T[keyof T]>>;
-	types: Map<PropertyKey, PropertyType>;
+	types: Map<PropertyKey, PropertyType | null>;
 	isWriting: boolean = false;
 
 	static proxyTraps: ProxyHandler<object> = {
@@ -171,15 +171,15 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return computedNode.get();
 	}
 
-	private getType(key: keyof T): PropertyType {
+	private getType(key: keyof T): PropertyType | null {
 		let type = this.types.get(key);
 
-		if (type === undefined) {
-			type = getPropertyType(key, this.source) as PropertyType;
+		if (type === undefined && !this.types.has(key)) {
+			type = getPropertyType(key, this.source);
 			this.types.set(key, type);
 		}
 
-		return type;
+		return type as PropertyType | null;
 	}
 
 	reportChanged(): void {
@@ -198,6 +198,10 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			return resolveNode(this.getComputed(key));
 		}
 
+		if (type === null) {
+			return undefined;
+		}
+
 		return resolveNode(this.valuesMap.getOrCreate(key, this.source[key]));
 	}
 
@@ -212,22 +216,24 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			return Reflect.get(this.source, key, receiver);
 		}
 
-		// For observable and action types, we track property access
-		if (key in this.source) {
-			this.valuesMap.reportObserved(key, this.source[key]);
+		if (type === null) {
+			// Transparent passthrough for non-reactive properties/accessors.
+			return Reflect.get(this.source, key, receiver);
 		}
 
+		// Report that the property was accessed
 		this.atom.reportObserved();
 
 		if (this.atom.observing) {
-			//has map might be an arbitrary key and reportObserved creates an atom for each one
+			// has map might be an arbitrary key and reportObserved creates an atom for each one
 			// we don't need to do this if we're not in a reaction
 			this.hasMap.reportObserved(key);
 		}
 
-		if (type === "observable") {
-			const value = Reflect.get(this.source, key, receiver);
+		const value = Reflect.get(this.source, key, receiver);
+		this.valuesMap.reportObserved(key, value);
 
+		if (type === "observable") {
 			// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
 			const shouldWrap =
 				this.explicitObservables.has(key) || isObservable(value);
@@ -254,15 +260,18 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			return value;
 		}
 
-		return getAction(
-			Reflect.get(this.source, key, receiver) as unknown as Function
-		);
+		// Otherwise it's an action
+		return getAction(value as unknown as Function);
 	}
 
 	private explicitObservables = new Set<PropertyKey>();
 
 	write(key: keyof T, newValue: T[keyof T]): boolean {
 		const type = this.getType(key);
+
+		if (type === null) {
+			return Reflect.set(this.source, key, newValue, this.proxy);
+		}
 
 		// if this property is a setter
 		if (type === "computed") {

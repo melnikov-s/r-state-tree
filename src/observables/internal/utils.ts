@@ -28,10 +28,8 @@ export function getPropertyType(
 	key: PropertyKey,
 	obj: object
 ): PropertyType | null {
-	// Check if this is a class instance with metadata (not a plain object)
-	const ctor = (obj as any).constructor as any;
-	const hasMetadata =
-		ctor != null && (ctor as any)[Symbol.metadata] !== undefined;
+	// Check if this is a plain object (to apply implicit behavior)
+	const plain = isPlainObject(obj);
 
 	// Get property descriptor
 	const descriptor = getPropertyDescriptor(obj, key);
@@ -41,15 +39,20 @@ export function getPropertyType(
 		return "action";
 	}
 
-	// For plain objects (no metadata), use implicit behavior
-	if (!hasMetadata) {
-		// All properties are observable (tracked for access)
-		// Getters are NOT auto-computed; they need explicit @computed
+	// Check if it's a getter/setter
+	const isAccessor =
+		descriptor &&
+		(typeof descriptor.get === "function" ||
+			typeof descriptor.set === "function");
+
+	// For plain objects, use implicit behavior: all properties are observable (tracked for access)
+	// Getters are NOT auto-computed; they need explicit @computed
+	if (plain) {
 		return "observable";
 	}
 
 	// For class instances, check decorator metadata first
-	const metadata = (obj.constructor as any)[Symbol.metadata];
+	const metadata = ((obj as any).constructor as any)[Symbol.metadata];
 	const config = metadata?.[key];
 	if (config) {
 		switch (config.type) {
@@ -64,8 +67,13 @@ export function getPropertyType(
 		}
 	}
 
-	// Undecorated accessors are treated as observable (tracked for access)
-	// but their values won't be wrapped unless explicitly observable.
+	// For accessors on classes, we return null if they are NOT decorated.
+	// This allows @model and @child routing to work, and keeps regular getters non-reactive.
+	if (isAccessor) {
+		return null;
+	}
+
+	// Undecorated regular fields are treated as observable (tracked for access)
 	return "observable";
 }
 

@@ -1807,3 +1807,74 @@ test("store dynamic observable properties", async () => {
 	s.child.map.set("value", 1);
 	expect(count).toBe(2);
 });
+
+describe("Accessor + Decorators Regression", () => {
+	test("Store @model is still resolved via props.models (not as an observable field)", () => {
+		class RootModel extends Model {
+			// no state needed
+		}
+		class S extends Store<{ models: { root: RootModel } }> {
+			@model root!: RootModel;
+			// Accessing root must not throw and must return the model from props
+			get ok() {
+				return this.root instanceof RootModel;
+			}
+		}
+
+		const root = RootModel.create({});
+		const s = mount(createStore(S, { models: { root } }));
+		expect(s.ok).toBe(true);
+		expect(s.root).toBe(root);
+	});
+
+	test("Store @child getter still returns a mounted child store instance", () => {
+		class Child extends Store {
+			count = 0;
+			inc() {
+				this.count++;
+			}
+		}
+		class Parent extends Store {
+			@child get child(): any {
+				return createStore(Child, { key: "child" });
+			}
+		}
+
+		const p = mount(createStore(Parent)) as any;
+		let seen: number[] = [];
+		const dispose = effect(() => {
+			seen.push(p.child.count);
+		});
+		expect(seen[0]).toBe(0);
+		p.child.inc();
+		expect(seen.at(-1)).toBe(1);
+		dispose();
+	});
+
+	test("Undecorated accessor on Store is NOT treated as observable property (should not hide missing metadata bugs)", () => {
+		class S extends Store {
+			_x = 1;
+			get x() {
+				return this._x;
+			}
+			set x(v: number) {
+				this._x = v;
+			}
+		}
+
+		const s = mount(createStore(S)) as any;
+		let runs = 0;
+		const dispose = effect(() => {
+			// If the accessor itself is treated as an observable "field", this can become reactive twice.
+			// We want it to be "transparent": reactive ONLY because of its dependencies (like _x),
+			// but NOT tracked as a discrete observable property itself.
+			void s.x;
+			runs++;
+		});
+		expect(runs).toBe(1);
+		s.x = 2;
+		// Expect 2: re-runs once because _x changed, but NOT twice.
+		expect(runs).toBe(2);
+		dispose();
+	});
+});

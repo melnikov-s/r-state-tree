@@ -1055,3 +1055,20 @@ describe("Administration.reportObserved bounded atoms", () => {
 		expect(adm.forceObservedAtom).toBeUndefined();
 	});
 });
+
+describe("Regression Tests", () => {
+	test("plain object getter is NOT auto-computed (no memoization)", () => {
+		let runs = 0;
+		const o = observable({
+			x: 1,
+			get g() {
+				runs++;
+				return this.x * 2;
+			},
+		}) as any;
+		// Not memoized: repeated reads re-run getter
+		expect(o.g).toBe(2);
+		expect(o.g).toBe(2);
+		expect(runs).toBe(2);
+	});
+});
