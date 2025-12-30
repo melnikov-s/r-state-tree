@@ -354,4 +354,24 @@ export function createContainer<
 		expect(await w).toBe(2);
 		expect(s.result).toEqual(result);
 	});
+
+	test(`(${Container.name}) has dynamic observable properties`, async () => {
+		class S extends Container {
+			map = observable(new Map());
+
+			@computed get valueGetter() {
+				return this.map.get("value");
+			}
+		}
+
+		const s = createContainer(S);
+		let count = 0;
+		effect(() => {
+			count++;
+			s.valueGetter;
+		});
+		expect(count).toBe(1);
+		s.map.set("value", 1);
+		expect(count).toBe(2);
+	});
 });

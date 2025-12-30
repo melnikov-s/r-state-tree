@@ -1653,3 +1653,157 @@ describe("child type validation", () => {
 		);
 	});
 });
+
+test("store properties are observable and trigger effects when changed", () => {
+	class S extends Store<any> {
+		state = observable({ value: 0 });
+		get value() {
+			return this.state.value;
+		}
+		set value(v) {
+			this.state.value = v;
+		}
+
+		increment() {
+			this.value++;
+		}
+	}
+
+	const store = mount(createStore(S));
+	let observedValue: number | undefined;
+	const observedValues: number[] = [];
+
+	effect(() => {
+		observedValue = store.value;
+		observedValues.push(observedValue);
+	});
+
+	expect(observedValue).toBe(0);
+
+	store.increment();
+	expect(observedValue).toBe(1);
+
+	store.increment();
+	expect(observedValue).toBe(2);
+
+	store.value = 10;
+	expect(observedValue).toBe(10);
+
+	// Verify all expected values were observed (may have duplicates due to getter re-runs)
+	expect(observedValues).toContain(0);
+	expect(observedValues).toContain(1);
+	expect(observedValues).toContain(2);
+	expect(observedValues).toContain(10);
+});
+
+test("store reference properties are observable", () => {
+	class Child extends Store<any> {
+		state = observable({ name: "initial" });
+		get name() {
+			return this.state.name;
+		}
+		set name(v) {
+			this.state.name = v;
+		}
+	}
+
+	class Parent extends Store<any> {
+		state = observable({ childRef: null as Child | null });
+		get childRef() {
+			return this.state.childRef;
+		}
+		set childRef(v) {
+			this.state.childRef = v;
+		}
+
+		setChild(child: Child) {
+			this.childRef = child;
+		}
+	}
+
+	const child1 = mount(createStore(Child));
+	const child2 = mount(createStore(Child));
+	child2.name = "child2";
+
+	const parent = mount(createStore(Parent));
+
+	let effectRunCount = 0;
+	let observedRef: Child | null = null;
+
+	effect(() => {
+		observedRef = parent.childRef;
+		effectRunCount++;
+	});
+
+	expect(effectRunCount).toBe(1);
+	expect(observedRef).toBe(null);
+
+	parent.setChild(child1);
+	expect(effectRunCount).toBe(2);
+	expect(observedRef).toBe(child1);
+
+	parent.setChild(child2);
+	expect(effectRunCount).toBe(3);
+	expect(observedRef).toBe(child2);
+	expect(observedRef?.name).toBe("child2");
+});
+
+test("plain store properties are observable", () => {
+	class S extends Store<any> {
+		count = 0;
+
+		increment() {
+			this.count++;
+		}
+	}
+
+	const store = mount(createStore(S));
+	let effectRunCount = 0;
+	let observedCount: number | undefined;
+
+	effect(() => {
+		observedCount = store.count;
+		effectRunCount++;
+	});
+
+	expect(effectRunCount).toBe(1);
+	expect(observedCount).toBe(0);
+
+	store.increment();
+	expect(effectRunCount).toBe(2);
+	expect(observedCount).toBe(1);
+
+	store.count = 10;
+	expect(effectRunCount).toBe(3);
+	expect(observedCount).toBe(10);
+});
+
+test("store dynamic observable properties", async () => {
+	class Child extends Store<any> {
+		map = observable(new Map());
+
+		@computed get valueGetter() {
+			return this.map.get("value");
+		}
+	}
+
+	class S extends Store<any> {
+		@child get child() {
+			return createStore(Child);
+		}
+
+		@computed get valueGetter() {
+			return this.child.valueGetter;
+		}
+	}
+
+	const s = mount(createStore(S));
+	let count = 0;
+	effect(() => {
+		count++;
+		s.valueGetter;
+	});
+	expect(count).toBe(1);
+	s.child.map.set("value", 1);
+	expect(count).toBe(2);
+});

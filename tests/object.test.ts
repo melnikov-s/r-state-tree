@@ -37,6 +37,19 @@ test("does not overwrite observable values", () => {
 	expect(source(o).o1).toBe(o1);
 });
 
+test("dnyamic property keys are observable", () => {
+	const o1 = observable({});
+	let count = 0;
+	effect(() => {
+		count++;
+		o1.value;
+	});
+	expect(count).toBe(1);
+
+	o1.value = 1;
+	expect(count).toBe(2);
+});
+
 // With shallow behavior, nested objects are NOT wrapped automatically
 test("observable values can be assigned via Object.assign", () => {
 	const target = { prop: undefined };
@@ -48,7 +61,7 @@ test("observable values can be assigned via Object.assign", () => {
 	expect(o.prop).toBe(c);
 });
 
-test("getters on the object become computed", () => {
+test("getters are observable but not auto-computed", () => {
 	let count = 0;
 	const o = observable({
 		prop: 1,
@@ -58,13 +71,27 @@ test("getters on the object become computed", () => {
 		},
 	});
 
-	effect(() => o.comp);
-	expect(o.comp).toBe(2);
-	expect(count).toBe(1);
+	// Effects should re-run when dependencies change
+	let effectCount = 0;
+	effect(() => {
+		o.comp;
+		effectCount++;
+	});
+	expect(effectCount).toBe(1);
+
+	// Changing prop triggers effect re-run (getter is still observable)
 	o.prop++;
+	expect(effectCount).toBe(2);
+
+	// Getter returns correct value
 	expect(o.comp).toBe(4);
+
+	// Key behavioral change: getter is NOT memoized
+	// Each read increments count (unlike computed which would cache)
+	const countBefore = count;
 	o.comp;
-	expect(count).toBe(2);
+	o.comp;
+	expect(count).toBeGreaterThan(countBefore);
 });
 
 test("can only have one observable proxy per object", () => {

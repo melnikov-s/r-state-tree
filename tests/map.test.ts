@@ -138,6 +138,22 @@ test("instanceof Map", () => {
 	expect(m instanceof Map).toBe(true);
 });
 
+test("Map is reactive", () => {
+	const m = map();
+
+	const target = {};
+	let count = 0;
+
+	effect(() => {
+		count++;
+		m.has(target);
+	});
+
+	m.set(target, 1);
+	expect(count).toBe(2);
+	expect(m.get(target)).toBe(1);
+});
+
 test("WeakMap is reactive", () => {
 	const m = weakMap();
 

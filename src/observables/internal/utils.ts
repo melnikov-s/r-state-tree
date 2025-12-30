@@ -49,12 +49,8 @@ export function getPropertyType(
 
 	// For plain objects (no metadata), use implicit behavior
 	if (!hasMetadata) {
-		if (descriptor?.get) {
-			return "computed";
-		}
-		if (isAccessor) {
-			return null;
-		}
+		// All properties are observable (tracked for access)
+		// Getters are NOT auto-computed; they need explicit @computed
 		return "observable";
 	}
 
@@ -74,7 +70,9 @@ export function getPropertyType(
 		}
 	}
 
-	return isAccessor ? null : "observable";
+	// Undecorated accessors are treated as observable (tracked for access)
+	// but their values won't be wrapped unless explicitly observable.
+	return "observable";
 }
 
 export function getPropertyDescriptor(

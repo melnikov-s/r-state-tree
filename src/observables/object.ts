@@ -21,7 +21,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	hasMap: AtomMap<PropertyKey>;
 	valuesMap: SignalMap<PropertyKey>;
 	computedMap!: Map<PropertyKey, ComputedNode<T[keyof T]>>;
-	types: Map<PropertyKey, PropertyType | null>;
+	types: Map<PropertyKey, PropertyType>;
 	isWriting: boolean = false;
 
 	static proxyTraps: ProxyHandler<object> = {
@@ -171,11 +171,11 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return computedNode.get();
 	}
 
-	private getType(key: keyof T): PropertyType | null {
+	private getType(key: keyof T): PropertyType {
 		let type = this.types.get(key);
 
 		if (type === undefined) {
-			type = getPropertyType(key, this.source);
+			type = getPropertyType(key, this.source) as PropertyType;
 			this.types.set(key, type);
 		}
 
@@ -204,81 +204,65 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	read(key: keyof T, receiver: any = this.proxy): unknown {
 		const type = this.getType(key);
 
-		// Non-reactive property - just return the raw value
-		if (type === null) {
+		if (type === "computed") {
+			if (receiver === this.proxy) {
+				return this.callComputed(key);
+			}
+			this.atom.reportObserved();
 			return Reflect.get(this.source, key, receiver);
 		}
 
-		switch (type) {
-			case "observable":
-			case "action": {
-				if (key in this.source) {
-					this.valuesMap.reportObserved(key, this.source[key]);
-				}
+		// For observable and action types, we track property access
+		if (key in this.source) {
+			this.valuesMap.reportObserved(key, this.source[key]);
+		}
 
-				this.atom.reportObserved();
+		this.atom.reportObserved();
 
-				if (this.atom.observing) {
-					//has map might be an arbitrary key and reportObserved creates an atom for each one
-					// we don't need to do this if we're not in a reaction
-					this.hasMap.reportObserved(key);
-				}
+		if (this.atom.observing) {
+			//has map might be an arbitrary key and reportObserved creates an atom for each one
+			// we don't need to do this if we're not in a reaction
+			this.hasMap.reportObserved(key);
+		}
 
-				if (type === "observable") {
-					const value = Reflect.get(this.source, key, receiver);
+		if (type === "observable") {
+			const value = Reflect.get(this.source, key, receiver);
 
-					// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
-					// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
-					const shouldWrap =
-						this.explicitObservables.has(key) || isObservable(value);
+			// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
+			const shouldWrap =
+				this.explicitObservables.has(key) || isObservable(value);
 
-					if (
-						shouldWrap &&
-						value &&
-						typeof value === "object" &&
-						!Object.isFrozen(value)
-					) {
-						// Check Proxy Invariants:
-						// If the property is non-configurable and non-writable, we MUST return the original value.
-						// We cannot return a proxy wrapper.
-						const desc = getPropertyDescriptor(this.source, key);
-						if (desc && !desc.configurable && !desc.writable) {
-							return value;
-						}
-
-						const existingAdm = getAdministration(value);
-						if (existingAdm) {
-							return existingAdm.proxy;
-						}
-					}
+			if (
+				shouldWrap &&
+				value &&
+				typeof value === "object" &&
+				!Object.isFrozen(value)
+			) {
+				// Check Proxy Invariants:
+				// If the property is non-configurable and non-writable, we MUST return the original value.
+				// We cannot return a proxy wrapper.
+				const desc = getPropertyDescriptor(this.source, key);
+				if (desc && !desc.configurable && !desc.writable) {
 					return value;
 				}
 
-				return getAction(
-					Reflect.get(this.source, key, receiver) as unknown as Function
-				);
-			}
-			case "computed": {
-				if (receiver === this.proxy) {
-					return this.callComputed(key);
+				const existingAdm = getAdministration(value);
+				if (existingAdm) {
+					return existingAdm.proxy;
 				}
-				this.atom.reportObserved();
-				return Reflect.get(this.source, key, receiver);
 			}
-			default:
-				throw new Error(`unknown type passed to configure`);
+			return value;
 		}
+
+		return getAction(
+			Reflect.get(this.source, key, receiver) as unknown as Function
+		);
 	}
 
 	private explicitObservables = new Set<PropertyKey>();
 
 	write(key: keyof T, newValue: T[keyof T]): boolean {
 		const type = this.getType(key);
-
-		// Non-reactive property - just set the value directly
-		if (type === null) {
-			return this.set(key, newValue);
-		}
 
 		// if this property is a setter
 		if (type === "computed") {
