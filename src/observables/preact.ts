@@ -210,11 +210,31 @@ export function createListener(
 	return listener;
 }
 
+function internalCreateComputed<T>(fn: () => T) {
+	const version = preactSignal(0);
+	const c = preactComputed(
+		() => {
+			version.value;
+			return fn();
+		},
+		{
+			unwatched() {
+				// Mark as dirty when unobserved. This is silent because there are no subscribers.
+				version.value++;
+			},
+		} as any
+	);
+
+	return { c, version };
+}
+
 export function createComputed<T>(
 	fn: () => T,
 	context: unknown = null
 ): ComputedNode<T> {
-	const c = preactComputed(context ? fn.bind(context) : fn);
+	const bound = context ? fn.bind(context) : fn;
+	const { c } = internalCreateComputed(bound);
+
 	return {
 		node: c,
 		get() {
@@ -222,7 +242,9 @@ export function createComputed<T>(
 		},
 		clear: () => {
 			untracked(() => {
+				// Option A: Strictly silent cache drop via internal properties.
 				(c as any)._value = undefined;
+				(c as any)._globalVersion = -1;
 			});
 		},
 	};
@@ -253,7 +275,7 @@ export function computed(value: any, context?: any): any {
 	}
 
 	// Otherwise, it's the regular computed function (value is actually the fn)
-	return preactComputed(value);
+	return internalCreateComputed(value).c;
 }
 
 export function source<T>(obj: PreactObservable<T> | T): T {

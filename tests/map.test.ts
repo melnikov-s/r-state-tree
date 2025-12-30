@@ -1,4 +1,15 @@
-import { effect, observable, reaction, source, isObservable } from "../src";
+import {
+	effect,
+	observable,
+	reaction,
+	source,
+	isObservable,
+	computed,
+	mount,
+	createStore,
+	Store,
+} from "../src";
+import { createComputed } from "../src/observables";
 
 const map = <K = any, V = any>(obj: Map<K, V> = new Map()): Map<K, V> => {
 	return observable(obj) as Map<K, V>;
@@ -1252,5 +1263,78 @@ describe("Uninstrumented collection methods (Branding check safety)", () => {
 		} finally {
 			delete (Map.prototype as any).fluentMapMethod;
 		}
+	});
+});
+
+describe("Computed Reactivity Bugs", () => {
+	test("computed re-subscribe sees updates that happened while unwatched (Map case)", () => {
+		const m = observable(new Map<string, number>());
+		const c = computed(() => m.get("v") ?? null);
+
+		const seen: (number | null)[] = [];
+		const dispose1 = effect(() => {
+			seen.push(c.value);
+		});
+		expect(seen[0]).toBe(null);
+		dispose1();
+
+		m.set("v", 123);
+
+		const seen2: (number | null)[] = [];
+		const dispose2 = effect(() => {
+			seen2.push(c.value);
+		});
+		expect(seen2[0]).toBe(123);
+		dispose2();
+	});
+
+	test("same bug via Store @computed getter (Map case)", () => {
+		class S extends Store {
+			m = observable(new Map<string, number>());
+
+			@computed
+			get v() {
+				return this.m.get("v") ?? null;
+			}
+		}
+
+		const s = mount(createStore(S as any)) as any;
+		const seen: (number | null)[] = [];
+		const dispose1 = effect(() => {
+			seen.push(s.v);
+		});
+		expect(seen[0]).toBe(null);
+		dispose1();
+
+		s.m.set("v", 123);
+
+		const seen2: (number | null)[] = [];
+		const dispose2 = effect(() => {
+			seen2.push(s.v);
+		});
+		expect(seen2[0]).toBe(123);
+		dispose2();
+	});
+
+	test("clear() drops cache silently (does not notify subscribers)", () => {
+		const s = observable({ v: 1 });
+		const cc = createComputed(() => s.v);
+
+		let runs = 0;
+		effect(() => {
+			cc.get();
+			runs++;
+		});
+
+		expect(runs).toBe(1);
+
+		// clear() should not trigger the effect
+		cc.clear();
+		expect(runs).toBe(1);
+
+		// But reading again should re-evaluate (if we change dependency)
+		s.v = 2;
+		// s.v change triggers the effect, which calls cc.get(), which recomputes
+		expect(runs).toBe(2);
 	});
 });

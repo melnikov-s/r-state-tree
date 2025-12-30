@@ -1,4 +1,14 @@
-import { effect, isObservable, observable, source } from "../src";
+import {
+	effect,
+	isObservable,
+	observable,
+	source,
+	computed,
+	mount,
+	createStore,
+	Store,
+} from "../src";
+import { createComputed } from "../src/observables";
 
 const set = <T>(obj: Set<T> = new Set()) => {
 	return observable(obj);
@@ -824,5 +834,76 @@ describe("Ownership Propagation", () => {
 		const items = Array.from(symDiff);
 		expect(items).toContain(obs1);
 		expect(items).toContain(obs2);
+	});
+});
+
+describe("Computed Reactivity Bugs", () => {
+	test("computed re-subscribe sees updates that happened while unwatched (Set case)", () => {
+		const s = observable(new Set<number>());
+		const c = computed(() => s.has(123));
+
+		const seen: boolean[] = [];
+		const dispose1 = effect(() => {
+			seen.push(c.value);
+		});
+		expect(seen[0]).toBe(false);
+		dispose1();
+
+		s.add(123);
+
+		const seen2: boolean[] = [];
+		const dispose2 = effect(() => {
+			seen2.push(c.value);
+		});
+		expect(seen2[0]).toBe(true);
+		dispose2();
+	});
+
+	test("same bug via Store @computed getter (Set case)", () => {
+		class S extends Store {
+			s = observable(new Set<number>());
+
+			@computed
+			get hasValue() {
+				return this.s.has(123);
+			}
+		}
+
+		const store = mount(createStore(S as any)) as any;
+		const seen: boolean[] = [];
+		const dispose1 = effect(() => {
+			seen.push(store.hasValue);
+		});
+		expect(seen[0]).toBe(false);
+		dispose1();
+
+		store.s.add(123);
+
+		const seen2: boolean[] = [];
+		const dispose2 = effect(() => {
+			seen2.push(store.hasValue);
+		});
+		expect(seen2[0]).toBe(true);
+		dispose2();
+	});
+
+	test("clear() drops cache silently (does not notify subscribers)", () => {
+		const s = observable({ v: 1 });
+		const cc = createComputed(() => s.v);
+
+		let runs = 0;
+		effect(() => {
+			cc.get();
+			runs++;
+		});
+
+		expect(runs).toBe(1);
+
+		// clear() should not trigger the effect
+		cc.clear();
+		expect(runs).toBe(1);
+
+		s.v = 2;
+		expect(runs).toBe(2);
 	});
 });

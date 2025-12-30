@@ -41,12 +41,6 @@ export function getPropertyType(
 		return "action";
 	}
 
-	// Check if it's a getter/setter
-	const isAccessor =
-		descriptor &&
-		(typeof descriptor.get === "function" ||
-			typeof descriptor.set === "function");
-
 	// For plain objects (no metadata), use implicit behavior
 	if (!hasMetadata) {
 		// All properties are observable (tracked for access)
