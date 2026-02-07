@@ -14,13 +14,18 @@ pnpm add r-state-tree
 
 ### Requirements
 
-This library uses [TC39 Stage 3 Decorators](https://github.com/tc39/proposal-decorators) and requires TypeScript 5.0+ with `target: "es2022"` or higher.
+This library strongly recommends using decorators.
+
+- Recommended: decorators (`@child`, `@model`, `@state`, `@id`, `@modelRef`, `@computed`). Requires TypeScript 5.0+ with `target: "es2022"` or higher.
+- Fallback: `static types` configuration (no decorators) if you can't or don't want to enable decorators in your toolchain.
 
 The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
 
 ## TypeScript config (Stage 3 decorators)
 
 TypeScript 5+ supports TC39 Stage 3 decorators.
+
+Only needed if you use decorators.
 
 ```json
 {
@@ -60,7 +65,7 @@ export default defineConfig({
 - Stores: application/view state containers. Create with `createStore()`, attach with `mount()`. Compose with `@child` (single or arrays, stable via `{ key }`). React to changes with `effect`/`reaction` and store lifecycles (`storeDidMount`/`storeWillUnmount`). Update reactive `props` via `updateStore()`.
 - Models: domain state containers. Create with `Model.create()`. Persistent via snapshots (`toSnapshot`, `applySnapshot`, `onSnapshot`, diffs via `onSnapshotDiff`). Structure with `@state`, `@child`, identifiers via `@id`, and references via `@modelRef`.
 - Context: pass data through Store/Model trees without prop drilling using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendants.
-- Reactivity: powered by signals. Use `observable()`, `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
+- Reactivity: powered by signals. Use `observable()`, `computed` / `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
 
 ## Separation of concerns
 
@@ -103,6 +108,31 @@ class AppStore extends Store {
 
 const app = mount(createStore(AppStore));
 app.todo.title; // "Write docs"
+```
+
+Fallback (no decorators) using `static types`:
+
+```ts
+import { Store, createStore, mount, child } from "r-state-tree";
+
+class TodoStore extends Store<{ title: string }> {
+	get title() {
+		return this.props.title;
+	}
+}
+
+class AppStore extends Store {
+	get todo() {
+		return createStore(TodoStore, { title: "Write docs" });
+	}
+
+	static types = {
+		todo: child,
+	};
+}
+
+const app = mount(createStore(AppStore));
+app.todo.title;
 ```
 
 ### Store creation, props, and typing
@@ -268,6 +298,35 @@ class ProfileStore extends Store {
 const user = User.create({ id: 1, name: "Ada" });
 const profile = mount(createStore(ProfileStore, { models: { user } }));
 profile.user.name; // "Ada"
+```
+
+Fallback (no decorators) using `static types`:
+
+```ts
+import {
+	Model,
+	Store,
+	createStore,
+	mount,
+	model,
+	id,
+	state,
+} from "r-state-tree";
+
+class User extends Model {
+	id = 0;
+	name = "";
+	static types = { id, name: state };
+}
+
+class ProfileStore extends Store {
+	user!: User;
+	static types = { user: model };
+}
+
+const user = User.create({ id: 1, name: "Ada" });
+const profile = mount(createStore(ProfileStore, { models: { user } }));
+profile.user.name;
 ```
 
 Type stores as `Store<Props>` and explicitly type `@model` fields for clarity. The `models` prop may also provide arrays of models.
@@ -807,9 +866,11 @@ When to use each:
 - `modelDidAttach`: link to other models or read context after the model is part of a tree.
 - `modelWillDetach`: cleanup before the model is removed or replaced.
 
-### Model decorators
+### Model configuration
 
-Use decorators to configure model properties:
+Recommended: configure model properties with decorators.
+
+Fallback: if you can't or don't want to use decorators, use `static types`.
 
 ```ts
 import { Model, state, id, child, modelRef } from "r-state-tree";
@@ -828,7 +889,35 @@ class TodoModel extends Model {
 }
 ```
 
-The `@child` and `@modelRef` decorators support both single values and arrays. You can also specify the child type using `@child(ChildType)`:
+Fallback (no decorators) using `static types`:
+
+```ts
+import { Model, id, state, child, modelRef } from "r-state-tree";
+
+class User extends Model {
+	id = 0;
+	name = "";
+	static types = { id, name: state };
+}
+
+class TodoModel extends Model {
+	id = 0;
+	title = "";
+	assignee?: User;
+	metadata = MetadataModel.create();
+	tags: TagModel[] = [];
+
+	static types = {
+		id,
+		title: state,
+		assignee: modelRef(User),
+		metadata: child(MetadataModel),
+		tags: child(TagModel),
+	};
+}
+```
+
+The `child` and `modelRef` helpers support both single values and arrays. You can also specify the child type using `@child(ChildType)` (decorators) or `child(ChildType)` (`static types`):
 
 ```ts
 class TodoModel extends Model {
@@ -839,7 +928,7 @@ class TodoModel extends Model {
 
 ### Model references
 
-Reference models by ID using `@modelRef`:
+Reference models by ID using `@modelRef` (or `static types`):
 
 ```ts
 class ProjectModel extends Model {
@@ -896,7 +985,9 @@ class ContainerModel extends Model {
 - Stores
   - `Store`, `createStore`, `mount`, `unmount`, `updateStore`
 - Models
-  - `Model`, decorators: `@state`, `@id`, `@child`, `@modelRef`
+- - `Model`, configuration: decorators (`@state`, `@id`, `@child`, `@modelRef`) or `static types` with `state`, `id`, `child`, `modelRef`
+- Store configuration
+  - decorators (`@child`, `@model`) or `static types` with `child`, `model`
 - Snapshots
   - `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
   - Types: `Snapshot`, `SnapshotDiff`, `IdType`, `Configuration`
@@ -1132,7 +1223,7 @@ When child stores are created during mount with `models` that point back into th
 - Avoid barrel files if they cause import confusion; prefer direct imports.
 - Keep file boundaries clean: one model per file; avoid piling multiple models together.
 - Do not shadow `props` or use constructors for work better suited to `storeDidMount`.
-- Use `@model` for injected models; `@child` for child stores; stable keys for arrays.
+- Use `@model`/`model` for injected models; `@child`/`child` for child stores; stable keys for arrays.
 
 ## Typing recipes
 
@@ -1142,6 +1233,7 @@ When child stores are created during mount with `models` that point back into th
 
 ## Cheat sheet
 
+- Configuration (no decorators): `static types = { ... }` with `state`, `id`, `child`, `modelRef`, `model`, `computed`
 - Decorators (Models): `@state`, `@id`, `@child`, `@modelRef`
 - Decorators (Stores): `@child`, `@model`
 - Core: `createStore`, `mount`, `unmount`, `updateStore`

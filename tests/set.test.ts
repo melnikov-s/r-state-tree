@@ -621,7 +621,6 @@ describe("Uninstrumented collection methods (Branding check safety)", () => {
 				(s1 as any).union(s2);
 			}).not.toThrow();
 		} else {
-			const originalMethod = (Set.prototype as any).someNonExistentMethod;
 			(Set.prototype as any).someNonExistentMethod = function () {
 				if (!(this instanceof Set)) {
 					throw new TypeError(

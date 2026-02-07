@@ -51,7 +51,7 @@ describe("model lifecylce", () => {
 		class M extends Model {
 			count = 0;
 			@state prop = 0;
-			modelDidInit(s, a, b) {
+			modelDidInit(s: any, a?: any, b?: any) {
 				expect(s).toBe(snapshot);
 				expect(a).toBe(paramA);
 				expect(b).toBe(paramB);
@@ -80,7 +80,7 @@ describe("model lifecylce", () => {
 		let called = false;
 		class M extends Model {
 			@state prop = 0;
-			modelDidInit(snapshot) {
+			modelDidInit(snapshot?: any) {
 				expect(snapshot).toBe(undefined);
 				called = true;
 			}
@@ -101,7 +101,7 @@ describe("model lifecylce", () => {
 		}
 
 		class M extends Model {
-			@child cm: CM;
+			@child cm!: CM;
 
 			setCM() {
 				this.cm = CM.create();
@@ -185,7 +185,7 @@ describe("model lifecylce", () => {
 		}
 
 		class M extends Model {
-			@child cm: CM = CM.create();
+			@child cm: CM | null = CM.create();
 
 			clearCM() {
 				this.cm = null;
@@ -259,7 +259,7 @@ describe("model lifecylce", () => {
 		}
 
 		class M extends Model {
-			@child cm: CM;
+			@child cm!: CM;
 			setCM() {
 				this.cm = CM.create();
 			}
@@ -279,16 +279,16 @@ describe("model lifecylce", () => {
 		}
 
 		class M extends Model {
-			@child cm: CM = CM.create();
-			_temp: CM;
+			@child cm: CM | null = CM.create();
+			_temp!: CM;
 			clearCM() {
-				this._temp = this.cm;
+				this._temp = this.cm!;
 				this.cm = null;
 			}
 		}
 
 		const m = M.create();
-		expect(m.cm.count).toBe(0);
+		expect(m.cm!.count).toBe(0);
 		m.clearCM();
 		expect(m._temp.count).toBe(1);
 	});
@@ -318,8 +318,8 @@ test("can re-attach an detached model", () => {
 	}
 
 	class M extends Model {
-		@child cm: CM;
-		_cm: CM = null;
+		@child cm!: CM | null;
+		_cm: CM | null = null;
 
 		clearCM() {
 			this._cm = this.cm;
@@ -334,8 +334,8 @@ test("can re-attach an detached model", () => {
 
 	const m = M.create();
 	m.setCM();
-	m.cm.incState();
-	expect(m.cm.computed).toBe(2);
+	m.cm!.incState();
+	expect(m.cm!.computed).toBe(2);
 	expect(attachCount).toBe(1);
 	expect(detachCount).toBe(0);
 	m.clearCM();
@@ -344,9 +344,9 @@ test("can re-attach an detached model", () => {
 	m.setCM();
 	expect(attachCount).toBe(2);
 	expect(detachCount).toBe(1);
-	expect(m.cm.computed).toBe(2);
-	m.cm.incState();
-	expect(m.cm.computed).toBe(4);
+	expect(m.cm!.computed).toBe(2);
+	m.cm!.incState();
+	expect(m.cm!.computed).toBe(4);
 });
 
 test("can have a child model", () => {
@@ -366,7 +366,7 @@ test("can have a child model", () => {
 	expect(m.mc).toBe(null);
 	m.addModel(1);
 	expect(m.mc).toBeInstanceOf(MC);
-	expect(m.mc.state).toBe(1);
+	expect(m.mc!.state).toBe(1);
 });
 
 test("child models are reactive properties", () => {
@@ -403,7 +403,7 @@ test("model can initialzie child model", () => {
 test("child model can't be placed in multiple locations in the tree", () => {
 	class MC extends Model {}
 	class M extends Model {
-		@child mc: MC;
+		@child mc!: MC;
 		setModel(mc: MC) {
 			this.mc = mc;
 		}
@@ -422,7 +422,7 @@ describe("model identifiers", () => {
 			@id id = 1;
 
 			clearId() {
-				this.id = undefined;
+				this.id = undefined as any;
 			}
 		}
 
@@ -501,7 +501,7 @@ describe("model identifiers", () => {
 
 	test("identifiers can be assigned in modelDidInit", () => {
 		class M extends Model {
-			@id id;
+			@id id!: any;
 
 			modelDidInit() {
 				this.id = 1;
@@ -553,7 +553,7 @@ test("children models can be set with Object.defineProperty", () => {
 	}
 
 	class M extends Model {
-		@child mcs;
+		@child mcs!: any;
 
 		constructor() {
 			super();
@@ -596,7 +596,7 @@ describe("runtime type switching", () => {
 			}
 
 			class M extends Model {
-				@child(MC) items: MC | MC[];
+				@child(MC) items!: MC | MC[];
 
 				setSingle() {
 					this.items = MC.create({ value: 1 });
@@ -643,7 +643,7 @@ describe("runtime type switching", () => {
 			}
 
 			class M extends Model {
-				@child(MC) items: MC | MC[];
+				@child(MC) items!: MC | MC[];
 
 				setSingle() {
 					this.items = MC.create({ value: 1 });
@@ -677,7 +677,7 @@ describe("runtime type switching", () => {
 			}
 
 			class M extends Model {
-				@child(MC) items: MC | MC[];
+				@child(MC) items!: MC | MC[];
 
 				setSingle() {
 					this.items = MC.create({ value: 1 });
@@ -717,7 +717,7 @@ describe("runtime type switching", () => {
 			}
 
 			class M extends Model {
-				@child(MC) items: MC | MC[];
+				@child(MC) items!: MC | MC[];
 			}
 
 			const m = M.create();
@@ -740,13 +740,13 @@ describe("runtime type switching", () => {
 	describe("modelRef property switching", () => {
 		test("can switch from single modelRef to array of modelRefs", () => {
 			class MC extends Model {
-				@id id;
+				@id id!: any;
 				@state value = 0;
 			}
 
 			class M extends Model {
 				@child(MC) children: MC[] = [];
-				@modelRef refs: MC | MC[];
+				@modelRef refs!: MC | MC[];
 
 				addChild(id: number, value: number) {
 					this.children.push(MC.create({ id, value }));
@@ -781,13 +781,13 @@ describe("runtime type switching", () => {
 
 		test("can switch from array of modelRefs to single modelRef", () => {
 			class MC extends Model {
-				@id id;
+				@id id!: any;
 				@state value = 0;
 			}
 
 			class M extends Model {
 				@child(MC) children: MC[] = [];
-				@modelRef refs: MC | MC[];
+				@modelRef refs!: MC | MC[];
 
 				addChild(id: number, value: number) {
 					this.children.push(MC.create({ id, value }));
@@ -820,13 +820,13 @@ describe("runtime type switching", () => {
 
 		test("switching modelRef types is reactive", () => {
 			class MC extends Model {
-				@id id;
+				@id id!: any;
 				@state value = 0;
 			}
 
 			class M extends Model {
 				@child(MC) children: MC[] = [];
-				@modelRef refs: MC | MC[];
+				@modelRef refs!: MC | MC[];
 
 				addChild(id: number, value: number) {
 					this.children.push(MC.create({ id, value }));
@@ -871,12 +871,12 @@ describe("runtime type switching", () => {
 	describe("snapshot compatibility with type switching", () => {
 		test("snapshots work correctly when switching child types", () => {
 			class MC extends Model {
-				@id id;
+				@id id!: any;
 				@state value = 0;
 			}
 
 			class M extends Model {
-				@child(MC) items: MC | MC[];
+				@child(MC) items!: MC | MC[];
 			}
 
 			const m = M.create();
@@ -905,12 +905,12 @@ describe("runtime type switching", () => {
 
 		test("can load snapshot with different type than current", () => {
 			class MC extends Model {
-				@id id;
+				@id id!: any;
 				@state value = 0;
 			}
 
 			class M extends Model {
-				@child(MC) items: MC | MC[];
+				@child(MC) items!: MC | MC[];
 			}
 
 			const m = M.create();
@@ -948,7 +948,7 @@ describe("model references", () => {
 
 		class M extends Model {
 			@child(MC) mc: MC = MC.create();
-			@modelRef mr: MC;
+			@modelRef mr!: MC;
 
 			setRef() {
 				this.mr = this.mc;
@@ -965,7 +965,7 @@ describe("model references", () => {
 		class MC extends Model {}
 		class M extends Model {
 			@child mc: MC = MC.create();
-			@modelRef mr: MC;
+			@modelRef mr!: MC;
 
 			setRef() {
 				this.mr = this.mc;
@@ -978,13 +978,13 @@ describe("model references", () => {
 
 	test("model ref is not available until the referenced model is attached", () => {
 		class MC extends Model {
-			@id id = 0;
+			@id id = 1;
 		}
 
 		class M extends Model {
-			mctemp = MC.create();
+			mctemp = MC.create({ id: 1 });
 			@child mc: MC | null = null;
-			@modelRef mr: MC = this.mctemp;
+			@modelRef mr: MC = this.mctemp as any;
 
 			setChild() {
 				this.mc = this.mctemp;
@@ -994,7 +994,6 @@ describe("model references", () => {
 		const m = M.create();
 		expect(m.mr).toBe(undefined);
 		m.setChild();
-		// With shallow behavior, use deep equality for Model comparisons
 		expect(m.mr).toStrictEqual(m.mc);
 	});
 
@@ -1003,8 +1002,8 @@ describe("model references", () => {
 			@id id = 0;
 		}
 		class M extends Model {
-			@child(MC) mc: MC = MC.create();
-			@modelRef mr: MC;
+			@child(MC) mc: MC | null = MC.create();
+			@modelRef mr!: MC | null;
 
 			setRef() {
 				this.mr = this.mc;
@@ -1026,12 +1025,12 @@ describe("model references", () => {
 
 	test("model ref will become undefined when model is detached (array)", () => {
 		class MC extends Model {
-			@id id;
+			@id id: any;
 		}
 
 		class M extends Model {
 			@child mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
-			@modelRef mr: MC;
+			@modelRef mr!: MC;
 
 			setRef() {
 				this.mr = this.mc[0];
@@ -1052,14 +1051,14 @@ describe("model references", () => {
 
 	test("model ref is reactive", () => {
 		class MC extends Model {
-			@id id;
+			@id id: any;
 		}
 		class M extends Model {
 			@child mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
-			@modelRef mr: MC;
+			@modelRef mr!: MC;
 
 			setModel(index: number) {
-				this.mr = index >= 0 ? this.mc[index] : undefined;
+				this.mr = (index >= 0 ? this.mc[index] : undefined) as MC;
 			}
 		}
 
@@ -1085,9 +1084,9 @@ describe("model references", () => {
 			@id id = 0;
 		}
 		class M extends Model {
-			@child(MC) mc: MC = MC.create();
-			@modelRef mr: MC;
-			_temp: MC;
+			@child(MC) mc: MC | null = MC.create();
+			@modelRef mr!: MC | null;
+			_temp!: MC | null;
 
 			setRef() {
 				this.mr = this.mc;
@@ -1122,7 +1121,7 @@ describe("model references", () => {
 		}
 		class M extends Model {
 			@child mc: MC = MC.create();
-			@modelRef mr: MC;
+			@modelRef mr!: MC | null;
 			@state setRef: boolean = false;
 
 			modelDidAttach() {
@@ -1133,11 +1132,11 @@ describe("model references", () => {
 
 			clearModel() {
 				temp = this.mc;
-				this.mc = null;
+				this.mc = null as any;
 			}
 
 			resetModel() {
-				this.mc = temp;
+				this.mc = temp as any;
 			}
 		}
 
@@ -1153,16 +1152,16 @@ describe("model references", () => {
 	});
 	test("model refs can be an array", () => {
 		class MC extends Model {
-			@id id;
+			@id id: any;
 		}
 		class M extends Model {
-			@child(MC) mc1 = MC.create({ id: 1 });
-			@child(MC) mc2: MC = MC.create({ id: 2 });
+			@child(MC) mc1: MC | null = MC.create({ id: 1 });
+			@child(MC) mc2: MC | null = MC.create({ id: 2 });
 			@modelRef mr: MC[] = [];
-			_temp: MC;
+			_temp!: MC | null;
 
 			setRef() {
-				this.mr = [this.mc1, this.mc2];
+				this.mr = [this.mc1!, this.mc2!];
 			}
 
 			clearModel1() {
@@ -1195,7 +1194,7 @@ describe("child type validation", () => {
 	test("rejects non-Model values for child property", () => {
 		class MC extends Model {}
 		class M extends Model {
-			@child(MC) child: MC;
+			@child(MC) child!: MC;
 		}
 
 		const m = M.create();
@@ -1222,7 +1221,7 @@ describe("child type validation", () => {
 	test("allows null and undefined for child property", () => {
 		class MC extends Model {}
 		class M extends Model {
-			@child(MC) child: MC | null;
+			@child(MC) child!: MC | null;
 		}
 
 		const m = M.create();
@@ -1239,7 +1238,7 @@ describe("child type validation", () => {
 	test("allows Model instance for child property", () => {
 		class MC extends Model {}
 		class M extends Model {
-			@child(MC) child: MC;
+			@child(MC) child!: MC;
 		}
 
 		const m = M.create();
@@ -1254,7 +1253,7 @@ describe("child type validation", () => {
 	test("rejects array with non-Model items for child property", () => {
 		class MC extends Model {}
 		class M extends Model {
-			@child(MC) children: MC[];
+			@child(MC) children!: MC[];
 		}
 
 		const m = M.create();
@@ -1281,7 +1280,7 @@ describe("child type validation", () => {
 	test("allows array of Model instances for child property", () => {
 		class MC extends Model {}
 		class M extends Model {
-			@child(MC) children: MC[];
+			@child(MC) children!: MC[];
 		}
 
 		const m = M.create();
@@ -1296,7 +1295,7 @@ describe("child type validation", () => {
 	test("allows empty array for child property", () => {
 		class MC extends Model {}
 		class M extends Model {
-			@child(MC) children: MC[];
+			@child(MC) children!: MC[];
 		}
 
 		const m = M.create();

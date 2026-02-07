@@ -1,6 +1,7 @@
 import { getModelAdm, ModelAdministration } from "./ModelAdministration";
 import type { Configuration, ModelConfiguration, Snapshot } from "../types";
 import { createObservableWithCustomAdministration } from "../observables";
+import { getConfigurationForCtor } from "../configuration";
 
 let initEnabled = false;
 
@@ -13,9 +14,7 @@ type ExtractModelDidInitArgs<T extends Model> = T extends {
 	: [];
 
 export default class Model {
-	static get types(): ModelConfiguration<unknown> {
-		return (this as any)[Symbol.metadata];
-	}
+	declare static types?: ModelConfiguration<unknown>;
 
 	static childTypes: object = {};
 
@@ -52,7 +51,9 @@ export default class Model {
 		const adm = getModelAdm(observable);
 		adm.setConfiguration(
 			() =>
-				((this.constructor as typeof Model).types as Configuration<this>) ?? {}
+				(getConfigurationForCtor(
+					this.constructor as unknown as Function
+				) as Configuration<this>) ?? {}
 		);
 
 		return observable;

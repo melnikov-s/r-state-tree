@@ -1,4 +1,4 @@
-import { effect, observable, isObservable, computed, Observable } from "../src";
+import { effect, observable, isObservable, Observable } from "../src";
 
 describe("private fields and built-ins compatibility", () => {
 	test("post-hoc proxying returns instance raw (not proxied)", () => {

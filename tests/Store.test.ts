@@ -139,10 +139,10 @@ test("can access models from props in constructor", () => {
 		}
 	}
 	class C extends Store<any> {
-		@model model;
-		prop;
-		constructor(props) {
-			super(props);
+		@model model!: M;
+		prop: any;
+		constructor(propsValue: any) {
+			super(propsValue);
 			this.prop = this.model;
 		}
 	}
@@ -200,7 +200,8 @@ test("updates an array of stores", () => {
 	const types = [C, C1, C2];
 
 	const s = mount(createStore(S));
-	const equals = (v) => expect(s.cs.map((c) => c.props.prop)).toEqual(v);
+	const equals = (v: any) =>
+		expect(s.cs.map((c: any) => c.props.prop)).toEqual(v);
 	equals([0, 1, 2]);
 	s.inc();
 	equals([1, 2, 3]);
@@ -215,7 +216,7 @@ test("child stores are reactive", () => {
 		}
 	}
 	class S extends Store<any> {
-		values = observable([]);
+		values = observable([] as any[]);
 		add() {
 			this.values.push(this.values.length);
 		}
@@ -280,7 +281,7 @@ test("children stores can be retrieved during an action", () => {
 		}
 	}
 	class S extends Store<any> {
-		values = observable([]);
+		values = observable([] as any[]);
 		add() {
 			count++;
 			this.values.push(this.values.length);
@@ -346,7 +347,7 @@ test("child stores are reactive", () => {
 		}
 	}
 	class S extends Store<any> {
-		values = observable([]);
+		values = observable([] as any[]);
 		add() {
 			this.values.push(this.values.length);
 		}
@@ -467,7 +468,7 @@ test("storeDidMount is executed in an action", () => {
 
 	let s;
 	expect(() => (s = mount(createStore(S)))).not.toThrow();
-	expect(s.count).toBe(1);
+	expect(s!.count).toBe(1);
 });
 
 test("will call `storeWillUnmount` when a root store unmounts", () => {
@@ -562,7 +563,7 @@ test("when props change only those computed methods that are directly affected a
 test("models on the store can be accessed", () => {
 	class M extends Model {}
 	class S extends Store<any> {
-		@model m: M;
+		@model m!: M;
 	}
 
 	const m = M.create();
@@ -573,7 +574,7 @@ test("models on the store can be accessed", () => {
 test("models on the store default to null", () => {
 	class M extends Model {}
 	class S extends Store<any> {
-		@model m: M;
+		@model m!: M;
 	}
 
 	const s = mount(createStore(S));
@@ -583,7 +584,7 @@ test("models on the store default to null", () => {
 test("models on the store are read only", () => {
 	class M extends Model {}
 	class S extends Store<any> {
-		@model m: M;
+		@model m!: M;
 	}
 
 	const s = mount(createStore(S));
@@ -602,7 +603,7 @@ test("models on the store can't have an initializer", () => {
 test("models on the store can be an array", () => {
 	class M extends Model {}
 	class S extends Store<any> {
-		@model ms: M[];
+		@model ms!: M[];
 	}
 
 	const models = [M.create(), M.create()];
@@ -619,7 +620,7 @@ test("models on the store can be updated", () => {
 	}
 
 	class CS extends Store<any> {
-		@model m: M1 | M2;
+		@model m!: M1 | M2;
 	}
 
 	class S extends Store<any> {
@@ -631,8 +632,8 @@ test("models on the store can be updated", () => {
 			this._state.active = v;
 		}
 
-		@model m1: M1;
-		@model m2: M2;
+		@model m1!: M1;
+		@model m2!: M2;
 
 		switchModel() {
 			this.state = !this.state;
@@ -663,8 +664,8 @@ test("models on the store are reactive", () => {
 	}
 
 	class CS extends Store<any> {
-		@model m: M1 | M2;
-		@model m1: M1;
+		@model m!: M1 | M2;
+		@model m1!: M1;
 
 		@computed get models() {
 			return [this.m1];
@@ -672,8 +673,8 @@ test("models on the store are reactive", () => {
 	}
 
 	class S extends Store<any> {
-		@model m1: M1;
-		@model m2: M2;
+		@model m1!: M1;
+		@model m2!: M2;
 
 		_state = observable({ active: false });
 		get state() {
@@ -737,7 +738,7 @@ test("can setup a reaction in a store", () => {
 		set count(v) {
 			this.state.count = v;
 		}
-		unsub;
+		unsub!: any;
 
 		storeDidMount() {
 			this.unsub = this.reaction(
@@ -1524,7 +1525,6 @@ describe("child type validation", () => {
 	});
 
 	test("allows null for child property", () => {
-		class C extends Store<any> {}
 		class S extends Store<any> {
 			@child get c() {
 				return null;
@@ -1611,7 +1611,6 @@ describe("child type validation", () => {
 	});
 
 	test("allows empty array for child property", () => {
-		class C extends Store<any> {}
 		class S extends Store<any> {
 			@child get cs() {
 				return [];
@@ -1745,7 +1744,7 @@ test("store reference properties are observable", () => {
 	parent.setChild(child2);
 	expect(effectRunCount).toBe(3);
 	expect(observedRef).toBe(child2);
-	expect(observedRef?.name).toBe("child2");
+	expect((observedRef as any)?.name).toBe("child2");
 });
 
 test("plain store properties are observable", () => {

@@ -8,6 +8,8 @@ import {
 } from "@preact/signals-core";
 import type { ReadonlySignal } from "@preact/signals-core";
 
+import { computedType } from "../types";
+
 import { ObjectAdministration } from "./object";
 import {
 	getAdministration,
@@ -270,13 +272,16 @@ export function computed(value: any, context?: any): any {
 	// If context exists and has 'kind', it's being used as a decorator
 	if (context && typeof context === "object" && "kind" in context) {
 		// Decorator behavior - set metadata
-		context.metadata![context.name!] = { type: "computed" };
+		context.metadata![context.name!] = computedType;
 		return value;
 	}
 
 	// Otherwise, it's the regular computed function (value is actually the fn)
 	return internalCreateComputed(value).c;
 }
+
+// Allow using `computed` in `static types` without introducing import cycles.
+(computed as any).type = computedType.type;
 
 export function source<T>(obj: PreactObservable<T> | T): T {
 	return getSource(obj) as T;

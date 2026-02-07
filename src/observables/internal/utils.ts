@@ -5,6 +5,8 @@ import {
 	CommonCfgTypes,
 	StoreCfgTypes,
 } from "../../types";
+import { getConfigurationValue } from "../../configuration";
+import { getConfigType } from "../../configuration";
 
 export function defaultEquals<T>(a: T, b: T): boolean {
 	return a === b || (a !== a && b !== b);
@@ -51,11 +53,13 @@ export function getPropertyType(
 		return "observable";
 	}
 
-	// For class instances, check decorator metadata first
-	const metadata = ((obj as any).constructor as any)[Symbol.metadata];
-	const config = metadata?.[key];
+	// For class instances, consult configuration (static types + decorator metadata)
+	const config = getConfigurationValue(
+		(obj as any).constructor as any as Function,
+		key
+	);
 	if (config) {
-		switch (config.type) {
+		switch (getConfigType(config)) {
 			case ObservableCfgTypes.computed:
 				return "computed";
 			case ModelCfgTypes.state:

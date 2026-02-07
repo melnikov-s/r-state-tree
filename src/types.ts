@@ -54,11 +54,15 @@ export type ConfigurationTypes =
 	| StoreCfgTypes
 	| ObservableCfgTypes;
 
-export type ConfigurationType = {
+export type ConfigurationValue = {
 	type: ConfigurationTypes;
 	childType?: Function;
 	[key: string]: unknown;
 };
+
+// Configuration entries can be plain objects or callable (e.g. childType/modelRefType)
+// or decorator-like functions that will be resolved at runtime.
+export type ConfigurationType = ConfigurationValue | Function;
 export type ModelConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type StoreConfiguration<T> = Record<PropertyKey, ConfigurationType>;
 export type Configuration<T> = ModelConfiguration<T> | StoreConfiguration<T>;
@@ -133,28 +137,28 @@ export type SnapshotChange<T extends Model = Model> = (
 export type RefSnapshot = { [key: string]: IdType; [key: number]: IdType };
 
 export const childType = Object.assign(
-	function (childType: Function): ConfigurationType {
+	function (childType: Function): ConfigurationValue {
 		return { type: CommonCfgTypes.child, childType };
 	},
 	{ type: CommonCfgTypes.child }
 );
 
-export const stateType: ConfigurationType = {
+export const stateType: ConfigurationValue = {
 	type: ModelCfgTypes.state,
 };
 
 export const modelRefType = Object.assign(
-	function (childType: Function): ConfigurationType {
+	function (childType: Function): ConfigurationValue {
 		return { type: ModelCfgTypes.modelRef, childType };
 	},
 	{ type: ModelCfgTypes.modelRef }
 );
 
-export const idType: ConfigurationType = { type: ModelCfgTypes.id };
-export const modelType: ConfigurationType = {
+export const idType: ConfigurationValue = { type: ModelCfgTypes.id };
+export const modelType: ConfigurationValue = {
 	type: StoreCfgTypes.model,
 };
 
-export const computedType: ConfigurationType = {
+export const computedType: ConfigurationValue = {
 	type: ObservableCfgTypes.computed,
 };

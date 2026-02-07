@@ -210,10 +210,12 @@ describe("Cross-cutting invariants", () => {
 		set.add(keyItem);
 
 		expect(
-			isObservable(Array.from(source(map).keys()).find((k) => k.key === 1))
+			isObservable(Array.from(source(map).keys()).find((k: any) => k.key === 1))
 		).toBe(false);
 		expect(
-			isObservable(Array.from(source(set).values()).find((v) => v.key === 1))
+			isObservable(
+				Array.from(source(set).values()).find((v: any) => v.key === 1)
+			)
 		).toBe(false);
 	});
 

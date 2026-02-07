@@ -13,6 +13,7 @@ import {
 	createObservableWithCustomAdministration,
 	getObservable,
 } from "../observables";
+import { getConfigurationForCtor } from "../configuration";
 
 let initEnabled = false;
 export function allowNewStore<T>(fn: () => T): T {
@@ -66,9 +67,7 @@ export function types<T extends Store>(
 export default class Store<
 	PropsType extends Record<string, any> = StoreProps<Props>
 > {
-	static get types(): StoreConfiguration<unknown> {
-		return (this as any)[Symbol.metadata];
-	}
+	declare static types?: StoreConfiguration<unknown>;
 
 	props!: StoreProps<PropsType>;
 
@@ -84,7 +83,9 @@ export default class Store<
 		const adm = getStoreAdm(observable);
 		adm.setConfiguration(
 			() =>
-				((this.constructor as typeof Store).types as Configuration<this>) ?? {}
+				(getConfigurationForCtor(
+					this.constructor as unknown as Function
+				) as Configuration<this>) ?? {}
 		);
 		adm.write("props", getObservable({}));
 		updateProps(observable.props, props);

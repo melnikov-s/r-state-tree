@@ -28,6 +28,11 @@ import {
 } from "./idMap";
 import { clone } from "../utils";
 import {
+	getConfigChildType,
+	getConfigType,
+	getConfigurationForCtor,
+} from "../configuration";
+import {
 	ChildModelsAdministration,
 	observe,
 } from "./ChildModelsAdministration";
@@ -48,11 +53,10 @@ export function getModelAdm<T extends Model>(model: T): ModelAdministration {
 
 function getIdKey(Ctor: typeof Model): string | number | null {
 	if (!ctorIdKeyMap.has(Ctor)) {
+		const config = getConfigurationForCtor(Ctor as unknown as Function);
 		const key =
-			Object.keys(Ctor.types).find(
-				(prop) =>
-					(Ctor.types[prop as keyof typeof Ctor.types] as any).type ===
-					ModelCfgTypes.id
+			Object.keys(config).find(
+				(prop) => (config as any)[prop]?.type === ModelCfgTypes.id
 			) ?? null;
 
 		ctorIdKeyMap.set(Ctor, key);
@@ -117,6 +121,16 @@ function validateModelChildValue(
 }
 
 export class ModelAdministration extends PreactObjectAdministration<any> {
+	private getCfgType(
+		name: PropertyKey
+	): ModelCfgTypes | CommonCfgTypes | undefined {
+		return getConfigType(this.configuration[name as any]) as any;
+	}
+
+	private getCfgChildType(name: PropertyKey): Function | undefined {
+		return getConfigChildType(this.configuration[name as any]);
+	}
+
 	static proxyTraps: ProxyHandler<object> = Object.assign(
 		{},
 		PreactObjectAdministration.proxyTraps,
@@ -126,7 +140,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				if (prop === "parent") {
 					return (target as Model).parent;
 				}
-				switch (adm.configuration[prop as string]?.type) {
+				switch (adm.getCfgType(prop)) {
 					case ModelCfgTypes.modelRef:
 						if (Array.isArray(adm.source[prop])) {
 							return adm.getModelRefs(prop);
@@ -143,7 +157,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				const adm = getAdministration(target) as ModelAdministration;
 				adm.writeInProgress.add(name);
 				try {
-					switch (adm.configuration[name as string]?.type) {
+					switch (adm.getCfgType(name)) {
 						case ModelCfgTypes.modelRef: {
 							Array.isArray(value)
 								? adm.setModelRefs(name, value)
@@ -184,7 +198,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				// if we don't check for writeInProgress we will blow the stack
 				// as Reflect.set will eventually trigger defineProperty proxy handler
 				if (desc && "value" in desc && !adm.writeInProgress.has(name)) {
-					switch (adm.configuration[name as string]?.type) {
+					switch (adm.getCfgType(name)) {
 						case ModelCfgTypes.modelRef:
 						case CommonCfgTypes.child:
 						case ModelCfgTypes.id: {
@@ -528,7 +542,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	private toJSON(): Snapshot<Model> {
 		return Object.keys(this.configuration).reduce((json: any, key) => {
-			switch (this.configuration[key].type) {
+			switch (getConfigType(this.configuration[key])) {
 				case ModelCfgTypes.state: {
 					json[key] = clone(this.proxy[key], key);
 					break;
@@ -588,7 +602,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	loadSnapshot(snapshot: Snapshot<any>): void {
 		const ensureChildTypes = (key: string): true => {
-			if (!this.configuration[key].childType) {
+			const childType = this.getCfgChildType(key);
+			if (!childType) {
 				throw new Error(
 					"r-state-tree: child constructor must be specified to load snapshots with child/children. eg: `@child(ChildCtor) MyChild`"
 				);
@@ -599,7 +614,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 		onSnapshotLoad(() => {
 			Object.keys(snapshot).forEach((key) => {
-				const { type, childType } = this.configuration[key] ?? {};
+				const type = this.getCfgType(key);
+				const childType = this.getCfgChildType(key);
 				const value = snapshot[key];
 
 				switch (type) {

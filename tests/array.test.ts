@@ -6,10 +6,7 @@ import {
 	observable,
 	effect,
 } from "../src";
-import {
-	getAdministration,
-	getInternalNode,
-} from "../src/observables/internal/lookup";
+import { getInternalNode } from "../src/observables/internal/lookup";
 
 // ... existing code ...
 
@@ -78,7 +75,7 @@ test("sort parameters are raw (non-observable)", () => {
 
 		effect(() => {
 			count++;
-			arr[method](lookup);
+			(arr as any)[method](lookup);
 		});
 
 		expect(count).toBe(1);
@@ -96,7 +93,7 @@ test("sort parameters are raw (non-observable)", () => {
 		effect(() => {
 			count++;
 
-			expect(arr[method]("en")).toBe(realArr[method]("en"));
+			expect((arr as any)[method]("en")).toBe((realArr as any)[method]("en"));
 		});
 
 		realArr.push(4);
@@ -113,9 +110,9 @@ test("sort parameters are raw (non-observable)", () => {
 
 		effect(() => {
 			count++;
-			const result = arr[method]();
+			const result = (arr as any)[method]();
 
-			expect(result).toEqual(realArr[method]());
+			expect(result).toEqual((realArr as any)[method]());
 			expect(isObservable(result)).toBe(false);
 			// Shallow behavior: nested items are NOT wrapped unless they were already observable
 			expect(isObservable(result[0])).toBe(isObservable(arr[0]));
@@ -146,14 +143,20 @@ test("sort parameters are raw (non-observable)", () => {
 			let ran = false;
 			count++;
 
-			const result = arr[method](function (v, i, a) {
+			const result = (arr as any)[method](function (
+				this: any,
+				v: any,
+				i: any,
+				a: any
+			) {
 				ran = true;
 				expect(a).toBe(arr);
 				expect(v).toBe(arr[i]);
 				expect(this).toBe(context);
 
 				return true;
-			}, context);
+			},
+			context);
 
 			if (result && typeof result === "object") {
 				// filter/map now return observable arrays
@@ -186,7 +189,7 @@ test("sort parameters are raw (non-observable)", () => {
 
 		effect(() => {
 			count++;
-			arr[method]((acc, v) => acc + v, 0);
+			(arr as any)[method]((acc: any, v: any) => acc + v, 0);
 		});
 
 		arr.push(4);
@@ -322,7 +325,7 @@ test("[mobx-test] basic functionality", function () {
 	const sum = computed(function () {
 		return (
 			-1 +
-			a.reduce(function (a, b) {
+			a.reduce(function (a: any, b: any) {
 				return a + b;
 			}, 1)
 		);
@@ -372,7 +375,7 @@ test("[mobx-test] basic functionality", function () {
 
 test("[mobx-test] find(findIndex)", function () {
 	const a = array([10, 20, 20]);
-	function predicate(item) {
+	function predicate(item: any) {
 		if (item === 20) {
 			return true;
 		}
@@ -413,8 +416,8 @@ test("[mobx-test] array modification functions", function () {
 		ars.forEach(function (ar) {
 			const a = ar.slice();
 			const b = array(a.slice());
-			const res1 = a[f](4);
-			const res2 = b[f](4);
+			const res1 = (a as any)[f](4);
+			const res2 = (b as any)[f](4);
 			expect(res1).toEqual(res2);
 			expect(a).toEqual(b.slice());
 		});
@@ -451,14 +454,14 @@ test("[mobx-test] array modifications", function () {
 					a2.splice(0, a2.length, ...a1);
 
 					// eslint-disable-next-line prefer-spread
-					const res1 = a1.splice.apply(
+					const res1 = (a1.splice as any).apply(
 						a1,
-						[inputs[i], inputs[j]].concat(arrays[l])
+						[inputs[i] as any, inputs[j] as any].concat(arrays[l])
 					);
 					// eslint-disable-next-line prefer-spread
-					const res2 = a2.splice.apply(
+					const res2 = (a2.splice as any).apply(
 						a2,
-						[inputs[i], inputs[j]].concat(arrays[l])
+						[inputs[i] as any, inputs[j] as any].concat(arrays[l])
 					);
 					expect(a1.slice()).toEqual(a2.slice());
 					expect(res1).toEqual(res2);
@@ -625,19 +628,19 @@ test("[mobx-test] can define properties on arrays", () => {
 test("[mobx-test] symbol key on array", () => {
 	const x = array([1, 2]);
 	const s = Symbol("test");
-	x[s] = 3;
-	expect(x[s]).toBe(3);
+	(x as any)[s] = 3;
+	expect((x as any)[s]).toBe(3);
 
 	let reacted = false;
 	const d = reaction(
-		() => x[s],
+		() => (x as any)[s],
 		() => {
 			reacted = true;
 		}
 	);
 
-	x[s] = 4;
-	expect(x[s]).toBe(4);
+	(x as any)[s] = 4;
+	expect((x as any)[s]).toBe(4);
 
 	// although x[s] can be stored, it won't be reactive!
 	expect(reacted).toBe(false);
@@ -647,19 +650,19 @@ test("[mobx-test] symbol key on array", () => {
 test("[mobx-test] non-symbol key on array", () => {
 	const x = array([1, 2]);
 	const s = "test";
-	x[s] = 3;
-	expect(x[s]).toBe(3);
+	(x as any)[s] = 3;
+	expect((x as any)[s]).toBe(3);
 
 	let reacted = false;
 	const d = reaction(
-		() => x[s],
+		() => (x as any)[s],
 		() => {
 			reacted = true;
 		}
 	);
 
-	x[s] = 4;
-	expect(x[s]).toBe(4);
+	(x as any)[s] = 4;
+	expect((x as any)[s]).toBe(4);
 
 	// although x[s] can be stored, it won't be reactive!
 	expect(reacted).toBe(false);
@@ -1209,8 +1212,8 @@ describe("JS Array Semantics Alignment", () => {
 			const nativeArr = [10, 20, 30];
 
 			// Native behavior: "01" is not an index
-			nativeArr["01" as any] = "non-index";
-			arr["01" as any] = "non-index";
+			(nativeArr as any)["01"] = "non-index";
+			(arr as any)["01"] = "non-index";
 
 			// Length should be unchanged
 			expect(arr.length).toBe(nativeArr.length);
@@ -1230,8 +1233,8 @@ describe("JS Array Semantics Alignment", () => {
 			const arr = array([10, 20, 30]);
 			const nativeArr = [10, 20, 30];
 
-			nativeArr["-1" as any] = "negative";
-			arr["-1" as any] = "negative";
+			(nativeArr as any)["-1"] = "negative";
+			(arr as any)["-1"] = "negative";
 
 			// Length should be unchanged
 			expect(arr.length).toBe(nativeArr.length);
@@ -1247,8 +1250,8 @@ describe("JS Array Semantics Alignment", () => {
 
 			// 2^32 - 1 is NOT a valid array index (max is 2^32 - 2)
 			const notAnIndex = "4294967295";
-			nativeArr[notAnIndex as any] = "not-index";
-			arr[notAnIndex as any] = "not-index";
+			(nativeArr as any)[notAnIndex] = "not-index";
+			(arr as any)[notAnIndex] = "not-index";
 
 			// Length should be unchanged (NOT 4294967296!)
 			expect(arr.length).toBe(nativeArr.length);

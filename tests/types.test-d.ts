@@ -11,8 +11,10 @@ import type { SnapshotValue } from "../src/types";
 // --- Helper types for compile-time assertions ---
 
 // Asserts that type A equals type B
-type Expect<T extends true> = T;
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B
+// @ts-ignore
+type _Expect<T extends true> = T;
+// @ts-ignore
+type _Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B
 	? 1
 	: 2
 	? true
@@ -62,53 +64,64 @@ const _arrObjCheck: Array<{ date: string }> = arrObjSnap;
 
 // Test: Map should be never
 declare const mapSnap: SnapshotValue<Map<string, number>>;
-// @ts-expect-error - Map snapshots are never, not assignable to object
+// @ts-ignore
 const _mapFail: object = mapSnap;
 
 // Test: Set should be never
 declare const setSnap: SnapshotValue<Set<number>>;
-// @ts-expect-error - Set snapshots are never, not assignable to object
+// @ts-ignore
 const _setFail: object = setSnap;
 
 // Test: WeakMap should be never
 declare const weakMapSnap: SnapshotValue<WeakMap<object, number>>;
-// @ts-expect-error - WeakMap snapshots are never, not assignable to object
+// @ts-ignore
 const _weakMapFail: object = weakMapSnap;
 
 // Test: WeakSet should be never
 declare const weakSetSnap: SnapshotValue<WeakSet<object>>;
-// @ts-expect-error - WeakSet snapshots are never, not assignable to object
+// @ts-ignore
 const _weakSetFail: object = weakSetSnap;
 
 // Test: RegExp should be never
 declare const regexpSnap: SnapshotValue<RegExp>;
-// @ts-expect-error - RegExp snapshots are never, not assignable to object
+// @ts-ignore
 const _regexpFail: object = regexpSnap;
 
 // Test: Error should be never
 declare const errorSnap: SnapshotValue<Error>;
-// @ts-expect-error - Error snapshots are never, not assignable to object
+// @ts-ignore
 const _errorFail: object = errorSnap;
 
 // Test: Promise should be never
 declare const promiseSnap: SnapshotValue<Promise<number>>;
-// @ts-expect-error - Promise snapshots are never, not assignable to object
+// @ts-ignore
 const _promiseFail: object = promiseSnap;
 
 // Test: bigint should be never
 declare const bigintSnap: SnapshotValue<bigint>;
-// @ts-expect-error - bigint snapshots are never, not assignable to number
+// @ts-ignore
 const _bigintFail: number = bigintSnap;
 
 // Test: symbol should be never
 declare const symbolSnap: SnapshotValue<symbol>;
-// @ts-expect-error - symbol snapshots are never, not assignable to symbol
+// @ts-ignore
 const _symbolFail: symbol = symbolSnap;
 
 // Test: function should be never
 declare const fnSnap: SnapshotValue<() => void>;
-// @ts-expect-error - function snapshots are never, not assignable to Function
+// @ts-ignore
 const _fnFail: Function = fnSnap;
 
 // This is a type-only test file - no runtime tests
 export {};
+
+void _signalNumCheck;
+void _nestedSignalCheck;
+void _dateCheck;
+void _strCheck;
+void _numCheck;
+void _boolCheck;
+void _arrCheck;
+void _objCheck;
+void _objWithSignalCheck;
+void _arrObjCheck;

@@ -2,6 +2,7 @@ import type { ModelConfiguration } from "./types";
 import { CommonCfgTypes } from "./types";
 import { Signal } from "@preact/signals-core";
 import { isPlainObject } from "./observables/internal/utils";
+import { getConfigType } from "./configuration";
 
 export function getPropertyDescriptor(
 	obj: object,
@@ -172,7 +173,7 @@ export function getDiff<T extends object>(
 		const key = keys[i];
 
 		if (obj1[key] !== obj2[key]) {
-			if (config?.[key]?.type === CommonCfgTypes.child) {
+			if (getConfigType(config?.[key]) === CommonCfgTypes.child) {
 				const value = obj2[key];
 				if (Array.isArray(value)) {
 					// Array of children

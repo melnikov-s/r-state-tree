@@ -44,16 +44,16 @@ export function createContainer<
 					this._stateB.value = v;
 				}
 
-				setA(obj) {
+				setA(obj: any) {
 					this.stateA = obj;
 				}
 
-				setB(obj) {
+				setB(obj: any) {
 					this.stateB = obj;
 				}
 
-				modObj(prop, value) {
-					this.stateA[prop] = value;
+				modObj(prop: any, value: any) {
+					(this.stateA as any)[prop] = value;
 				}
 			}
 
@@ -90,16 +90,16 @@ export function createContainer<
 					this._stateB.value = v;
 				}
 
-				setA(array) {
+				setA(array: any) {
 					this.stateA = array;
 				}
 
-				setB(array) {
+				setB(array: any) {
 					this.stateB = array;
 				}
 
-				modArray(index, value) {
-					this.stateA[index] = value;
+				modArray(index: any, value: any) {
+					(this.stateA as any)[index] = value;
 				}
 			}
 
@@ -135,15 +135,15 @@ export function createContainer<
 					this._stateB.value = v;
 				}
 
-				setA(map) {
+				setA(map: any) {
 					this.stateA = map;
 				}
 
-				setB(map) {
+				setB(map: any) {
 					this.stateB = map;
 				}
 
-				modMap(key, value) {
+				modMap(key: any, value: any) {
 					this.stateA.set(key, value);
 				}
 			}
@@ -183,15 +183,15 @@ export function createContainer<
 					this._stateB.value = v;
 				}
 
-				setA(set) {
+				setA(set: any) {
 					this.stateA = set;
 				}
 
-				setB(set) {
+				setB(set: any) {
 					this.stateB = set;
 				}
 
-				modSet(value) {
+				modSet(value: any) {
 					this.stateA.add(value);
 				}
 			}
@@ -332,7 +332,7 @@ export function createContainer<
 		class S extends Container {
 			value = 0;
 
-			result = null;
+			result: any = null;
 
 			async inc() {
 				this.value++;
@@ -347,7 +347,9 @@ export function createContainer<
 
 		const s = createContainer(S);
 		expect(s.value).toBe(0);
-		effect(() => s.value);
+		effect(() => {
+			s.value;
+		});
 		const w = s.inc();
 		expect(s.value).toBe(1);
 		expect(s.result).toBe(null);

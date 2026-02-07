@@ -346,7 +346,7 @@ test("[mobx-test] observe collections", function () {
 });
 
 test("[mobx-test] unobserve before delete", function () {
-	const propValues = [];
+	const propValues: any[] = [];
 	const myObservable = observable({
 		myMap: source(map()),
 	}) as any;
@@ -459,7 +459,7 @@ test("[mobx-test] can iterate maps", () => {
 	d();
 });
 
-function iteratorToArray(it) {
+function iteratorToArray(it: any) {
 	const res = [];
 	while (true) {
 		const r = it.next();
@@ -552,7 +552,7 @@ test("[mobx-test] toStringTag", () => {
 
 test("[mobx-test] map.size is reactive", () => {
 	const m = map();
-	const sizes = [];
+	const sizes: any[] = [];
 
 	effect(() => {
 		sizes.push(m.size);
@@ -751,7 +751,7 @@ test("[mobx-test] noop mutations do NOT reportChanges", () => {
 });
 
 test("[mobx-test] iterators should be resilient to concurrent delete operation", () => {
-	function testIterator(method) {
+	function testIterator(method: any) {
 		const m = map(
 			new Map([
 				[1, 1],
@@ -766,7 +766,7 @@ test("[mobx-test] iterators should be resilient to concurrent delete operation",
 				[3, 3],
 			])
 		);
-		for (const entry of m[method]()) {
+		for (const entry of (m as any)[method]()) {
 			const key = Array.isArray(entry) ? entry[0] : entry;
 			const deleted1 = m.delete(key);
 			const deleted2 = expectedMap.delete(key);
@@ -1229,7 +1229,6 @@ describe("Uninstrumented collection methods (Branding check safety)", () => {
 		const m = map(new Map([["a", 1]]));
 
 		// Mock a native-like method on Map prototype
-		const originalMethod = (Map.prototype as any).someNewMapMethod;
 		(Map.prototype as any).someNewMapMethod = function () {
 			if (!(this instanceof Map)) {
 				throw new TypeError(

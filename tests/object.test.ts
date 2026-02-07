@@ -7,7 +7,6 @@ import {
 	reportChanged,
 	isObservable,
 } from "../src";
-import { createComputed, createSignal } from "../src/observables";
 import {
 	getInternalNode,
 	getAdministration,
@@ -42,11 +41,11 @@ test("dnyamic property keys are observable", () => {
 	let count = 0;
 	effect(() => {
 		count++;
-		o1.value;
+		(o1 as any).value;
 	});
 	expect(count).toBe(1);
 
-	o1.value = 1;
+	(o1 as any).value = 1;
 	expect(count).toBe(2);
 });
 
@@ -221,7 +220,7 @@ test("observable can turn into action (source)", () => {
 test("[mobx-test] keys should be observable when extending", () => {
 	const todos = object({});
 
-	const todoTitles = [];
+	const todoTitles: any[] = [];
 	reaction(
 		() => Object.keys(todos).map((key) => `${key}: ${todos[key]}`),
 		(titles) => todoTitles.push(titles.join(","))
@@ -248,7 +247,7 @@ test("[mobx-test] keys should be observable when extending", () => {
 
 test("[mobx-test] object - set, remove, values are reactive", () => {
 	const todos = object({});
-	const snapshots = [];
+	const snapshots: any[] = [];
 
 	reaction(
 		() => Object.values(todos),
@@ -270,7 +269,7 @@ test("[mobx-test] object - set, remove, values are reactive", () => {
 
 test("[mobx-test] object - set, remove, entries are reactive", () => {
 	const todos = object({});
-	const snapshots = [];
+	const snapshots: any[] = [];
 
 	reaction(
 		() => Object.entries(todos),
@@ -303,7 +302,7 @@ test("[mobx-test] object - set, remove, entries are reactive", () => {
 
 test("[mobx-test] object - set, remove, keys are reactive", () => {
 	const todos = object({ a: 3 });
-	const snapshots = [];
+	const snapshots: any[] = [];
 
 	reaction(
 		() => Object.keys(todos),
@@ -361,7 +360,7 @@ test("[mobx-test] getter props are considered part of collections", () => {
 test("[mobx-test] delete and undelete should work", () => {
 	const x = object({});
 
-	const events = [];
+	const events: any[] = [];
 	effect(() => {
 		events.push("a" in x);
 	});
@@ -397,7 +396,7 @@ test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 
 });
 
 test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 2", () => {
-	const events = [];
+	const events: any[] = [];
 	const x = object({
 		y: 1,
 		z: 1,
@@ -413,7 +412,7 @@ test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 
 });
 
 test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 2", () => {
-	const events = [];
+	const events: any[] = [];
 	const x = object({
 		y: 1,
 		z: undefined,
@@ -429,7 +428,7 @@ test("[mobx-test] should react to key removal (unless reconfiguring to empty) - 
 });
 
 test("[mobx-test] should react to future key additions - 1", () => {
-	const events = [];
+	const events: any[] = [];
 	const x = object({});
 
 	reaction(
@@ -442,7 +441,7 @@ test("[mobx-test] should react to future key additions - 1", () => {
 });
 
 test("[mobx-test] should react to future key additions - 2", () => {
-	const events = [];
+	const events: any[] = [];
 	const x = object({});
 
 	reaction(
@@ -573,7 +572,7 @@ test("[mobx-test] deleting / recreate prop", () => {
 		foo: undefined, // if foo is something like 'abc', it works.
 	});
 
-	const events = [];
+	const events: any[] = [];
 
 	effect(() => {
 		events.push(value.foo);
@@ -838,10 +837,10 @@ describe("Proxy trap invariants", () => {
 describe("Setter-only accessors on plain objects", () => {
 	test("reading a setter-only accessor returns undefined and does not throw", () => {
 		const obj = {};
-		let setterValue: any;
+		let _setterValue: any;
 		Object.defineProperty(obj, "prop", {
 			set(v) {
-				setterValue = v;
+				_setterValue = v;
 			},
 			configurable: true,
 			enumerable: true,
@@ -850,6 +849,7 @@ describe("Setter-only accessors on plain objects", () => {
 		const o = observable(obj) as any;
 		expect(() => o.prop).not.toThrow();
 		expect(o.prop).toBe(undefined);
+		void _setterValue;
 	});
 
 	test("writing to a setter-only accessor invokes the setter and does not throw", () => {
@@ -897,7 +897,7 @@ describe("Proxy Correctness", () => {
 			const child = Object.create(proto);
 			const spy = vi.fn();
 
-			reaction(() => {
+			effect(() => {
 				spy(child.x);
 			});
 
@@ -912,7 +912,7 @@ describe("Proxy Correctness", () => {
 			const obj = object({ x: 1 });
 			const spy = vi.fn();
 
-			reaction(() => {
+			effect(() => {
 				spy(Object.keys(obj));
 			});
 
@@ -934,9 +934,12 @@ describe("Proxy Correctness", () => {
 			const obj = object({ x: 1 });
 			const spy = vi.fn();
 
-			reaction(() => {
-				spy(obj.x);
-			});
+			reaction(
+				() => {
+					spy(obj.x);
+				},
+				() => {}
+			);
 
 			expect(spy).toHaveBeenLastCalledWith(1);
 
@@ -971,13 +974,17 @@ describe("Proxy Correctness", () => {
 			const obj = object({ toString: "custom" });
 			const spy = vi.fn();
 
-			reaction(() => {
-				spy(obj.toString);
-			});
+			reaction(
+				() => {
+					const v = (obj as any).toString;
+					spy(typeof v === "function" ? v.call(obj) : v);
+				},
+				() => {}
+			);
 
 			expect(spy).toHaveBeenLastCalledWith("custom");
 
-			obj.toString = "updated";
+			obj.toString = () => "updated";
 			expect(spy).toHaveBeenLastCalledWith("updated");
 		});
 
@@ -990,10 +997,10 @@ describe("Proxy Correctness", () => {
 
 			// Should properly track it
 			const spy = vi.fn();
-			reaction(() => spy((obj as any).hasOwnProperty("x")));
+			effect(() => spy((obj as any).hasOwnProperty("x")));
 			expect(spy).toHaveBeenCalledWith("fake");
 
-			obj.hasOwnProperty = () => "updated";
+			(obj as any).hasOwnProperty = () => "updated";
 			expect(spy).toHaveBeenCalledWith("updated");
 		});
 	});

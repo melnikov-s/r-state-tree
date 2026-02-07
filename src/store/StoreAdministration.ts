@@ -16,6 +16,7 @@ import type Store from "./Store";
 import type Model from "../model/Model";
 import type { StoreConfiguration, StoreElement, Props } from "../types";
 import { CommonCfgTypes, StoreCfgTypes } from "../types";
+import { getConfigType } from "../configuration";
 import { getPropertyDescriptor } from "../utils";
 
 const MAX_MOUNT_DEPTH = 100;
@@ -157,7 +158,7 @@ export class StoreAdministration<
 				}
 
 				const adm = getAdministration(target) as StoreAdministration;
-				switch (adm.configuration[name as string]?.type) {
+				switch (getConfigType(adm.configuration[name as string])) {
 					case CommonCfgTypes.child:
 						return adm.getStore(name);
 					case StoreCfgTypes.model:
@@ -177,7 +178,10 @@ export class StoreAdministration<
 					throw new Error(`r-state-tree: ${name} is read-only`);
 				}
 
-				if (adm.configuration[name as string]?.type === StoreCfgTypes.model) {
+				if (
+					getConfigType(adm.configuration[name as string]) ===
+					StoreCfgTypes.model
+				) {
 					if (value !== undefined) {
 						throw new Error(`r-state-tree: model ${String(name)} is read-only`);
 					}

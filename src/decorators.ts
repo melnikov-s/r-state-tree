@@ -18,10 +18,15 @@ function makeChildDecorator(typeObj: any): any {
 
 		// Factory use: @child(ChildType)
 		const childCtor = valueOrChildType;
-		return function <T>(value: T, context: DecoratorContext): T {
-			const typeWithCtor = (typeObj as Function)(childCtor);
+		const typeWithCtor = (typeObj as Function)(childCtor);
+		const decorator = function <T>(value: T, context: DecoratorContext): T {
 			return makeDecorator(typeWithCtor)(value, context);
 		};
+		// Allow using `child(ChildCtor)` / `modelRef(ModelCtor)` in `static types`.
+		// We only attach the minimum metadata needed to resolve the entry.
+		(decorator as any).type = (typeWithCtor as any)?.type;
+		(decorator as any).childType = childCtor as any;
+		return decorator;
 	};
 }
 
