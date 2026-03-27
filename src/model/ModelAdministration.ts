@@ -4,9 +4,11 @@ import {
 	PreactObjectAdministration,
 	getSource,
 	batch,
+	untracked,
 	createComputed,
 	createAtom,
 	reaction,
+	Signal,
 } from "../observables";
 import type { ComputedNode, AtomNode } from "../observables";
 import Model from "../model/Model";
@@ -37,6 +39,7 @@ import {
 	observe,
 } from "./ChildModelsAdministration";
 import type { MutationEvent } from "./ChildModelsAdministration";
+import { isPlainObject } from "../observables/internal/utils";
 
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
@@ -270,6 +273,46 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				);
 			});
 		}
+	}
+
+	private hydrateStateValue(currentValue: unknown, snapshotValue: unknown): unknown {
+		if (currentValue instanceof Signal) {
+			currentValue.value = this.hydrateStateValue(
+				currentValue.value,
+				snapshotValue
+			);
+			return currentValue;
+		}
+
+		if (Array.isArray(currentValue) && Array.isArray(snapshotValue)) {
+			const nextItems = snapshotValue.map((item, index) =>
+				this.hydrateStateValue(currentValue[index], item)
+			);
+			currentValue.splice(0, currentValue.length, ...nextItems);
+			return currentValue;
+		}
+
+		if (isPlainObject(currentValue) && isPlainObject(snapshotValue)) {
+			const currentRecord = currentValue as Record<string, unknown>;
+			const snapshotRecord = snapshotValue as Record<string, unknown>;
+
+			Object.keys(snapshotRecord).forEach((key) => {
+				currentRecord[key] = this.hydrateStateValue(
+					currentRecord[key],
+					snapshotRecord[key]
+				);
+			});
+
+			Object.keys(currentRecord).forEach((key) => {
+				if (!(key in snapshotRecord)) {
+					delete currentRecord[key];
+				}
+			});
+
+			return currentValue;
+		}
+
+		return snapshotValue;
 	}
 
 	private setId(name: string, v: IdType): void {
@@ -613,102 +656,106 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		};
 
 		onSnapshotLoad(() => {
-			Object.keys(snapshot).forEach((key) => {
-				const type = this.getCfgType(key);
-				const childType = this.getCfgChildType(key);
-				const value = snapshot[key];
+			untracked(() => {
+				batch(() => {
+					Object.keys(snapshot).forEach((key) => {
+						const type = this.getCfgType(key);
+						const childType = this.getCfgChildType(key);
+						const value = snapshot[key];
 
-				switch (type) {
-					case ModelCfgTypes.state:
-						this.proxy[key] = value;
-						break;
-					case ModelCfgTypes.modelRef:
-						if (Array.isArray(value)) {
-							if ((value as unknown[])?.[0] instanceof Model) {
-								this.proxy[key] = value;
-							} else {
-								this.source[key] = value.map((snapshot: RefSnapshot) =>
-									getSnapshotRefId(snapshot)
-								);
-								this.referencedAtoms?.get(key)?.reportChanged();
-							}
-							break;
-						} else if (value instanceof Model) {
-							this.proxy[key] = value;
-						} else {
-							this.source[key] = getSnapshotRefId(value);
-							this.referencedAtoms?.get(key)?.reportChanged();
-						}
-						break;
-					case ModelCfgTypes.id:
-						this.setId(key, value as IdType);
-						break;
-					case CommonCfgTypes.child:
-						let model: Model;
-
-						if (Array.isArray(value)) {
-							const Ctor = childType as typeof Model;
-							this.proxy[key] = (value as Snapshot[])?.map(
-								(snapshot, index) => {
-									snapshot = snapshot ?? {};
-									let model: Model;
-									if (snapshot instanceof Model) {
-										model = snapshot;
+						switch (type) {
+							case ModelCfgTypes.state:
+								this.proxy[key] = this.hydrateStateValue(this.proxy[key], value);
+								break;
+							case ModelCfgTypes.modelRef:
+								if (Array.isArray(value)) {
+									if ((value as unknown[])?.[0] instanceof Model) {
+										this.proxy[key] = value;
 									} else {
-										ensureChildTypes(key);
-
-										const id = childType && getSnapshotId(snapshot, Ctor);
-										const foundModel =
-											id != null
-												? getModelById(this.root.proxy, id)
-												: this.proxy[key][index];
-										const adm = foundModel && getModelAdm(foundModel);
-
-										if (
-											adm &&
-											foundModel!.parent === this.proxy &&
-											adm?.parentName === key
-										) {
-											adm.loadSnapshot(snapshot);
-											model = foundModel!;
-										} else {
-											model = Ctor.create(snapshot);
-										}
+										this.source[key] = value.map((snapshot: RefSnapshot) =>
+											getSnapshotRefId(snapshot)
+										);
+										this.referencedAtoms?.get(key)?.reportChanged();
 									}
-
-									return model;
+									break;
+								} else if (value instanceof Model) {
+									this.proxy[key] = value;
+								} else {
+									this.source[key] = getSnapshotRefId(value);
+									this.referencedAtoms?.get(key)?.reportChanged();
 								}
-							);
-							break;
-						} else if (value instanceof Model) {
-							model = value;
-						} else {
-							ensureChildTypes(key);
+								break;
+							case ModelCfgTypes.id:
+								this.setId(key, value as IdType);
+								break;
+							case CommonCfgTypes.child:
+								let model: Model;
 
-							const id =
-								childType &&
-								getSnapshotId(value as Snapshot, childType as typeof Model);
+								if (Array.isArray(value)) {
+									const Ctor = childType as typeof Model;
+									this.proxy[key] = (value as Snapshot[])?.map(
+										(snapshot, index) => {
+											snapshot = snapshot ?? {};
+											let model: Model;
+											if (snapshot instanceof Model) {
+												model = snapshot;
+											} else {
+												ensureChildTypes(key);
 
-							if (
-								id != null &&
-								this.proxy[key] &&
-								id === getIdentifier(this.proxy[key])
-							) {
-								const adm = getModelAdm(this.proxy[key]);
-								adm.loadSnapshot(value as Snapshot);
-								model = this.proxy[key];
-							} else {
-								model = (childType as typeof Model).create(value as Snapshot);
-							}
+												const id = childType && getSnapshotId(snapshot, Ctor);
+												const foundModel =
+													id != null
+														? getModelById(this.root.proxy, id)
+														: this.proxy[key][index];
+												const adm = foundModel && getModelAdm(foundModel);
+
+												if (
+													adm &&
+													foundModel!.parent === this.proxy &&
+													adm?.parentName === key
+												) {
+													adm.loadSnapshot(snapshot);
+													model = foundModel!;
+												} else {
+													model = Ctor.create(snapshot);
+												}
+											}
+
+											return model;
+										}
+									);
+									break;
+								} else if (value instanceof Model) {
+									model = value;
+								} else {
+									ensureChildTypes(key);
+
+									const id =
+										childType &&
+										getSnapshotId(value as Snapshot, childType as typeof Model);
+
+									if (
+										id != null &&
+										this.proxy[key] &&
+										id === getIdentifier(this.proxy[key])
+									) {
+										const adm = getModelAdm(this.proxy[key]);
+										adm.loadSnapshot(value as Snapshot);
+										model = this.proxy[key];
+									} else {
+										model = (childType as typeof Model).create(value as Snapshot);
+									}
+								}
+
+								this.proxy[key] = model;
+								break;
+							default:
+								console.warn(
+									`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
+								);
 						}
-
-						this.proxy[key] = model;
-						break;
-					default:
-						console.warn(
-							`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
-						);
-				}
+					});
+				});
 			});
 		});
 	}

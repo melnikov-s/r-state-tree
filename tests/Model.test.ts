@@ -22,6 +22,281 @@ test("can create a model", () => {
 	expect(model instanceof Model).toBe(true);
 });
 
+test("root snapshots stay fresh when nested child model updates an observable state array", () => {
+	class Chat extends Model {
+		@state messages: { id: number; parts: { type: string }[] }[] = observable([]);
+
+		setMessages(ids: number[]) {
+			this.messages.splice(
+				0,
+				this.messages.length,
+				...ids.map((id) => ({ id, parts: [{ type: "text" }] }))
+			);
+		}
+	}
+
+	class Threads extends Model {
+		@child(Chat) chats: Chat[] = [Chat.create()];
+		@state activeChatId = "";
+	}
+
+	class Root extends Model {
+		@child(Threads) conceptChats: Threads = Threads.create();
+	}
+
+	const root = Root.create();
+	const chat = root.conceptChats.chats[0];
+	const snapshots: any[] = [];
+	const off = onSnapshot(root, (snapshot) => snapshots.push(snapshot));
+
+	expect(toSnapshot(root)).toStrictEqual({
+		conceptChats: { chats: [{ messages: [] }], activeChatId: "" },
+	});
+
+	chat.setMessages([1, 2]);
+
+	expect(toSnapshot(chat)).toStrictEqual({
+		messages: [
+			{ id: 1, parts: [{ type: "text" }] },
+			{ id: 2, parts: [{ type: "text" }] },
+		],
+	});
+	expect(toSnapshot(root)).toStrictEqual({
+		conceptChats: {
+			chats: [
+				{
+					messages: [
+						{ id: 1, parts: [{ type: "text" }] },
+						{ id: 2, parts: [{ type: "text" }] },
+					],
+				},
+			],
+			activeChatId: "",
+		},
+	});
+	expect(snapshots).toStrictEqual([
+		{
+			conceptChats: {
+				chats: [
+					{
+						messages: [
+							{ id: 1, parts: [{ type: "text" }] },
+							{ id: 2, parts: [{ type: "text" }] },
+						],
+					},
+				],
+				activeChatId: "",
+			},
+		},
+	]);
+
+	off();
+});
+
+test("root snapshots stay fresh after adding a child model and then mutating its observable state array", () => {
+	class Chat extends Model {
+		@state id = "";
+		@state messages: { id: number; parts: { type: string }[] }[] = observable([]);
+
+		setMessages(ids: number[]) {
+			this.messages.splice(
+				0,
+				this.messages.length,
+				...ids.map((id) => ({ id, parts: [{ type: "text" }] }))
+			);
+		}
+	}
+
+	class Threads extends Model {
+		@child(Chat) chats: Chat[] = [];
+		@state activeChatId = "";
+
+		addChat(chat: Chat) {
+			this.chats.push(chat);
+			this.activeChatId = chat.id;
+		}
+	}
+
+	class Root extends Model {
+		@child(Threads) conceptChats: Threads = Threads.create();
+	}
+
+	const root = Root.create();
+	const snapshots: any[] = [];
+	const off = onSnapshot(root, (snapshot) => snapshots.push(snapshot));
+
+	expect(toSnapshot(root)).toStrictEqual({
+		conceptChats: { chats: [], activeChatId: "" },
+	});
+
+	const chat = Chat.create({ id: "concept:feature" });
+	root.conceptChats.addChat(chat);
+
+	expect(toSnapshot(root)).toStrictEqual({
+		conceptChats: {
+			chats: [{ id: "concept:feature", messages: [] }],
+			activeChatId: "concept:feature",
+		},
+	});
+
+	chat.setMessages([1, 2]);
+
+	expect(toSnapshot(chat)).toStrictEqual({
+		id: "concept:feature",
+		messages: [
+			{ id: 1, parts: [{ type: "text" }] },
+			{ id: 2, parts: [{ type: "text" }] },
+		],
+	});
+	expect(toSnapshot(root)).toStrictEqual({
+		conceptChats: {
+			chats: [
+				{
+					id: "concept:feature",
+					messages: [
+						{ id: 1, parts: [{ type: "text" }] },
+						{ id: 2, parts: [{ type: "text" }] },
+					],
+				},
+			],
+			activeChatId: "concept:feature",
+		},
+	});
+
+	off();
+});
+
+test("snapshot hydration preserves observable @state containers and references", () => {
+	class Chat extends Model {
+		@state messages: { id: number }[] = observable([]);
+		@state draft = observable({ title: "", unread: 0 });
+
+		setMessages(ids: number[]) {
+			this.messages.splice(
+				0,
+				this.messages.length,
+				...ids.map((id) => ({ id }))
+			);
+		}
+	}
+
+	const chat = Chat.create({
+		messages: [{ id: 1 }],
+		draft: { title: "hello", unread: 1 },
+	});
+	const messagesRef = chat.messages;
+	const draftRef = chat.draft;
+
+	expect(isObservable(chat.messages)).toBe(true);
+	expect(isObservable(chat.draft)).toBe(true);
+	expect(chat.messages).toBe(messagesRef);
+	expect(chat.draft).toBe(draftRef);
+	expect(toSnapshot(chat)).toStrictEqual({
+		messages: [{ id: 1 }],
+		draft: { title: "hello", unread: 1 },
+	});
+
+	applySnapshot(chat, {
+		messages: [{ id: 2 }, { id: 3 }],
+		draft: { title: "updated", unread: 2 },
+	});
+
+	expect(chat.messages).toBe(messagesRef);
+	expect(chat.draft).toBe(draftRef);
+	expect(toSnapshot(chat)).toStrictEqual({
+		messages: [{ id: 2 }, { id: 3 }],
+		draft: { title: "updated", unread: 2 },
+	});
+
+	chat.setMessages([1, 2]);
+	chat.draft.unread = 3;
+
+	expect(toSnapshot(chat)).toStrictEqual({
+		messages: [{ id: 1 }, { id: 2 }],
+		draft: { title: "updated", unread: 3 },
+	});
+});
+
+test("snapshot hydration preserves plain @state container references", () => {
+	class Chat extends Model {
+		@state messages: { id: number }[] = [];
+		@state draft = { title: "", unread: 0 };
+	}
+
+	const chat = Chat.create({
+		messages: [{ id: 1 }],
+		draft: { title: "hello", unread: 1 },
+	});
+	const messagesRef = chat.messages;
+	const draftRef = chat.draft;
+
+	applySnapshot(chat, {
+		messages: [{ id: 2 }, { id: 3 }],
+		draft: { title: "updated", unread: 2 },
+	});
+
+	expect(chat.messages).toBe(messagesRef);
+	expect(chat.draft).toBe(draftRef);
+	expect(chat.messages).toStrictEqual([{ id: 2 }, { id: 3 }]);
+	expect(chat.draft).toStrictEqual({ title: "updated", unread: 2 });
+});
+
+test("snapshot hydration preserves nested plain @state references by index", () => {
+	class Chat extends Model {
+		@state messages: {
+			id: number;
+			meta: { unread: number };
+		}[] = [];
+	}
+
+	const chat = Chat.create({
+		messages: [{ id: 1, meta: { unread: 1 } }],
+	});
+	const messagesRef = chat.messages;
+	const firstMessageRef = chat.messages[0];
+	const firstMetaRef = chat.messages[0].meta;
+
+	applySnapshot(chat, {
+		messages: [
+			{ id: 2, meta: { unread: 2 } },
+			{ id: 3, meta: { unread: 0 } },
+		],
+	});
+
+	expect(chat.messages).toBe(messagesRef);
+	expect(chat.messages[0]).toBe(firstMessageRef);
+	expect(chat.messages[0].meta).toBe(firstMetaRef);
+	expect(toSnapshot(chat)).toStrictEqual({
+		messages: [
+			{ id: 2, meta: { unread: 2 } },
+			{ id: 3, meta: { unread: 0 } },
+		],
+	});
+});
+
+test("hydrated observable arrays in @state stay live for in-place mutation", () => {
+	class Chat extends Model {
+		@state messages: { id: number }[] = observable([]);
+
+		setMessages(ids: number[]) {
+			this.messages.splice(
+				0,
+				this.messages.length,
+				...ids.map((id) => ({ id }))
+			);
+		}
+	}
+
+	const chat = Chat.create({ messages: [{ id: 1 }] });
+	expect(toSnapshot(chat)).toStrictEqual({ messages: [{ id: 1 }] });
+
+	chat.setMessages([1, 2]);
+
+	expect(toSnapshot(chat)).toStrictEqual({
+		messages: [{ id: 1 }, { id: 2 }],
+	});
+});
+
 test("direct new calls are disallowed", () => {
 	class M extends Model {}
 	expect(() => new M()).toThrowErrorMatchingInlineSnapshot(
