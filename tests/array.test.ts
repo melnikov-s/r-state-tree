@@ -853,9 +853,60 @@ describe("Ownership Propagation", () => {
 		const obs2 = observable({ id: 2, active: false });
 		const arr = observable([obs1, obs2]);
 
-		const filtered = arr.filter((item) => (item as any).active);
+		const filtered = arr.filter((item) => item.active);
 		expect(filtered.length).toBe(1);
 		expect(filtered[0]).toBe(obs1);
+	});
+
+	it("find() and filter() return observed identities even when the source stores raw values", () => {
+		const obs = observable({ id: 1, active: true });
+		const arr = array([]);
+
+		arr.push(obs);
+
+		expect(source(arr)[0]).not.toBe(obs);
+		expect(arr[0]).toBe(obs);
+
+		const found = arr.find((item) => item.id === 1);
+		const filtered = arr.filter((item) => item.id === 1);
+
+		expect(found).toBe(obs);
+		expect(isObservable(filtered)).toBe(false);
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0]).toBe(obs);
+	});
+
+	it("reduce() and reduceRight() callbacks receive observed identities even when the source stores raw values", () => {
+		const obs1 = observable({ id: 1 });
+		const obs2 = observable({ id: 2 });
+		const arr = array([]);
+
+		arr.push(obs1, obs2);
+
+		expect(source(arr)[0]).not.toBe(obs1);
+		expect(source(arr)[1]).not.toBe(obs2);
+		expect(arr[0]).toBe(obs1);
+		expect(arr[1]).toBe(obs2);
+
+		const reduced = arr.reduce((items: unknown[], item, index, self) => {
+			expect(item).toBe(arr[index]);
+			expect(self).toBe(arr);
+			items.push(item);
+			return items;
+		}, [] as unknown[]);
+
+		const reducedRight = arr.reduceRight(
+			(items: unknown[], item, index, self) => {
+				expect(item).toBe(arr[index]);
+				expect(self).toBe(arr);
+				items.push(item);
+				return items;
+			},
+			[] as unknown[]
+		);
+
+		expect(reduced).toStrictEqual([obs1, obs2]);
+		expect(reducedRight).toStrictEqual([obs2, obs1]);
 	});
 
 	it("pop() returns removed item using same identity", () => {
@@ -971,6 +1022,32 @@ describe("Detailed ArrayAdministration behavior", () => {
 				expect(v).toBe(arr[i]);
 				return true;
 			});
+		});
+
+		test("arr.reduce / arr.reduceRight", () => {
+			const obs1 = observable({ id: 1 });
+			const raw2 = { id: 2 };
+			const arr = array([obs1, raw2]);
+
+			const reduced = arr.reduce((items: unknown[], v, i, self) => {
+				expect(v).toBe(arr[i]);
+				expect(self).toBe(arr);
+				items.push(v);
+				return items;
+			}, [] as unknown[]);
+
+			const reducedRight = arr.reduceRight(
+				(items: unknown[], v, i, self) => {
+					expect(v).toBe(arr[i]);
+					expect(self).toBe(arr);
+					items.push(v);
+					return items;
+				},
+				[] as unknown[]
+			);
+
+			expect(reduced).toStrictEqual([arr[0], arr[1]]);
+			expect(reducedRight).toStrictEqual([arr[1], arr[0]]);
 		});
 	});
 

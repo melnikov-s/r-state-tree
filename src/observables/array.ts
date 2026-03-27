@@ -618,10 +618,26 @@ function createFilterMethod(method: string): any {
 			const adm = getAdministration(this);
 			adm.reportObserved();
 
-			// Return a plain array (raw container) containing the same identities as observed reads/iteration.
-			return (adm.source as any)[method]((_element: unknown, index: number) => {
+			// Run find/filter against the observed values so the returned match identities
+			// align with `this[index]`, while still returning a plain array for `filter`.
+			const observedInput: unknown[] = [];
+			observedInput.length = adm.source.length;
+
+			const keys = Object.keys(adm.source);
+			for (let i = 0; i < keys.length; i++) {
+				const key = keys[i];
+				const idx = Number(key);
+				if (!Number.isNaN(idx)) {
+					observedInput[idx] = (this as any)[idx];
+				}
+			}
+
+			return (Array.prototype as any)[method].call(
+				observedInput,
+				(_element: unknown, index: number) => {
 				return callback.call(thisArg, (this as any)[index], index, this);
-			});
+				}
+			);
 		}
 	);
 }
@@ -630,7 +646,24 @@ function createReduceMethod(method: string): any {
 		const adm = getAdministration(this);
 		adm.reportObserved();
 
-		// Pass raw values to callback - no deep wrapping
-		return (adm.source as any)[method].apply(adm.source, arguments);
+		const observedInput: unknown[] = [];
+		observedInput.length = adm.source.length;
+
+		const keys = Object.keys(adm.source);
+		for (let i = 0; i < keys.length; i++) {
+			const key = keys[i];
+			const idx = Number(key);
+			if (!Number.isNaN(idx)) {
+				observedInput[idx] = (this as any)[idx];
+			}
+		}
+
+		const args = Array.from(arguments);
+		const callback = args[0] as Function;
+		args[0] = (acc: unknown, _element: unknown, index: number) => {
+			return callback(acc, (this as any)[index], index, this);
+		};
+
+		return (Array.prototype as any)[method].apply(observedInput, args);
 	});
 }
