@@ -62,7 +62,7 @@ export default defineConfig({
 
 ## Core concepts
 
-- Stores: application/view state containers. Create with `createStore()`, attach with `mount()`. Compose with `@child` (single or arrays, stable via `{ key }`). React to changes with `effect`/`reaction` and store lifecycles (`storeDidMount`/`storeWillUnmount`). Update reactive `props` via `updateStore()`.
+- Stores: application/view state containers. Create with `createStore()`, attach with `mount()`, and dispose with `Symbol.dispose`. Compose with `@child` and register owned `effect`/`reaction` behavior in constructors. Update reactive `props` via `updateStore()`.
 - Models: domain state containers. Create with `Model.create()`. Persistent via snapshots (`toSnapshot`, `applySnapshot`, `onSnapshot`, diffs via `onSnapshotDiff`). Structure with `@state`, `@child`, identifiers via `@id`, and references via `@modelRef`.
 - Context: pass data through Store/Model trees without prop drilling using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendants.
 - Reactivity: powered by signals. Use `observable()`, `computed` / `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
@@ -139,7 +139,7 @@ app.todo.title;
 
 - Always create with `createStore()` and attach with `mount()`. Stores cannot be constructed with `new` directly.
 - Prefer no custom constructor. Type stores as `Store<Props>` and access props via `this.props`.
-- If a constructor is necessary, call `super(props)` exactly once and keep it minimal; put effects in `storeDidMount`.
+- Constructors may register framework-owned reactions and effects after `super(props)`. Gate external resource acquisition on `isMounted` and return cleanup from effects.
 - Do not shadow or re-declare `props` as a class field; `props` is read-only. Use the generic `Store<{ ... }>` for typing.
 
 ```ts
@@ -203,20 +203,28 @@ class ItemsStore extends Store {
 }
 ```
 
-### Lifecycle hooks
+### Store lifetime and owned effects
 
-Stores support lifecycle methods:
+Mounted stores expose reactive `isMounted` state and implement `Disposable`:
 
 ```ts
 class TodoStore extends Store {
-	storeDidMount() {
-		console.log("Store mounted");
-	}
-
-	storeWillUnmount() {
-		console.log("Store will unmount");
+	constructor(props) {
+		super(props);
+		this.effect(() => {
+			if (!this.isMounted) return;
+			const connection = connect();
+			return () => connection.close();
+		});
 	}
 }
+
+const store = mount(createStore(TodoStore));
+store[Symbol.dispose]();
+
+{
+	using store = mount(createStore(TodoStore));
+} // Symbol.dispose is called automatically
 ```
 
 ### Reactions
@@ -225,10 +233,11 @@ Create side effects that run when reactive values change:
 
 ```ts
 class TodoStore extends Store {
-	storeDidMount() {
+	constructor(props) {
+		super(props);
 		this.reaction(
 			() => this.props.title,
-			(title) => console.log("Title changed:", title)
+			(title, previousTitle) => console.log(previousTitle, "->", title)
 		);
 	}
 }
@@ -834,37 +843,55 @@ const off = onSnapshot(list, (snap) => {
 
 Mutate Models through domain methods and let snapshots record changes automatically.
 
-### Model lifecycle hooks
+### Model creation and named factories
 
-Models support lifecycle methods:
+`Model.create()` accepts a canonical snapshot. For defaults, identifier generation, normalization, migrations, or external API formats, use a named static factory that prepares the input before calling `create()`:
+
+```ts
+class TodoModel extends Model {
+	@id id = "";
+	@state title = "";
+
+	static new(title = "Untitled") {
+		return this.create({
+			id: crypto.randomUUID(),
+			title: title.trim(),
+		});
+	}
+
+	static fromApi(input: ApiTodo) {
+		return this.create({
+			id: input.todo_id,
+			title: input.name.trim(),
+		});
+	}
+}
+
+const todo = TodoModel.new("  Write documentation  ");
+todo.title; // "Write documentation"
+```
+
+This keeps snapshot hydration predictable: `create(snapshot)` and `applySnapshot(model, snapshot)` both consume the same canonical shape. Named factories make non-canonical inputs and generated values explicit and independently typed. Nested snapshots must already be canonical.
+
+### Model attachment and disposal
+
+The public `parent` relationship is reactive. Register a model-owned reaction in the constructor to observe attachment and detachment:
 
 ```ts
 class TodoModel extends Model {
 	@child tags: TagModel[] = [];
 
-	modelDidInit(snapshot?, ...args: unknown[]) {
-		// Called when model is created via Model.create()
-		// Receives the snapshot and any additional arguments passed to create()
-		console.log("Model initialized", snapshot);
-	}
-
-	modelDidAttach() {
-		// Called when this model is attached as a child to another model
-		console.log("Model attached to parent");
-	}
-
-	modelWillDetach() {
-		// Called when this model is detached from its parent
-		console.log("Model will be detached");
+	constructor() {
+		super();
+		this.reaction(() => this.parent, (parent, previousParent) => {
+			if (previousParent) console.log("detached", previousParent);
+			if (parent) console.log("attached", parent);
+		});
 	}
 }
 ```
 
-When to use each:
-
-- `modelDidInit`: initialize/normalize data based on the initial snapshot.
-- `modelDidAttach`: link to other models or read context after the model is part of a tree.
-- `modelWillDetach`: cleanup before the model is removed or replaced.
+Detachment is reversible; model-owned effects survive reattachment. `model[Symbol.dispose]()` is terminal and recursively disposes owned child models, but never model refs.
 
 ### Model configuration
 
@@ -983,9 +1010,10 @@ class ContainerModel extends Model {
 ## API surface
 
 - Stores
-  - `Store`, `createStore`, `mount`, `unmount`, `updateStore`
+  - `Store`, `createStore`, `mount`, `updateStore`
 - Models
-- - `Model`, configuration: decorators (`@state`, `@id`, `@child`, `@modelRef`) or `static types` with `state`, `id`, `child`, `modelRef`
+	- `Model`, `Model.create()`
+  - configuration: decorators (`@state`, `@id`, `@child`, `@modelRef`) or `static types` with `state`, `id`, `child`, `modelRef`
 - Store configuration
   - decorators (`@child`, `@model`) or `static types` with `child`, `model`
 - Snapshots
@@ -1167,17 +1195,22 @@ class ListModel extends Model {
 }
 ```
 
-Lifecycle hooks:
+Lifecycle registration:
 
 ```ts
 class M extends Model {
-	modelDidInit() {}
-	modelDidAttach() {}
-	modelWillDetach() {}
+	constructor() {
+		super();
+		this.reaction(() => this.parent, (parent, previousParent) => {});
+	}
 }
 class S extends Store {
-	storeDidMount() {}
-	storeWillUnmount() {}
+	constructor(props) {
+		super(props);
+		this.effect(() => {
+			if (!this.isMounted) return;
+		});
+	}
 }
 ```
 
@@ -1199,11 +1232,11 @@ const off = onSnapshot(m, (snap) =>
 - Mutating raw `@state` arrays/objects in place (`push`, `obj.x = 1`) and expecting snapshots to update. Snapshots are memoized; use reassignment or store `observable()` containers / `signal()` values in `@state`.
 - Passing observables to third‑party APIs that expect cloneable/serializable values (e.g. `structuredClone`). Use `source(value)` to get the backing value. It will be observable-free for values written via r-state-tree’s observable APIs (unwrap-on-write), but `source(...)` is **not** guaranteed observable-free if you manually seed observables into backing sources.
 - Creating child stores in constructors: `@child` must be on getters so identity and lifecycle can be managed by the framework.
-- Passing `models` into child stores during mount can create a recursive mount loop. If a child needs parent models, create the child store/model inside `storeDidMount` instead of wiring it through `models` during the mount cycle.
+- Passing `models` into child stores during mount can create a recursive mount loop. Break the ownership cycle rather than wiring models back through a child during mount.
 
 ### Circular store/model creation
 
-When child stores are created during mount with `models` that point back into the parent, it is easy to trigger an endless mount loop. The runtime now guards this by throwing a descriptive error (for example, `detected circular store/model creation while mounting ParentStore -> ChildStore.loop -> ...`). If you see this, move child creation into `storeDidMount` or break the cycle so that models are produced after the parent finishes mounting.
+When child stores are created during mount with `models` that point back into the parent, it is easy to trigger an endless mount loop. The runtime guards this with a descriptive circular-creation error. Break the cycle so models are produced independently of the child mount.
 
 ## LLM implementation checklist
 
@@ -1222,7 +1255,7 @@ When child stores are created during mount with `models` that point back into th
 - For `createStore` props, extend `Record<string, unknown>` only if needed; otherwise rely on proper prop types and context.
 - Avoid barrel files if they cause import confusion; prefer direct imports.
 - Keep file boundaries clean: one model per file; avoid piling multiple models together.
-- Do not shadow `props` or use constructors for work better suited to `storeDidMount`.
+- Do not shadow `props`; constructors are the registration phase for owned reactions and effects.
 - Use `@model`/`model` for injected models; `@child`/`child` for child stores; stable keys for arrays.
 
 ## Typing recipes
@@ -1236,10 +1269,10 @@ When child stores are created during mount with `models` that point back into th
 - Configuration (no decorators): `static types = { ... }` with `state`, `id`, `child`, `modelRef`, `model`, `computed`
 - Decorators (Models): `@state`, `@id`, `@child`, `@modelRef`
 - Decorators (Stores): `@child`, `@model`
-- Core: `createStore`, `mount`, `unmount`, `updateStore`
+- Core: `createStore`, `mount`, `Symbol.dispose`, `updateStore`
 - Snapshots: `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
-- Lifecycle: `storeDidMount`, `storeWillUnmount`, `modelDidInit`, `modelDidAttach`, `modelWillDetach`
-- Best practices: domain in Models; delegate from Stores; stable keys for `@child`; in-place mutations in Models; no effectful constructors; don’t shadow `props`.
+- Lifecycle: reactive `Store.isMounted`, reactive `Model.parent`, and owned `reaction`/`effect`
+- Best practices: domain in Models; delegate from Stores; stable keys for `@child`; gate resources on lifecycle state; don’t shadow `props`.
 
 ## Testing
 

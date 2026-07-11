@@ -13,18 +13,15 @@ export function mount<T extends Store>(container: T): T {
 	return allowNewStore(() => {
 		const element = container as unknown as StoreElement;
 		const s = new element.Type(element.props);
-		getStoreAdm(s).mount();
+		const adm = getStoreAdm(s);
+		try {
+			adm.mount();
+		} catch (error) {
+			adm.dispose(true);
+			throw error;
+		}
 		return s;
 	}) as T;
-}
-
-export function unmount<S extends Store>(container: S): void {
-	const internalStore = getStoreAdm(container);
-	if (!internalStore.isRoot()) {
-		throw new Error("r-state-tree: can only unmount root stores");
-	}
-
-	internalStore.unmount();
 }
 
 export function toSnapshot<T extends Model>(model: T): Snapshot<T> {

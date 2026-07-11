@@ -5,12 +5,32 @@ import {
 	reportObserved,
 	reportChanged,
 	isObservable,
+	reaction,
 } from "../src";
 import { vi } from "vitest";
 
 test("reportObserved returns observable", () => {
 	const o = observable({});
 	expect(reportObserved(o)).toBe(o);
+});
+
+test("reaction callbacks receive current and previous values", () => {
+	const value = observable({ current: 0 });
+	const calls: Array<[number, number]> = [];
+	const dispose = reaction(
+		() => value.current,
+		(next, previous) => calls.push([next, previous])
+	);
+
+	value.current = 1;
+	value.current = 2;
+	dispose();
+	value.current = 3;
+
+	expect(calls).toEqual([
+		[1, 0],
+		[2, 1],
+	]);
 });
 
 // reportObserved on plain object - shallow behavior means nested values are not tracked

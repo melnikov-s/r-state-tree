@@ -4,6 +4,7 @@ import {
 	createSignal,
 	createListener,
 	reaction,
+	effect,
 	batch,
 	untracked,
 	createComputed,
@@ -61,7 +62,7 @@ function createCircularMountError(frame: MountFrame): Error {
 			? "no models provided"
 			: `models: ${frame.modelsKeys.join(", ")}`;
 	return new Error(
-		`r-state-tree: detected circular store/model creation while mounting ${chain} (using ${models}). Passing models into child stores during mount can create recursive wiring. Move child store/model creation into storeDidMount or break the cycle.`
+		`r-state-tree: detected circular store/model creation while mounting ${chain} (using ${models}). Passing models into child stores during mount can create recursive wiring. Break the ownership cycle.`
 	);
 }
 
@@ -153,8 +154,8 @@ export class StoreAdministration<
 		ObjectAdministration.proxyTraps,
 		{
 			get(target, name) {
-				if (name === "key") {
-					return (target as Store).key;
+				if (name === "key" || name === Symbol.dispose) {
+					return Reflect.get(target, name);
 				}
 
 				const adm = getAdministration(target) as StoreAdministration;
@@ -196,10 +197,11 @@ export class StoreAdministration<
 	);
 
 	parent: StoreAdministration | null = null;
-	mounted: boolean = false;
+	private mountedSignal = createSignal(false);
+	private disposed = false;
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
-	private reactionsUnsub: (() => void)[] = [];
+	private ownedDisposers = new Set<() => void>();
 	private configurationGetter?: () => StoreConfiguration<StoreType>;
 
 	setConfiguration(
@@ -304,7 +306,7 @@ export class StoreAdministration<
 			batch(() => childStoreData.value.set(stores));
 		}
 
-		removedStores.forEach((s) => getStoreAdm(s).unmount());
+		removedStores.forEach((s) => getStoreAdm(s).dispose(true));
 		newStores.forEach((s) => getStoreAdm(s).mount(this, name));
 
 		return stores;
@@ -321,7 +323,7 @@ export class StoreAdministration<
 		const { key, Type, props } = element || {};
 
 		if (!element) {
-			oldStore && getStoreAdm(oldStore).unmount();
+			oldStore && getStoreAdm(oldStore).dispose(true);
 			batch(() => childStoreData.value.set(null));
 			return null;
 		} else if (
@@ -330,7 +332,7 @@ export class StoreAdministration<
 			!(oldStore instanceof Type!)
 		) {
 			if (oldStore) {
-				getStoreAdm(oldStore).unmount();
+				getStoreAdm(oldStore).dispose(true);
 			}
 
 			const childStore = this.createChildStore(element);
@@ -388,7 +390,8 @@ export class StoreAdministration<
 		const childStoreData = this.childStoreDataMap.get(name);
 
 		if (!childStoreData) {
-			return this.initializeStore(name);
+			untracked(() => this.initializeStore(name));
+			return this.childStoreDataMap.get(name)!.value.get() as Store | null;
 		} else {
 			const storeElement = untracked(() => childStoreData.computed.get());
 			validateStoreChildValue(storeElement, name);
@@ -407,6 +410,10 @@ export class StoreAdministration<
 
 	isRoot(): boolean {
 		return !this.parent;
+	}
+
+	get isMounted(): boolean {
+		return this.mountedSignal.get();
 	}
 
 	getContextValue<T>(
@@ -465,16 +472,46 @@ export class StoreAdministration<
 		return undefined as T;
 	}
 
-	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
+	private own(disposer: () => void): () => void {
+		if (this.disposed) {
+			disposer();
+			throw new Error(
+				"r-state-tree: cannot register reactive resources on a disposed store"
+			);
+		}
+		let active = true;
+		const wrapped = () => {
+			if (!active) return;
+			active = false;
+			this.ownedDisposers.delete(wrapped);
+			disposer();
+		};
+		this.ownedDisposers.add(wrapped);
+		return wrapped;
+	}
+
+	reaction<T>(
+		track: () => T,
+		callback: (value: T, previousValue: T) => void
+	): () => void {
 		const unsub = reaction(track, callback);
-		this.reactionsUnsub.push(unsub);
-		return unsub;
+		return this.own(unsub);
+	}
+
+	effect(callback: () => void | (() => void)): () => void {
+		return this.own(effect(callback));
 	}
 
 	mount(
 		parent: StoreAdministration | null = null,
 		childName?: PropertyKey
 	): void {
+		if (this.disposed) {
+			throw new Error("r-state-tree: cannot mount a disposed store");
+		}
+		if (this.isMounted) {
+			throw new Error("r-state-tree: store is already mounted");
+		}
 		const frame: MountFrame = {
 			storeName: (this.proxy.constructor as { name?: string }).name || "Store",
 			childName,
@@ -487,20 +524,24 @@ export class StoreAdministration<
 
 		mountingStack.push(frame);
 		try {
-			this.parent = parent || null;
-
-			this.childStoreDataMap.forEach(({ value }, name) => {
-				const stores = value.get();
-				if (Array.isArray(stores)) {
-					stores?.forEach((s) => getStoreAdm(s)?.mount(this, name));
-				} else if (stores) {
-					getStoreAdm(stores)?.mount(this, name);
-				}
+			batch(() => {
+				this.parent = parent || null;
+				this.childStoreDataMap.forEach(({ value }, name) => {
+					const stores = value.get();
+					if (Array.isArray(stores)) {
+						stores?.forEach((s) => getStoreAdm(s)?.mount(this, name));
+					} else if (stores) {
+						getStoreAdm(stores)?.mount(this, name);
+					}
+				});
+				this.mountedSignal.set(true);
 			});
-			this.mounted = true;
-			batch(() => this.proxy.storeDidMount?.());
 		} catch (error) {
-			if (error instanceof RangeError && /call stack/i.test(error.message)) {
+			if (
+				error instanceof Error &&
+				((error instanceof RangeError && /call stack/i.test(error.message)) ||
+					/cycle detected/i.test(error.message))
+			) {
 				throw createCircularMountError(frame);
 			}
 			throw error;
@@ -509,26 +550,34 @@ export class StoreAdministration<
 		}
 	}
 
-	unmount(): void {
-		this.proxy.storeWillUnmount?.();
-		this.mounted = false;
-		this.childStoreDataMap.forEach((data) => {
-			const { value, computed, listener } = data;
+	dispose(internal = false): void {
+		if (this.disposed) return;
+		if (!internal && !this.isRoot()) {
+			throw new Error("r-state-tree: can only dispose root stores");
+		}
+		batch(() => {
+			this.childStoreDataMap.forEach((data) => {
+				const { value, computed, listener } = data;
 
-			const stores = value.get();
+				const stores = value.get();
 
-			if (Array.isArray(stores)) {
-				stores?.forEach((s) => getStoreAdm(s)?.unmount());
-			} else if (stores) {
-				getStoreAdm(stores)?.unmount();
-			}
-			computed.clear();
-			listener.dispose();
+				if (Array.isArray(stores)) {
+					stores?.forEach((s) => getStoreAdm(s)?.dispose(true));
+				} else if (stores) {
+					getStoreAdm(stores)?.dispose(true);
+				}
+				computed.clear();
+				listener.dispose();
+			});
+			this.childStoreDataMap.clear();
+			this.contextCache.forEach((computed) => computed.clear());
+			this.contextCache.clear();
+			this.parent = null;
 		});
-		this.childStoreDataMap.clear();
-		this.contextCache.forEach((computed) => computed.clear());
-		this.contextCache.clear();
-		this.reactionsUnsub.forEach((u) => u());
-		this.parent = null;
+		// Publish the final lifecycle transition only after the tree cleanup above
+		// is complete, while owned subscriptions are still active.
+		this.mountedSignal.set(false);
+		this.disposed = true;
+		Array.from(this.ownedDisposers).forEach((dispose) => dispose());
 	}
 }

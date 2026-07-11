@@ -3,7 +3,6 @@ import Store, { createStore, updateStore } from "./store/Store";
 import Model from "./model/Model";
 import {
 	mount,
-	unmount,
 	onSnapshot,
 	toSnapshot,
 	applySnapshot,
@@ -17,7 +16,6 @@ export {
 	Store,
 	Model,
 	mount,
-	unmount,
 	updateStore,
 	onSnapshot,
 	onSnapshotDiff,

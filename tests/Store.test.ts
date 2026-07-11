@@ -4,7 +4,6 @@ import {
 	child,
 	createStore,
 	mount,
-	unmount,
 	Model,
 	model,
 	updateStore,
@@ -22,6 +21,42 @@ test("can mount a store", () => {
 
 	expect(store instanceof Store).toBe(true);
 	expect(store.props.myProp).toBe(1);
+});
+
+test("mounted state is reactive and owned effects are cleaned up on disposal", () => {
+	const transitions: Array<[boolean, boolean]> = [];
+	let acquired = 0;
+	let cleaned = 0;
+
+	class AppStore extends Store {
+		constructor(props: any) {
+			super(props);
+			this.reaction(
+				() => this.isMounted,
+				(next, previous) => transitions.push([next, previous])
+			);
+			this.effect(() => {
+				if (!this.isMounted) return;
+				acquired++;
+				return () => cleaned++;
+			});
+		}
+	}
+
+	const store = mount(createStore(AppStore));
+	expect(store.isMounted).toBe(true);
+	expect(acquired).toBe(1);
+
+	store[Symbol.dispose]();
+	store[Symbol.dispose]();
+
+	expect(store.isMounted).toBe(false);
+	expect(transitions).toEqual([
+		[true, false],
+		[false, true],
+	]);
+	expect(cleaned).toBe(1);
+	expect(() => mount(store)).toThrow();
 });
 
 test("can update store props with updateStore", () => {
@@ -439,12 +474,16 @@ test("props are reactive", () => {
 	expect(propsCounter).toBe(5);
 });
 
-test("will call `storeDidMount` when a root store mounts", () => {
+test("a mount reaction observes the root store mounting", () => {
 	let count = 0;
 
 	class S extends Store<any> {
-		storeDidMount() {
-			count++;
+		constructor(props: any) {
+			super(props);
+			this.reaction(
+				() => this.isMounted,
+				(isMounted) => isMounted && count++
+			);
 		}
 	}
 
@@ -452,7 +491,7 @@ test("will call `storeDidMount` when a root store mounts", () => {
 	expect(count).toBe(1);
 });
 
-test("storeDidMount is executed in an action", () => {
+test("mount reaction mutations are batched", () => {
 	class S extends Store<any> {
 		state = observable({ count: 0 });
 		get count() {
@@ -461,8 +500,12 @@ test("storeDidMount is executed in an action", () => {
 		set count(v) {
 			this.state.count = v;
 		}
-		storeDidMount() {
-			this.state.count++;
+		constructor(props: any) {
+			super(props);
+			this.reaction(
+				() => this.isMounted,
+				(isMounted) => isMounted && this.state.count++
+			);
 		}
 	}
 
@@ -471,22 +514,26 @@ test("storeDidMount is executed in an action", () => {
 	expect(s!.count).toBe(1);
 });
 
-test("will call `storeWillUnmount` when a root store unmounts", () => {
+test("a mount reaction observes root store disposal", () => {
 	let count = 0;
 
 	class S extends Store<any> {
-		storeWillUnmount() {
-			count++;
+		constructor(props: any) {
+			super(props);
+			this.reaction(
+				() => this.isMounted,
+				(isMounted, wasMounted) => !isMounted && wasMounted && count++
+			);
 		}
 	}
 
 	const s = mount(createStore(S));
 	expect(count).toBe(0);
-	unmount(s);
+	s[Symbol.dispose]();
 	expect(count).toBe(1);
 });
 
-test("storeWillUnmount is executed in an action", () => {
+test("disposal reaction mutations are batched", () => {
 	class S extends Store<any> {
 		state = observable({ count: 0 });
 		get count() {
@@ -495,14 +542,19 @@ test("storeWillUnmount is executed in an action", () => {
 		set count(v) {
 			this.state.count = v;
 		}
-		storeWillUnmount() {
-			this.state.count++;
+		constructor(props: any) {
+			super(props);
+			this.reaction(
+				() => this.isMounted,
+				(isMounted, wasMounted) =>
+					!isMounted && wasMounted && this.state.count++
+			);
 		}
 	}
 
 	const s = mount(createStore(S));
 	expect(s.count).toBe(0);
-	unmount(s);
+	s[Symbol.dispose]();
 	expect(s.count).toBe(1);
 });
 
@@ -740,7 +792,8 @@ test("can setup a reaction in a store", () => {
 		}
 		unsub!: any;
 
-		storeDidMount() {
+		constructor(props: any) {
+			super(props);
 			this.unsub = this.reaction(
 				() => this.prop,
 				() => this.count++
@@ -764,7 +817,8 @@ test("can setup a reaction in a store", () => {
 
 test("reaction in a store will auto unsub after store is unmounted ", () => {
 	class C extends Store<any> {
-		storeDidMount() {
+		constructor(props: any) {
+			super(props);
 			this.reaction(
 				() => this.props.prop,
 				() => this.props.countUp()
@@ -1449,9 +1503,11 @@ describe("recursive mount diagnostics", () => {
 	class RecursiveStore extends Store<{ models: { shared: SharedModel } }> {
 		@model shared!: SharedModel;
 
-		storeDidMount() {
-			// Access the child during mount to trigger recursive creation
-			this.loop;
+		constructor(props: any) {
+			super(props);
+			this.effect(() => {
+				if (this.isMounted) this.loop;
+			});
 		}
 
 		@child get loop() {
@@ -1482,7 +1538,7 @@ describe("recursive mount diagnostics", () => {
 				);
 				expect(error.message).toContain("RecursiveStore");
 				expect(error.message).toContain("models: shared");
-				expect(error.message).toContain("storeDidMount");
+				expect(error.message).toContain("Break the ownership cycle");
 				return;
 			}
 			throw error;
@@ -1840,7 +1896,7 @@ describe("Accessor + Decorators Regression", () => {
 		}
 
 		const p = mount(createStore(Parent)) as any;
-		let seen: number[] = [];
+		const seen: number[] = [];
 		const dispose = effect(() => {
 			seen.push(p.child.count);
 		});

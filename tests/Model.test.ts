@@ -22,9 +22,62 @@ test("can create a model", () => {
 	expect(model instanceof Model).toBe(true);
 });
 
+test("parent reactions observe detach and reattach transitions", () => {
+	const transitions: Array<[Model | null, Model | null]> = [];
+
+	class Item extends Model {
+		constructor() {
+			super();
+			this.reaction(
+				() => this.parent,
+				(next, previous) => transitions.push([next, previous])
+			);
+		}
+	}
+
+	class Parent extends Model {
+		@child item: Item | null = null;
+	}
+
+	const item = Item.create();
+	const first = Parent.create();
+	const second = Parent.create();
+	first.item = item;
+	first.item = null;
+	second.item = item;
+
+	expect(transitions).toEqual([
+		[first, null],
+		[null, first],
+		[second, null],
+	]);
+	expect(() => item[Symbol.dispose]()).toThrow(/attached child/);
+	second[Symbol.dispose]();
+	expect(() => {
+		first.item = item;
+	}).toThrow(/disposed model/);
+});
+
+test("named factories can prepare input before creating a model", () => {
+	class Item extends Model {
+		@id id?: number;
+		@state title = "";
+
+		static fromTitle(title = "new") {
+			return this.create({ id: 1, title: title.trim() });
+		}
+	}
+
+	const item = Item.fromTitle("  hello  ");
+	expect({ id: item.id, title: item.title }).toEqual({ id: 1, title: "hello" });
+	expect(Item.fromTitle().title).toBe("new");
+});
+
 test("root snapshots stay fresh when nested child model updates an observable state array", () => {
 	class Chat extends Model {
-		@state messages: { id: number; parts: { type: string }[] }[] = observable([]);
+		@state messages: { id: number; parts: { type: string }[] }[] = observable(
+			[]
+		);
 
 		setMessages(ids: number[]) {
 			this.messages.splice(
@@ -96,7 +149,9 @@ test("root snapshots stay fresh when nested child model updates an observable st
 test("root snapshots stay fresh after adding a child model and then mutating its observable state array", () => {
 	class Chat extends Model {
 		@state id = "";
-		@state messages: { id: number; parts: { type: string }[] }[] = observable([]);
+		@state messages: { id: number; parts: { type: string }[] }[] = observable(
+			[]
+		);
 
 		setMessages(ids: number[]) {
 			this.messages.splice(
@@ -304,74 +359,55 @@ test("direct new calls are disallowed", () => {
 	);
 });
 
-describe("model lifecylce", () => {
-	test("modelDidInit is executed when a model is created", () => {
+describe("model attachment", () => {
+	test("the initial snapshot is loaded before create returns", () => {
 		class M extends Model {
-			count = 0;
 			@state prop = 0;
-			modelDidInit() {
-				expect(this.prop).toBe(1);
-				this.count++;
-			}
 		}
 
 		const m = M.create({ prop: 1 });
-		expect(m.count).toBe(1);
+		expect(m.prop).toBe(1);
 	});
 
-	test("modelDidInit has the initial paramters passed into create", () => {
-		const snapshot = { prop: 1 };
-		const paramA = {};
-		const paramB = {};
+	test("named factories accept domain-specific creation parameters", () => {
 		class M extends Model {
-			count = 0;
 			@state prop = 0;
-			modelDidInit(s: any, a?: any, b?: any) {
-				expect(s).toBe(snapshot);
-				expect(a).toBe(paramA);
-				expect(b).toBe(paramB);
-				expect(this.prop).toBe(1);
-				this.count++;
+			static fromValue(prop: number) {
+				return this.create({ prop });
 			}
 		}
 
-		const m = M.create(snapshot, paramA, paramB);
-		expect(m.count).toBe(1);
+		expect(M.fromValue(1).prop).toBe(1);
 	});
 
-	test("modelDidInit is executed in an action", () => {
+	test("snapshot loading is batched", () => {
 		class M extends Model {
 			@state count = 0;
-			modelDidInit() {
-				this.count++;
-			}
 		}
 
-		const m = M.create();
+		const m = M.create({ count: 1 });
 		expect(m.count).toBe(1);
 	});
 
-	test("modelDidInit can be called without snapshot", () => {
-		let called = false;
+	test("models can be created without a snapshot", () => {
 		class M extends Model {
 			@state prop = 0;
-			modelDidInit(snapshot?: any) {
-				expect(snapshot).toBe(undefined);
-				called = true;
-			}
 		}
 
 		const m = M.create();
-		expect(called).toBe(true);
 		expect(m.prop).toBe(0);
 	});
 
-	test("will call modelDidAttach when children are attached", () => {
+	test("parent reactions observe children attached after creation", () => {
 		let count = 0;
 
 		class CM extends Model {
-			modelDidAttach() {
-				count++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent) => parent && count++
+				);
 			}
 		}
 
@@ -389,12 +425,16 @@ describe("model lifecylce", () => {
 		expect(count).toBe(1);
 	});
 
-	test("will call modelDidAttach on children that are attached (delayed list)", () => {
+	test("parent reactions observe children added to a list", () => {
 		let count = 0;
 
 		class CM extends Model {
-			modelDidAttach() {
-				count++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent) => parent && count++
+				);
 			}
 		}
 
@@ -414,12 +454,16 @@ describe("model lifecylce", () => {
 		expect(count).toBe(2);
 	});
 
-	test("will call modelDidAttach when model is initialized as a child", () => {
+	test("parent reactions observe an initialized child", () => {
 		let attachCount = 0;
 
 		class CM extends Model {
-			modelDidAttach() {
-				attachCount++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent) => parent && attachCount++
+				);
 			}
 		}
 
@@ -432,12 +476,16 @@ describe("model lifecylce", () => {
 		expect(m.cm).toBeInstanceOf(CM);
 	});
 
-	test("will call modelDidAttach when model is initialized as a child (array)", () => {
+	test("parent reactions observe initialized child arrays", () => {
 		let attachCount = 0;
 
 		class CM extends Model {
-			modelDidAttach() {
-				attachCount++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent) => parent && attachCount++
+				);
 			}
 		}
 
@@ -450,12 +498,16 @@ describe("model lifecylce", () => {
 		expect(m.cms.length).toBe(2);
 	});
 
-	test("will call modelWillDetach when children are detached", () => {
+	test("parent reactions observe child detachment", () => {
 		let count = 0;
 
 		class CM extends Model {
-			modelWillDetach() {
-				count++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent, previousParent) => !parent && previousParent && count++
+				);
 			}
 		}
 
@@ -473,12 +525,16 @@ describe("model lifecylce", () => {
 		expect(count).toBe(1);
 	});
 
-	test("will call modelWillDetach when children are detached (delayed list)", () => {
+	test("parent reactions observe children removed from a list", () => {
 		let count = 0;
 
 		class CM extends Model {
-			modelWillDetach() {
-				count++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent, previousParent) => !parent && previousParent && count++
+				);
 			}
 		}
 
@@ -502,12 +558,12 @@ describe("model lifecylce", () => {
 		let count = 0;
 
 		class CM extends Model {
-			modelWillDetach() {
-				count++;
-			}
-
-			modelDidAttach() {
-				count++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					() => count++
+				);
 			}
 		}
 
@@ -525,11 +581,15 @@ describe("model lifecylce", () => {
 		expect(count).toBe(2);
 	});
 
-	test("modelDidAttach is executed in an action", () => {
+	test("attachment reaction mutations are batched", () => {
 		class CM extends Model {
 			@state count = 0;
-			modelDidAttach() {
-				this.count++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent) => parent && this.count++
+				);
 			}
 		}
 
@@ -545,11 +605,15 @@ describe("model lifecylce", () => {
 		expect(m.cm.count).toBe(1);
 	});
 
-	test("modelWillDetach is executed in an action", () => {
+	test("detachment reaction mutations are batched", () => {
 		class CM extends Model {
 			@state count = 0;
-			modelWillDetach() {
-				this.count++;
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent, previousParent) => !parent && previousParent && this.count++
+				);
 			}
 		}
 
@@ -575,20 +639,22 @@ test("can re-attach an detached model", () => {
 
 	class CM extends Model {
 		state = 0;
+		constructor() {
+			super();
+			this.reaction(
+				() => this.parent,
+				(parent, previousParent) => {
+					if (previousParent) detachCount++;
+					if (parent) attachCount++;
+				}
+			);
+		}
 		incState() {
 			this.state++;
 		}
 
 		get computed() {
 			return this.state * 2;
-		}
-
-		modelDidAttach() {
-			attachCount++;
-		}
-
-		modelWillDetach() {
-			detachCount++;
 		}
 	}
 
@@ -774,16 +840,16 @@ describe("model identifiers", () => {
 		});
 	});
 
-	test("identifiers can be assigned in modelDidInit", () => {
+	test("identifiers can be assigned by a named factory", () => {
 		class M extends Model {
 			@id id!: any;
 
-			modelDidInit() {
-				this.id = 1;
+			static new() {
+				return this.create({ id: 1 });
 			}
 		}
 
-		const m = M.create();
+		const m = M.new();
 		expect(m.id).toBe(1);
 	});
 
@@ -822,8 +888,12 @@ test("can get the parent of a model", () => {
 test("children models can be set with Object.defineProperty", () => {
 	let childAttachedCount = 0;
 	class MC extends Model {
-		modelDidAttach() {
-			childAttachedCount++;
+		constructor() {
+			super();
+			this.reaction(
+				() => this.parent,
+				(parent) => parent && childAttachedCount++
+			);
 		}
 	}
 
@@ -861,12 +931,15 @@ describe("runtime type switching", () => {
 			class MC extends Model {
 				@state value = 0;
 
-				modelDidAttach() {
-					attachCount++;
-				}
-
-				modelWillDetach() {
-					detachCount++;
+				constructor() {
+					super();
+					this.reaction(
+						() => this.parent,
+						(parent, previousParent) => {
+							if (previousParent) detachCount++;
+							if (parent) attachCount++;
+						}
+					);
 				}
 			}
 
@@ -908,12 +981,15 @@ describe("runtime type switching", () => {
 			class MC extends Model {
 				@state value = 0;
 
-				modelDidAttach() {
-					attachCount++;
-				}
-
-				modelWillDetach() {
-					detachCount++;
+				constructor() {
+					super();
+					this.reaction(
+						() => this.parent,
+						(parent, previousParent) => {
+							if (previousParent) detachCount++;
+							if (parent) attachCount++;
+						}
+					);
 				}
 			}
 
@@ -1399,10 +1475,14 @@ describe("model references", () => {
 			@modelRef mr!: MC | null;
 			@state setRef: boolean = false;
 
-			modelDidAttach() {
-				if (this.setRef) {
-					this.mr = this.mc;
-				}
+			constructor() {
+				super();
+				this.reaction(
+					() => this.parent,
+					(parent) => {
+						if (parent && this.setRef) this.mr = this.mc;
+					}
+				);
 			}
 
 			clearModel() {

@@ -66,7 +66,8 @@ export function types<T extends Store>(
 
 export default class Store<
 	PropsType extends Record<string, any> = StoreProps<Props>
-> {
+> implements Disposable
+{
 	declare static types?: StoreConfiguration<unknown>;
 
 	props!: StoreProps<PropsType>;
@@ -97,12 +98,22 @@ export default class Store<
 		return this.props.key;
 	}
 
-	reaction<T>(track: () => T, callback: (a: T) => void): () => void {
+	get isMounted(): boolean {
+		return getStoreAdm(this).isMounted;
+	}
+
+	reaction<T>(
+		track: () => T,
+		callback: (value: T, previousValue: T) => void
+	): () => void {
 		return getStoreAdm(this).reaction(track, callback);
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	storeDidMount(): void {}
-	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	storeWillUnmount(): void {}
+	effect(callback: () => void | (() => void)): () => void {
+		return getStoreAdm(this).effect(callback);
+	}
+
+	[Symbol.dispose](): void {
+		getStoreAdm(this).dispose();
+	}
 }

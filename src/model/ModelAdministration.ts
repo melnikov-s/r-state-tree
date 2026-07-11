@@ -8,6 +8,7 @@ import {
 	createComputed,
 	createAtom,
 	reaction,
+	effect,
 	Signal,
 } from "../observables";
 import type { ComputedNode, AtomNode } from "../observables";
@@ -140,6 +141,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		{
 			get(target, prop, proxy) {
 				const adm = getAdministration(target) as ModelAdministration;
+				if (prop === Symbol.dispose) {
+					return Reflect.get(target, prop, proxy);
+				}
 				if (prop === "parent") {
 					return (target as Model).parent;
 				}
@@ -158,6 +162,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			},
 			set(target, name, value) {
 				const adm = getAdministration(target) as ModelAdministration;
+				adm.assertUsable();
 				adm.writeInProgress.add(name);
 				try {
 					switch (adm.getCfgType(name)) {
@@ -228,6 +233,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
 	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
+	private ownedDisposers = new Set<() => void>();
+	private disposed = false;
 	parentName: PropertyKey | null = null;
 
 	get parent(): ModelAdministration | null {
@@ -244,6 +251,36 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	setConfiguration(configurationGetter: () => ModelConfiguration<any>): void {
 		this.configurationGetter = configurationGetter;
+	}
+
+	assertUsable(): void {
+		if (this.disposed) {
+			throw new Error("r-state-tree: cannot use a disposed model");
+		}
+	}
+
+	private own(disposer: () => void): () => void {
+		this.assertUsable();
+		let active = true;
+		const wrapped = () => {
+			if (!active) return;
+			active = false;
+			this.ownedDisposers.delete(wrapped);
+			disposer();
+		};
+		this.ownedDisposers.add(wrapped);
+		return wrapped;
+	}
+
+	reaction<T>(
+		track: () => T,
+		callback: (value: T, previousValue: T) => void
+	): () => void {
+		return this.own(reaction(track, callback));
+	}
+
+	effect(callback: () => void | (() => void)): () => void {
+		return this.own(effect(callback));
 	}
 
 	private get configuration(): ModelConfiguration<any> {
@@ -275,7 +312,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		}
 	}
 
-	private hydrateStateValue(currentValue: unknown, snapshotValue: unknown): unknown {
+	private hydrateStateValue(
+		currentValue: unknown,
+		snapshotValue: unknown
+	): unknown {
 		if (currentValue instanceof Signal) {
 			currentValue.value = this.hydrateStateValue(
 				currentValue.value,
@@ -405,7 +445,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			this.proxy
 		);
 
-		// sub to new model trace so that we mount/unmount models as they change
+		// Observe ownership changes so models attach and detach with the collection.
 		// on the observable proxy.
 		this.modelsTraceUnsub.set(
 			name,
@@ -501,34 +541,61 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		parent: ModelAdministration | null = null,
 		parentName: PropertyKey | null = null
 	): void {
+		this.assertUsable();
 		if (this.parent) {
 			throw new Error(
 				"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
 			);
 		}
 
-		if (parent) {
-			this.parent = parent;
-			this.root = parent.root;
-			this.parentName = parentName;
-		}
-
 		batch(() => {
+			if (parent) {
+				this.parent = parent;
+				this.root = parent.root;
+				this.parentName = parentName;
+			}
 			onModelAttached(this.proxy);
-			this.proxy.modelDidAttach();
 		});
 	}
 
 	private detach(): void {
 		batch(() => {
-			this.proxy.modelWillDetach();
 			onModelDetached(this.proxy);
+			this.contextCache.forEach((computed) => computed.clear());
+			this.contextCache.clear();
+			this.parent = null;
+			this.parentName = null;
+			this.root = this;
 		});
+	}
 
+	dispose(internal = false): void {
+		if (this.disposed) return;
+		if (!internal && this.parent) {
+			throw new Error(
+				"r-state-tree: cannot directly dispose an attached child model"
+			);
+		}
+		batch(() => {
+			this.activeModels.forEach((name) => {
+				const child = this.proxy[name] as Model | Model[] | null | undefined;
+				if (Array.isArray(child)) {
+					child.forEach((model) => getModelAdm(model).dispose(true));
+				} else if (child) {
+					getModelAdm(child).dispose(true);
+				}
+			});
+			if (this.parent) onModelDetached(this.proxy);
+			this.parent = null;
+			this.parentName = null;
+			this.root = this;
+		});
+		this.disposed = true;
+		this.modelsTraceUnsub.forEach((dispose) => dispose());
+		this.modelsTraceUnsub.clear();
 		this.contextCache.forEach((computed) => computed.clear());
 		this.contextCache.clear();
-		this.parent = null;
-		this.root = this;
+		Array.from(this.ownedDisposers).forEach((dispose) => dispose());
 	}
 
 	getContextValue<T>(
@@ -665,7 +732,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 						switch (type) {
 							case ModelCfgTypes.state:
-								this.proxy[key] = this.hydrateStateValue(this.proxy[key], value);
+								this.proxy[key] = this.hydrateStateValue(
+									this.proxy[key],
+									value
+								);
 								break;
 							case ModelCfgTypes.modelRef:
 								if (Array.isArray(value)) {
@@ -743,7 +813,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 										adm.loadSnapshot(value as Snapshot);
 										model = this.proxy[key];
 									} else {
-										model = (childType as typeof Model).create(value as Snapshot);
+										model = (childType as typeof Model).create(
+											value as Snapshot
+										);
 									}
 								}
 

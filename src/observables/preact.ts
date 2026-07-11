@@ -129,7 +129,10 @@ export function createAtom(): AtomNode {
 export { effect, batch, untracked, Signal };
 export type { ReadonlySignal };
 
-export function reaction<T>(fn: () => T, callback: (value: T) => void) {
+export function reaction<T>(
+	fn: () => T,
+	callback: (value: T, previousValue: T) => void
+) {
 	let initialized = false;
 	let currentValue: T;
 
@@ -146,10 +149,11 @@ export function reaction<T>(fn: () => T, callback: (value: T) => void) {
 			return;
 		}
 
+		const previousValue = currentValue;
 		currentValue = nextValue;
 
 		untracked(() => {
-			callback(nextValue);
+			callback(nextValue, previousValue);
 		});
 	});
 }

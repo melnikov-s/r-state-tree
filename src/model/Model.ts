@@ -5,23 +5,14 @@ import { getConfigurationForCtor } from "../configuration";
 
 let initEnabled = false;
 
-type ExtractModelDidInitArgs<T extends Model> = T extends {
-	modelDidInit(...args: infer Args): unknown;
-}
-	? Args extends [infer Snapshot, ...infer Rest]
-		? Rest
-		: []
-	: [];
-
-export default class Model {
+export default class Model implements Disposable {
 	declare static types?: ModelConfiguration<unknown>;
 
 	static childTypes: object = {};
 
 	static create<T extends Model = Model>(
 		this: { new (...args: unknown[]): T },
-		snapshot?: Snapshot<T>,
-		...args: ExtractModelDidInitArgs<T>
+		snapshot?: Snapshot<T>
 	): T {
 		let instance: T;
 		try {
@@ -31,8 +22,12 @@ export default class Model {
 			initEnabled = false;
 		}
 		const adm = getModelAdm(instance);
-		snapshot && adm.loadSnapshot(snapshot);
-		instance.modelDidInit(snapshot, ...args);
+		try {
+			snapshot && adm.loadSnapshot(snapshot);
+		} catch (error) {
+			adm.dispose(true);
+			throw error;
+		}
 
 		return instance;
 	}
@@ -63,12 +58,18 @@ export default class Model {
 		return getModelAdm(this).parent?.proxy ?? null;
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	modelDidInit(snapshot?: Snapshot<this>, ...args: unknown[]): void {}
+	reaction<T>(
+		track: () => T,
+		callback: (value: T, previousValue: T) => void
+	): () => void {
+		return getModelAdm(this).reaction(track, callback);
+	}
 
-	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	modelDidAttach(): void {}
+	effect(callback: () => void | (() => void)): () => void {
+		return getModelAdm(this).effect(callback);
+	}
 
-	// eslint-disable-next-line @typescript-eslint/no-empty-function
-	modelWillDetach(): void {}
+	[Symbol.dispose](): void {
+		getModelAdm(this).dispose();
+	}
 }
