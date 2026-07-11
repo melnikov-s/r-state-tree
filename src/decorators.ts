@@ -31,7 +31,19 @@ function makeChildDecorator(typeObj: any): any {
 }
 
 export const child = makeChildDecorator(childType);
-export const modelRef = makeChildDecorator(modelRefType);
+const modelRefDecorator = makeChildDecorator(modelRefType);
+export function modelRef<T extends Function>(childCtor: T): any;
+export function modelRef<T extends Function>(
+	childCtor: T,
+	context?: DecoratorContext
+): any {
+	if (context !== undefined) {
+		throw new Error(
+			"r-state-tree: @modelRef requires a model constructor, for example `@modelRef(User)`"
+		);
+	}
+	return modelRefDecorator(childCtor);
+}
 export const model = makeDecorator(modelType);
 export const id = makeDecorator(idType);
 export const state = makeDecorator(stateType);

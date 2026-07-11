@@ -1,4 +1,4 @@
-import type { StoreElement, Snapshot, SnapshotDiff } from "./types";
+import type { StoreElement, Snapshot, SnapshotDiff, IdType } from "./types";
 import { getDiff } from "./utils";
 import type Store from "./store/Store";
 import { allowNewStore } from "./store/Store";
@@ -8,6 +8,15 @@ import {
 	getModelAdm,
 	getConfigurationFromSnapshot,
 } from "./model/ModelAdministration";
+import { getModelById } from "./model/idMap";
+
+export function findModelById<T extends Model>(
+	root: Model,
+	ModelType: new (...args: any[]) => T,
+	id: IdType
+): T | undefined {
+	return getModelById(getModelAdm(root).root.proxy, ModelType, id);
+}
 
 export function mount<T extends Store>(container: T): T {
 	return allowNewStore(() => {
@@ -57,7 +66,13 @@ export function applySnapshot<T extends Model>(
 	snapshot: Snapshot<T>
 ): T {
 	const adm = getModelAdm(model);
-	adm.loadSnapshot(snapshot);
+	const previousSnapshot = adm.getSnapshotForRollback();
+	try {
+		adm.loadSnapshot(snapshot);
+	} catch (error) {
+		adm.loadSnapshot(previousSnapshot);
+		throw error;
+	}
 
 	return model;
 }

@@ -12,6 +12,7 @@ import {
 	isObservable,
 	observable,
 	signal,
+	findModelById,
 } from "../src/index";
 
 test("can create a model", () => {
@@ -807,14 +808,14 @@ describe("model identifiers", () => {
 
 		class MP extends Model {
 			@child m = M.create();
-			@modelRef mr: M = this.m;
+			@modelRef(M) mr: M = this.m;
 		}
 
 		const mp = MP.create();
 		// With shallow behavior, use deep equality for Model comparisons
 		expect(mp.m).toStrictEqual(mp.mr);
 		mp.m.setId();
-		expect(mp.m).toStrictEqual(mp.mr);
+		expect(mp.mr).toBe(undefined);
 	});
 
 	test("correct id shows up in snapshot after being re-assigned", () => {
@@ -829,14 +830,14 @@ describe("model identifiers", () => {
 
 		class MP extends Model {
 			@child m = M.create();
-			@modelRef mr: M = this.m;
+			@modelRef(M) mr: M = this.m;
 		}
 
 		const mp = MP.create();
 		mp.m.setId();
 		expect(toSnapshot(mp)).toStrictEqual({
 			m: { myId: 2, test: "me" },
-			mr: { myId: 2 },
+			mr: undefined,
 		});
 	});
 
@@ -1097,7 +1098,7 @@ describe("runtime type switching", () => {
 
 			class M extends Model {
 				@child(MC) children: MC[] = [];
-				@modelRef refs!: MC | MC[];
+				@modelRef(MC) refs!: MC | MC[];
 
 				addChild(id: number, value: number) {
 					this.children.push(MC.create({ id, value }));
@@ -1138,7 +1139,7 @@ describe("runtime type switching", () => {
 
 			class M extends Model {
 				@child(MC) children: MC[] = [];
-				@modelRef refs!: MC | MC[];
+				@modelRef(MC) refs!: MC | MC[];
 
 				addChild(id: number, value: number) {
 					this.children.push(MC.create({ id, value }));
@@ -1177,7 +1178,7 @@ describe("runtime type switching", () => {
 
 			class M extends Model {
 				@child(MC) children: MC[] = [];
-				@modelRef refs!: MC | MC[];
+				@modelRef(MC) refs!: MC | MC[];
 
 				addChild(id: number, value: number) {
 					this.children.push(MC.create({ id, value }));
@@ -1292,6 +1293,295 @@ describe("runtime type switching", () => {
 });
 
 describe("model references", () => {
+	test("modelRef requires an explicit model constructor", () => {
+		expect(() => {
+			class Invalid extends Model {
+				@(modelRef as any) ref!: Model;
+			}
+			return Invalid;
+		}).toThrow("@modelRef requires a model constructor");
+
+		class InvalidStatic extends Model {
+			ref!: Model;
+			static types = { ref: modelRef };
+		}
+		expect(() => InvalidStatic.create()).toThrow(
+			"modelRef requires a model constructor"
+		);
+	});
+
+	test("modelRef rejects a model outside its declared type", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Project extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(User) user = User.create();
+			@child(Project) project = Project.create();
+			@modelRef(User) ref!: User;
+		}
+
+		const root = Root.create();
+		expect(() => (root.ref = root.project as unknown as User)).toThrow(
+			"must reference User"
+		);
+	});
+
+	test("findModelById exposes typed tree-scoped lookup", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Project extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(User) user: User | null = User.create();
+			@child(Project) project = Project.create();
+		}
+
+		const root = Root.create();
+		expect(findModelById(root, User, 1)).toBe(root.user);
+		expect(findModelById(root, Project, 1)).toBe(root.project);
+		expect(findModelById(root, User, 2)).toBe(undefined);
+	});
+
+	test("findModelById tracks id mutation and detachment reactively", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(User) user: User | null = User.create();
+		}
+
+		const root = Root.create();
+		const user = root.user!;
+		let byOne: User | undefined;
+		let byTwo: User | undefined;
+		const dispose = effect(() => {
+			byOne = findModelById(root, User, 1);
+			byTwo = findModelById(root, User, 2);
+		});
+
+		expect(byOne).toBe(user);
+		expect(byTwo).toBe(undefined);
+		user.id = 2;
+		expect(byOne).toBe(undefined);
+		expect(byTwo).toBe(user);
+		root.user = null;
+		expect(byTwo).toBe(undefined);
+		dispose();
+	});
+
+	test("ids and typed references are namespaced by exact model type", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Project extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(User) users = [User.create()];
+			@child(Project) projects = [Project.create()];
+			@modelRef(User) user!: User;
+			@modelRef(Project) project!: Project;
+			@modelRef(User) userList: User[] = [];
+
+			setRefs() {
+				this.user = this.users[0];
+				this.project = this.projects[0];
+				this.userList = [this.users[0]];
+			}
+		}
+
+		const root = Root.create();
+		root.setRefs();
+		expect(root.user).toBe(root.users[0]);
+		expect(root.project).toBe(root.projects[0]);
+		expect(root.userList).toEqual([root.users[0]]);
+	});
+
+	test("failed same-type id mutation preserves both mappings", () => {
+		class User extends Model {
+			@id id!: number;
+		}
+		class Root extends Model {
+			@child(User) users = [User.create({ id: 1 }), User.create({ id: 2 })];
+			@modelRef(User) first: User = this.users[0];
+			@modelRef(User) second: User = this.users[1];
+		}
+
+		const root = Root.create();
+		expect(() => (root.users[0].id = 2)).toThrow();
+		expect(root.users[0].id).toBe(1);
+		expect(root.first).toBe(root.users[0]);
+		expect(root.second).toBe(root.users[1]);
+	});
+
+	test("typed reference reacts when an identifier changes", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(User) user = User.create();
+			@modelRef(User) ref: User = this.user;
+		}
+
+		const root = Root.create();
+		let resolved: User | undefined;
+		const dispose = effect(() => {
+			resolved = root.ref;
+		});
+		expect(resolved).toBe(root.user);
+		root.user.id = 2;
+		expect(resolved).toBe(undefined);
+		dispose();
+	});
+
+	test("snapshot reconciliation uses the declared child type with overlapping ids", () => {
+		class User extends Model {
+			@id id!: number;
+			@state name = "";
+		}
+		class Project extends Model {
+			@id id!: number;
+		}
+		class Root extends Model {
+			@child(User) users = [User.create({ id: 1, name: "old" })];
+			@child(Project) projects = [Project.create({ id: 1 })];
+		}
+
+		const root = Root.create();
+		const user = root.users[0];
+		applySnapshot(root, { users: [{ id: 1, name: "new" }] });
+		expect(root.users[0]).toBe(user);
+		expect(root.users[0].name).toBe("new");
+	});
+
+	test("snapshot loading rejects duplicate ids of the same child type", () => {
+		class User extends Model {
+			@id id!: number;
+		}
+		class Root extends Model {
+			@child(User) users: User[] = [];
+		}
+
+		const root = Root.create();
+		expect(() =>
+			applySnapshot(root, { users: [{ id: 1 }, { id: 1 }] })
+		).toThrow("duplicate ids");
+		expect(root.users).toEqual([]);
+	});
+
+	test("typed references do not resolve an overlapping id from another model type", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Project extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(Project) projects = [Project.create()];
+			@child(User) users = [User.create()];
+			@modelRef(User) ref: User = this.users[0];
+		}
+
+		const root = Root.create();
+		expect(root.ref).toBe(root.users[0]);
+	});
+
+	test("failed attachment rolls back the child collection", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(User) users = [User.create()];
+		}
+
+		const root = Root.create();
+		const original = root.users[0];
+		const duplicate = User.create();
+
+		expect(() => root.users.push(duplicate)).toThrow();
+		expect(root.users).toEqual([original]);
+		expect(original.parent).toBe(root);
+		expect(duplicate.parent).toBe(null);
+	});
+
+	test("failed snapshot application rolls back changes across child properties", () => {
+		class User extends Model {
+			@id id!: number;
+		}
+		class Root extends Model {
+			@child(User) first: User[] = [];
+			@child(User) second: User[] = [];
+		}
+
+		const root = Root.create();
+		expect(() =>
+			applySnapshot(root, {
+				first: [{ id: 1 }],
+				second: [{ id: 1 }],
+			})
+		).toThrow("already assigned");
+		expect(root.first).toEqual([]);
+		expect(root.second).toEqual([]);
+	});
+
+	test("singular snapshot reconciliation uses the declared child type", () => {
+		class User extends Model {
+			@id id = 1;
+			@state name = "";
+		}
+		class Project extends Model {
+			@id id = 1;
+			@state name = "";
+		}
+		class Root extends Model {
+			@child(User) item: User = Project.create() as unknown as User;
+		}
+
+		const root = Root.create();
+		applySnapshot(root, { item: { id: 1, name: "hydrated" } });
+		expect(root.item).toBeInstanceOf(User);
+		expect(root.item.name).toBe("hydrated");
+	});
+
+	test("references react when their owning model is detached and reparented", () => {
+		class User extends Model {
+			@id id = 1;
+		}
+		class Holder extends Model {
+			@modelRef(User) ref!: User;
+
+			setRef(user: User) {
+				this.ref = user;
+			}
+		}
+		class Root extends Model {
+			@child(User) user = User.create();
+			@child(Holder) holder: Holder | null = null;
+		}
+
+		const first = Root.create();
+		const second = Root.create();
+		const holder = Holder.create();
+		first.holder = holder;
+		holder.setRef(first.user);
+
+		let resolved: User | undefined;
+		const dispose = effect(() => {
+			resolved = holder.ref;
+		});
+		expect(resolved).toBe(first.user);
+		first.holder = null;
+		expect(resolved).toBe(undefined);
+		second.holder = holder;
+		expect(resolved).toBe(second.user);
+		dispose();
+	});
+
 	test("can assign a model to a reference", () => {
 		class MC extends Model {
 			@id id = 0;
@@ -1299,7 +1589,7 @@ describe("model references", () => {
 
 		class M extends Model {
 			@child(MC) mc: MC = MC.create();
-			@modelRef mr!: MC;
+			@modelRef(MC) mr!: MC;
 
 			setRef() {
 				this.mr = this.mc;
@@ -1316,7 +1606,7 @@ describe("model references", () => {
 		class MC extends Model {}
 		class M extends Model {
 			@child mc: MC = MC.create();
-			@modelRef mr!: MC;
+			@modelRef(MC) mr!: MC;
 
 			setRef() {
 				this.mr = this.mc;
@@ -1335,7 +1625,7 @@ describe("model references", () => {
 		class M extends Model {
 			mctemp = MC.create({ id: 1 });
 			@child mc: MC | null = null;
-			@modelRef mr: MC = this.mctemp as any;
+			@modelRef(MC) mr: MC = this.mctemp as any;
 
 			setChild() {
 				this.mc = this.mctemp;
@@ -1354,7 +1644,7 @@ describe("model references", () => {
 		}
 		class M extends Model {
 			@child(MC) mc: MC | null = MC.create();
-			@modelRef mr!: MC | null;
+			@modelRef(MC) mr!: MC | null;
 
 			setRef() {
 				this.mr = this.mc;
@@ -1381,7 +1671,7 @@ describe("model references", () => {
 
 		class M extends Model {
 			@child mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
-			@modelRef mr!: MC;
+			@modelRef(MC) mr!: MC;
 
 			setRef() {
 				this.mr = this.mc[0];
@@ -1406,7 +1696,7 @@ describe("model references", () => {
 		}
 		class M extends Model {
 			@child mc: MC[] = [MC.create({ id: 0 }), MC.create({ id: 1 })];
-			@modelRef mr!: MC;
+			@modelRef(MC) mr!: MC;
 
 			setModel(index: number) {
 				this.mr = (index >= 0 ? this.mc[index] : undefined) as MC;
@@ -1436,7 +1726,7 @@ describe("model references", () => {
 		}
 		class M extends Model {
 			@child(MC) mc: MC | null = MC.create();
-			@modelRef mr!: MC | null;
+			@modelRef(MC) mr!: MC | null;
 			_temp!: MC | null;
 
 			setRef() {
@@ -1472,7 +1762,7 @@ describe("model references", () => {
 		}
 		class M extends Model {
 			@child mc: MC = MC.create();
-			@modelRef mr!: MC | null;
+			@modelRef(MC) mr!: MC | null;
 			@state setRef: boolean = false;
 
 			constructor() {
@@ -1512,7 +1802,7 @@ describe("model references", () => {
 		class M extends Model {
 			@child(MC) mc1: MC | null = MC.create({ id: 1 });
 			@child(MC) mc2: MC | null = MC.create({ id: 2 });
-			@modelRef mr: MC[] = [];
+			@modelRef(MC) mr: MC[] = [];
 			_temp!: MC | null;
 
 			setRef() {

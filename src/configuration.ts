@@ -3,7 +3,7 @@ import type {
 	ConfigurationTypes,
 	ConfigurationValue,
 } from "./types";
-import { childType, idType, modelRefType, modelType, stateType } from "./types";
+import { childType, idType, modelType, stateType } from "./types";
 import { child, id, model, modelRef, state } from "./decorators";
 
 type Ctor = Function;
@@ -31,7 +31,11 @@ function normalizeEntry(entry: unknown): ConfigurationType | undefined {
 		if (entry === state) return stateType;
 		if (entry === model) return modelType;
 		if (entry === child) return childType;
-		if (entry === modelRef) return modelRefType;
+		if (entry === modelRef) {
+			throw new Error(
+				"r-state-tree: modelRef requires a model constructor, for example `modelRef(User)`"
+			);
+		}
 		// `computed` is handled by tagging the function with `.type` in `observables/preact`.
 		return undefined;
 	}

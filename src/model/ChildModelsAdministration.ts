@@ -102,21 +102,30 @@ class ObservableListener<T> {
 		if (!this.listeners) return;
 
 		this.notifying = true;
-		for (let i = 0; i < this.listeners.length; i++) {
-			this.listeners[i](ev);
+		try {
+			for (let i = 0; i < this.listeners.length; i++) {
+				this.listeners[i](ev);
+			}
+		} finally {
+			this.notifying = false;
 		}
-		this.notifying = false;
 	}
 }
 
 export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 	set(index: number, newValue: T): boolean {
 		return batch(() => {
+			const oldValue = this.source[index];
 			const result = super.set(index, newValue);
 
 			const sourceValue = getSource(newValue);
-			if (this.source[index] !== sourceValue) {
-				notifyArrayUpdate(this.proxy, index, this.source[index], sourceValue);
+			if (oldValue !== sourceValue) {
+				try {
+					notifyArrayUpdate(this.proxy, index, oldValue, sourceValue);
+				} catch (error) {
+					super.set(index, oldValue);
+					throw error;
+				}
 			}
 			return result;
 		});
@@ -130,7 +139,12 @@ export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 		return batch(() => {
 			const deleted = super.spliceWithArray(index, deleteCount, newItems);
 			if (deleteCount || newItems?.length) {
-				notifySpliceArray(this.proxy, index, newItems ?? [], deleted);
+				try {
+					notifySpliceArray(this.proxy, index, newItems ?? [], deleted);
+				} catch (error) {
+					super.spliceWithArray(index, newItems?.length ?? 0, deleted);
+					throw error;
+				}
 			}
 
 			return deleted;

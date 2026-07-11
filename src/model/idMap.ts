@@ -1,166 +1,120 @@
 import { observable } from "../observables";
 import type { IdType } from "../types";
-import type Model from "./Model";
-import { getModelAdm } from "./ModelAdministration";
+import Model from "./Model";
 
-const attachedIdMap: WeakMap<
-	Model,
-	Map<IdType, Model | undefined>
-> = new WeakMap();
+export type ModelConstructor<T extends Model = Model> = new (
+	...args: any[]
+) => T;
+type TypeMap = Map<ModelConstructor, Map<IdType, Model | undefined>>;
 
+const attachedIdMap: WeakMap<Model, TypeMap> = new WeakMap();
 const idMap: WeakMap<Model, IdType> = new WeakMap();
-let loadingSnapshot = false;
 
-const potentialDups: Set<Model> = new Set();
+function getModelType(model: Model): ModelConstructor {
+	return Object.getPrototypeOf(model).constructor as ModelConstructor;
+}
 
-export function onSnapshotLoad<T>(fn: () => T): T {
-	const wasLoadingSnapshot = loadingSnapshot;
-	loadingSnapshot = true;
+function entriesFor(model: Model): Array<[ModelConstructor, IdType, Model]> {
+	const entries: Array<[ModelConstructor, IdType, Model]> = [];
+	attachedIdMap.get(model)?.forEach((ids, Type) => {
+		ids.forEach((value, id) => {
+			if (value) entries.push([Type, id, value]);
+		});
+	});
+	const id = idMap.get(model);
+	if (id != null) entries.push([getModelType(model), id, model]);
+	return entries;
+}
 
-	try {
-		return fn();
-	} finally {
-		if (!wasLoadingSnapshot) {
-			loadingSnapshot = false;
-			const rootMap: Map<Model, Set<IdType>> = new Map();
-
-			try {
-				potentialDups.forEach((model) => {
-					const root = getModelAdm(model).root.proxy;
-
-					let set = rootMap.get(root);
-
-					if (!set) {
-						set = new Set();
-						rootMap.set(root, set);
-					}
-
-					if (idMap.has(model)) {
-						const id = idMap.get(model)!;
-						if (set.has(id)) {
-							throw new Error(
-								"r-state-tree duplicate ids detected after snapshot was loaded"
-							);
-						}
-
-						set.add(id);
-					}
-				});
-			} finally {
-				potentialDups.clear();
-			}
+function assertAvailable(
+	node: Model,
+	entries: Array<[ModelConstructor, IdType, Model]>
+): void {
+	const map = attachedIdMap.get(node);
+	for (const [Type, id, model] of entries) {
+		const existing = map?.get(Type)?.get(id);
+		if (existing && existing !== model) {
+			throw new Error(
+				`r-state-tree: id: ${id} is already assigned to another model`
+			);
 		}
 	}
 }
 
-export function setIdentifier(model: Model, id: string | number): void {
-	const prevId = idMap.get(model);
-	idMap.set(model, id);
-
-	if (prevId == null) {
-		if (model.parent) {
-			onModelAttached(model);
-		}
-	} else if (prevId !== id) {
-		updateIdentifier(model);
+function bucket(
+	node: Model,
+	Type: ModelConstructor
+): Map<IdType, Model | undefined> {
+	let map = attachedIdMap.get(node);
+	if (!map) {
+		map = observable(new Map());
+		attachedIdMap.set(node, map);
 	}
+	let ids = map.get(Type);
+	if (!ids) {
+		ids = observable(new Map());
+		map.set(Type, ids);
+	}
+	return ids;
+}
+
+export function setIdentifier(model: Model, id: IdType): void {
+	const previousId = idMap.get(model);
+	if (previousId === id) return;
+	const Type = getModelType(model);
+	const ancestors: Model[] = [];
+	let node = model.parent;
+	while (node) {
+		assertAvailable(node, [[Type, id, model]]);
+		ancestors.push(node);
+		node = node.parent;
+	}
+	for (const ancestor of ancestors) {
+		const ids = bucket(ancestor, Type);
+		if (previousId != null && ids.get(previousId) === model)
+			ids.delete(previousId);
+		ids.set(id, model);
+	}
+	idMap.set(model, id);
 }
 
 export function getIdentifier(model: Model): IdType | undefined {
 	return idMap.get(model);
 }
 
-export function getModelById(root: Model, id: IdType): Model | undefined {
-	const map = attachedIdMap.get(root);
-	return map?.get(id);
-}
-
-function updateIdentifier(model: Model): void {
-	const id = idMap.get(model)!;
-
-	let node: Model | null = model.parent;
-
-	while (node) {
-		const map = attachedIdMap.get(node);
-
-		if (map) {
-			map.set(id, model);
-		}
-
-		node = node.parent;
-	}
+export function getModelById<T extends Model>(
+	root: Model,
+	Type: ModelConstructor<T>,
+	id: IdType
+): T | undefined {
+	return attachedIdMap.get(root)?.get(Type)?.get(id) as T | undefined;
 }
 
 export function onModelAttached(model: Model): void {
-	const attachedMap = attachedIdMap.get(model);
-	const id = idMap.get(model);
-
-	if (attachedMap || id != null) {
-		const id = idMap.get(model);
-		let node = model.parent;
-
-		while (node) {
-			let map = attachedIdMap.get(node);
-
-			if (!map) {
-				map = observable(new Map());
-				attachedIdMap.set(node, map);
-			}
-
-			attachedMap?.forEach((value, key) => {
-				if (map!.has(key)) {
-					if (loadingSnapshot) {
-						potentialDups.add(model);
-						potentialDups.add(map!.get(key)!);
-					} else {
-						throw new Error(
-							`r-state-tree: id: ${key} is already assigned to another model`
-						);
-					}
-				}
-				map!.set(key, value);
-			});
-
-			if (id != null) {
-				if (map!.has(id)) {
-					if (loadingSnapshot) {
-						potentialDups.add(model);
-						potentialDups.add(map!.get(id)!);
-					} else {
-						throw new Error(
-							`r-state-tree: id: ${id} is already assigned to another model`
-						);
-					}
-				}
-				map.set(id, model);
-			}
-
-			node = node.parent;
-		}
+	const entries = entriesFor(model);
+	if (!entries.length) return;
+	const ancestors: Model[] = [];
+	let node = model.parent;
+	while (node) {
+		assertAvailable(node, entries);
+		ancestors.push(node);
+		node = node.parent;
+	}
+	for (const ancestor of ancestors) {
+		for (const [Type, id, value] of entries)
+			bucket(ancestor, Type).set(id, value);
 	}
 }
 
-// TODO: clean up if not observed
 export function onModelDetached(model: Model): void {
-	const id = idMap.get(model);
-	if (attachedIdMap.has(model) || id != null) {
-		const attachedMap = attachedIdMap.get(model);
-		let node = model.parent;
-
-		while (node) {
-			const map = attachedIdMap.get(node);
-
-			if (map) {
-				attachedMap?.forEach((value, key) => {
-					map!.delete(key);
-				});
-
-				if (id != null) {
-					map!.delete(id);
-				}
-			}
-
-			node = node.parent;
+	const entries = entriesFor(model);
+	let node = model.parent;
+	while (node) {
+		const map = attachedIdMap.get(node);
+		for (const [Type, id, value] of entries) {
+			const ids = map?.get(Type);
+			if (ids?.get(id) === value) ids.delete(id);
 		}
+		node = node.parent;
 	}
 }

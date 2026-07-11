@@ -910,7 +910,7 @@ class User extends Model {
 class TodoModel extends Model {
 	@id id = 0;
 	@state title = "";
-	@modelRef assignee?: User; // Reference to another model by ID
+	@modelRef(User) assignee?: User; // Reference to another model by ID
 	@child metadata = MetadataModel.create(); // Nested child model
 	@child tags: TagModel[] = []; // Array of child models
 }
@@ -955,14 +955,14 @@ class TodoModel extends Model {
 
 ### Model references
 
-Reference models by ID using `@modelRef` (or `static types`):
+Reference models by ID using `@modelRef(ModelType)` (or `modelRef(ModelType)` in `static types`). The model constructor is required because identifiers are namespaced by model type:
 
 ```ts
 class ProjectModel extends Model {
 	@id id = 0;
 	@child users: User[] = [];
-	@modelRef owner?: User; // Single reference
-	@modelRef assignees: User[] = []; // Array of references
+	@modelRef(User) owner?: User; // Single reference
+	@modelRef(User) assignees: User[] = []; // Array of references
 
 	assignOwner(userId: number) {
 		// Find user by ID and set as owner
@@ -1077,11 +1077,20 @@ Use the observers/renderers provided by the signals bindings for your UI library
 
 ### Identifier and reference rules
 
-- `@id` values are unique within a tree. They cannot be cleared to `undefined` after assignment.
-- Identifiers can be reassigned to a new value (including in snapshots) as long as uniqueness is preserved.
-- `@modelRef` requires the referenced model to have an id and be attached to the tree; the ref becomes `undefined` when the model detaches.
+- `@id` values are unique per exact runtime Model class within a tree. Different Model classes may use the same id; subclasses have their own identifier namespace. IDs cannot be cleared to `undefined` after assignment.
+- Identifiers are mutable and can be reassigned (including in snapshots) as long as the new id is unused by that exact Model class. A failed reassignment preserves the old id and its references.
+- Use `@modelRef(ModelType)` or `modelRef(ModelType)` when ids can overlap across Model classes; references resolve only within the declared Model class.
+- `@modelRef(ModelType)` requires an explicit model constructor. The referenced model must have an id and be attached to the tree; the ref becomes `undefined` when the model detaches.
 - When a model is re-attached to the same tree, compatible refs restore automatically; attaching to a different root does not restore prior refs.
 - `@modelRef` and `@child` can switch between single and array at runtime; reactions observe the property itself rather than internal array mutations.
+
+Use `findModelById` for an optional, typed lookup within a model tree:
+
+```ts
+const user = findModelById(root, User, 1); // User | undefined
+```
+
+The lookup is reactive inside an effect or computed value. It returns `undefined` when the matching model changes its id, detaches, or is disposed.
 
 ### Snapshot diffs
 

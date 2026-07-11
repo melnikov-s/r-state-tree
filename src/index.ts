@@ -7,6 +7,7 @@ import {
 	toSnapshot,
 	applySnapshot,
 	onSnapshotDiff,
+	findModelById,
 } from "./api";
 import { createContext } from "./context";
 import { toObservableTree } from "./toObservableTree";
@@ -21,6 +22,7 @@ export {
 	onSnapshotDiff,
 	toSnapshot,
 	applySnapshot,
+	findModelById,
 	createContext,
 	toObservableTree,
 };
