@@ -139,7 +139,7 @@ app.todo.title;
 
 - Always create with `createStore()` and attach with `mount()`. Stores cannot be constructed with `new` directly.
 - Prefer no custom constructor. Type stores as `Store<Props>` and access props via `this.props`.
-- Constructors may register framework-owned reactions and effects after `super(props)`. Gate external resource acquisition on `isMounted` and return cleanup from effects.
+- Constructors may register framework-owned reactions and effects after `super(props)`. Store registrations activate when mounting and are disposed with the store; return cleanup from effects to release resources.
 - Do not shadow or re-declare `props` as a class field; `props` is read-only. Use the generic `Store<{ ... }>` for typing.
 
 ```ts
@@ -212,7 +212,6 @@ class TodoStore extends Store {
 	constructor(props) {
 		super(props);
 		this.effect(() => {
-			if (!this.isMounted) return;
 			const connection = connect();
 			return () => connection.close();
 		});
@@ -242,6 +241,10 @@ class TodoStore extends Store {
 	}
 }
 ```
+
+`Store.effect()` and `Store.reaction()` register mount-scoped behavior. Mounting first links the complete store tree and marks it mounted bottom-up in one transaction. Registrations then activate bottom-up, so even a grandchild's initial effect observes every ancestor and descendant as mounted. A reaction establishes its initial value at activation and still skips its initial callback. Calling the disposer returned during construction cancels the pending registration; after mount, it disposes the live subscription. All registrations are disposed automatically with the store.
+
+Use the exported standalone `effect()` or `reaction()` when observing a store from outside its owned lifetime—for example, to observe the public reactive `isMounted` transition to `false`.
 
 ### Context
 
@@ -1217,7 +1220,8 @@ class S extends Store {
 	constructor(props) {
 		super(props);
 		this.effect(() => {
-			if (!this.isMounted) return;
+			const resource = acquireResource();
+			return () => resource.dispose();
 		});
 	}
 }
@@ -1281,7 +1285,7 @@ When child stores are created during mount with `models` that point back into th
 - Core: `createStore`, `mount`, `Symbol.dispose`, `updateStore`
 - Snapshots: `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
 - Lifecycle: reactive `Store.isMounted`, reactive `Model.parent`, and owned `reaction`/`effect`
-- Best practices: domain in Models; delegate from Stores; stable keys for `@child`; gate resources on lifecycle state; don’t shadow `props`.
+- Best practices: domain in Models; delegate from Stores; stable keys for `@child`; return cleanup from store effects; don’t shadow `props`.
 
 ## Testing
 

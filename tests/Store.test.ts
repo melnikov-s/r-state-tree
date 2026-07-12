@@ -24,26 +24,23 @@ test("can mount a store", () => {
 });
 
 test("mounted state is reactive and owned effects are cleaned up on disposal", () => {
-	const transitions: Array<[boolean, boolean]> = [];
 	let acquired = 0;
 	let cleaned = 0;
 
 	class AppStore extends Store {
 		constructor(props: any) {
 			super(props);
-			this.reaction(
-				() => this.isMounted,
-				(next, previous) => transitions.push([next, previous])
-			);
 			this.effect(() => {
-				if (!this.isMounted) return;
 				acquired++;
 				return () => cleaned++;
 			});
+			expect(acquired).toBe(0);
 		}
 	}
 
 	const store = mount(createStore(AppStore));
+	const mountedStates: boolean[] = [];
+	const stopWatchingMount = effect(() => mountedStates.push(store.isMounted));
 	expect(store.isMounted).toBe(true);
 	expect(acquired).toBe(1);
 
@@ -51,12 +48,103 @@ test("mounted state is reactive and owned effects are cleaned up on disposal", (
 	store[Symbol.dispose]();
 
 	expect(store.isMounted).toBe(false);
-	expect(transitions).toEqual([
-		[true, false],
-		[false, true],
-	]);
+	expect(mountedStates).toEqual([true, false]);
 	expect(cleaned).toBe(1);
 	expect(() => mount(store)).toThrow();
+	stopWatchingMount();
+});
+
+test("a disposer can cancel a reactive registration before mount", () => {
+	let runs = 0;
+
+	class AppStore extends Store {
+		constructor(props: any) {
+			super(props);
+			const dispose = this.effect(() => void runs++);
+			dispose();
+		}
+	}
+
+	mount(createStore(AppStore));
+	expect(runs).toBe(0);
+});
+
+test("store tree effects activate bottom-up after the whole tree is mounted", () => {
+	type Observation = {
+		store: "grandchild" | "child" | "root";
+		mounted: boolean[];
+	};
+	const observations: Observation[] = [];
+	const mountedTransitions: boolean[][] = [];
+	let stopWatchingMount!: () => void;
+	let rootStore!: RootStore;
+	let childStore!: ChildStore;
+	let grandchildStore!: GrandchildStore;
+
+	const observeMount = (store: Observation["store"]) => {
+		observations.push({
+			store,
+			mounted: [
+				grandchildStore.isMounted,
+				childStore.isMounted,
+				rootStore.isMounted,
+			],
+		});
+	};
+
+	class GrandchildStore extends Store {
+		constructor(props: any) {
+			super(props);
+			grandchildStore = this;
+			stopWatchingMount = effect(() => {
+				mountedTransitions.push([
+					grandchildStore.isMounted,
+					childStore.isMounted,
+					rootStore.isMounted,
+				]);
+			});
+			this.effect(() => observeMount("grandchild"));
+		}
+	}
+
+	class ChildStore extends Store {
+		@child get grandchild() {
+			return createStore(GrandchildStore);
+		}
+
+		constructor(props: any) {
+			super(props);
+			childStore = this;
+			this.effect(() => observeMount("child"));
+			void this.grandchild;
+		}
+	}
+
+	class RootStore extends Store {
+		@child get child() {
+			return createStore(ChildStore);
+		}
+
+		constructor(props: any) {
+			super(props);
+			rootStore = this;
+			this.effect(() => observeMount("root"));
+			void this.child;
+		}
+	}
+
+	mount(createStore(RootStore));
+
+	expect(observations).toEqual([
+		{ store: "grandchild", mounted: [true, true, true] },
+		{ store: "child", mounted: [true, true, true] },
+		{ store: "root", mounted: [true, true, true] },
+	]);
+	expect(mountedTransitions).toEqual([
+		[false, false, false],
+		[true, true, true],
+	]);
+	stopWatchingMount();
 });
 
 test("can update store props with updateStore", () => {
@@ -474,16 +562,13 @@ test("props are reactive", () => {
 	expect(propsCounter).toBe(5);
 });
 
-test("a mount reaction observes the root store mounting", () => {
+test("store effects start when the root store mounts", () => {
 	let count = 0;
 
 	class S extends Store<any> {
 		constructor(props: any) {
 			super(props);
-			this.reaction(
-				() => this.isMounted,
-				(isMounted) => isMounted && count++
-			);
+			this.effect(() => void count++);
 		}
 	}
 
@@ -491,7 +576,7 @@ test("a mount reaction observes the root store mounting", () => {
 	expect(count).toBe(1);
 });
 
-test("mount reaction mutations are batched", () => {
+test("mount-scoped effect mutations are batched", () => {
 	class S extends Store<any> {
 		state = observable({ count: 0 });
 		get count() {
@@ -502,10 +587,7 @@ test("mount reaction mutations are batched", () => {
 		}
 		constructor(props: any) {
 			super(props);
-			this.reaction(
-				() => this.isMounted,
-				(isMounted) => isMounted && this.state.count++
-			);
+			this.effect(() => void (this.state.count = 1));
 		}
 	}
 
@@ -514,16 +596,13 @@ test("mount reaction mutations are batched", () => {
 	expect(s!.count).toBe(1);
 });
 
-test("a mount reaction observes root store disposal", () => {
+test("store effect cleanup runs on root store disposal", () => {
 	let count = 0;
 
 	class S extends Store<any> {
 		constructor(props: any) {
 			super(props);
-			this.reaction(
-				() => this.isMounted,
-				(isMounted, wasMounted) => !isMounted && wasMounted && count++
-			);
+			this.effect(() => () => void count++);
 		}
 	}
 
@@ -533,7 +612,7 @@ test("a mount reaction observes root store disposal", () => {
 	expect(count).toBe(1);
 });
 
-test("disposal reaction mutations are batched", () => {
+test("store effect cleanup may mutate state", () => {
 	class S extends Store<any> {
 		state = observable({ count: 0 });
 		get count() {
@@ -544,11 +623,7 @@ test("disposal reaction mutations are batched", () => {
 		}
 		constructor(props: any) {
 			super(props);
-			this.reaction(
-				() => this.isMounted,
-				(isMounted, wasMounted) =>
-					!isMounted && wasMounted && this.state.count++
-			);
+			this.effect(() => () => void this.state.count++);
 		}
 	}
 
@@ -776,6 +851,7 @@ test("can't initianialize store directly", () => {
 });
 
 test("can setup a reaction in a store", () => {
+	let trackRuns = 0;
 	class S extends Store<any> {
 		state = observable({ prop: 0, count: 0 });
 		get prop() {
@@ -795,9 +871,13 @@ test("can setup a reaction in a store", () => {
 		constructor(props: any) {
 			super(props);
 			this.unsub = this.reaction(
-				() => this.prop,
+				() => {
+					trackRuns++;
+					return this.prop;
+				},
 				() => this.count++
 			);
+			expect(trackRuns).toBe(0);
 		}
 		inc() {
 			this.prop++;
@@ -805,6 +885,7 @@ test("can setup a reaction in a store", () => {
 	}
 
 	const s = mount(createStore(S));
+	expect(trackRuns).toBe(1);
 	expect(s.count).toBe(0);
 	s.inc();
 	expect(s.count).toBe(1);

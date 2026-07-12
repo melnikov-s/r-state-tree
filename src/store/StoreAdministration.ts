@@ -146,6 +146,12 @@ type ChildStoreData = {
 	listener: ListenerNode;
 };
 
+type ReactiveRegistration = {
+	start: () => () => void;
+	stop?: () => void;
+	disposed: boolean;
+};
+
 export class StoreAdministration<
 	StoreType extends Store = Store
 > extends ObjectAdministration<Store> {
@@ -201,7 +207,7 @@ export class StoreAdministration<
 	private disposed = false;
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
-	private ownedDisposers = new Set<() => void>();
+	private reactiveRegistrations = new Set<ReactiveRegistration>();
 	private configurationGetter?: () => StoreConfiguration<StoreType>;
 
 	setConfiguration(
@@ -237,7 +243,9 @@ export class StoreAdministration<
 			});
 
 			childStoreData.value.set(stores);
-			stores.forEach((s) => getStoreAdm(s).mount(this, name));
+			if (this.isMounted) {
+				stores.forEach((s) => getStoreAdm(s).mount(this, name));
+			}
 
 			return stores;
 		}
@@ -307,7 +315,9 @@ export class StoreAdministration<
 		}
 
 		removedStores.forEach((s) => getStoreAdm(s).dispose(true));
-		newStores.forEach((s) => getStoreAdm(s).mount(this, name));
+		if (this.isMounted) {
+			newStores.forEach((s) => getStoreAdm(s).mount(this, name));
+		}
 
 		return stores;
 	}
@@ -337,7 +347,9 @@ export class StoreAdministration<
 
 			const childStore = this.createChildStore(element);
 			batch(() => childStoreData.value.set(childStore));
-			getStoreAdm(childStore).mount(this, name);
+			if (this.isMounted) {
+				getStoreAdm(childStore).mount(this, name);
+			}
 			return childStore;
 		} else {
 			batch(() => updateProps(oldStore.props, props!));
@@ -472,39 +484,48 @@ export class StoreAdministration<
 		return undefined as T;
 	}
 
-	private own(disposer: () => void): () => void {
+	private register(start: () => () => void): () => void {
 		if (this.disposed) {
-			disposer();
 			throw new Error(
 				"r-state-tree: cannot register reactive resources on a disposed store"
 			);
 		}
-		let active = true;
-		const wrapped = () => {
-			if (!active) return;
-			active = false;
-			this.ownedDisposers.delete(wrapped);
-			disposer();
+		const registration: ReactiveRegistration = { start, disposed: false };
+		this.reactiveRegistrations.add(registration);
+		if (this.isMounted) registration.stop = registration.start();
+
+		return () => {
+			if (registration.disposed) return;
+			registration.disposed = true;
+			this.reactiveRegistrations.delete(registration);
+			registration.stop?.();
+			registration.stop = undefined;
 		};
-		this.ownedDisposers.add(wrapped);
-		return wrapped;
+	}
+
+	private startReactiveRegistrations(): void {
+		this.reactiveRegistrations.forEach((registration) => {
+			if (!registration.disposed && !registration.stop) {
+				registration.stop = registration.start();
+			}
+		});
 	}
 
 	reaction<T>(
 		track: () => T,
 		callback: (value: T, previousValue: T) => void
 	): () => void {
-		const unsub = reaction(track, callback);
-		return this.own(unsub);
+		return this.register(() => reaction(track, callback));
 	}
 
 	effect(callback: () => void | (() => void)): () => void {
-		return this.own(effect(callback));
+		return this.register(() => effect(callback));
 	}
 
 	mount(
 		parent: StoreAdministration | null = null,
-		childName?: PropertyKey
+		childName?: PropertyKey,
+		activationQueue?: StoreAdministration[]
 	): void {
 		if (this.disposed) {
 			throw new Error("r-state-tree: cannot mount a disposed store");
@@ -523,19 +544,29 @@ export class StoreAdministration<
 		}
 
 		mountingStack.push(frame);
+		const isOutermostMount = activationQueue === undefined;
+		const registrationsToStart = activationQueue ?? [];
 		try {
 			batch(() => {
 				this.parent = parent || null;
 				this.childStoreDataMap.forEach(({ value }, name) => {
 					const stores = value.get();
 					if (Array.isArray(stores)) {
-						stores?.forEach((s) => getStoreAdm(s)?.mount(this, name));
+						stores?.forEach((s) =>
+							getStoreAdm(s)?.mount(this, name, registrationsToStart)
+						);
 					} else if (stores) {
-						getStoreAdm(stores)?.mount(this, name);
+						getStoreAdm(stores)?.mount(this, name, registrationsToStart);
 					}
 				});
 				this.mountedSignal.set(true);
+				registrationsToStart.push(this);
 			});
+			if (isOutermostMount) {
+				registrationsToStart.forEach((store) =>
+					store.startReactiveRegistrations()
+				);
+			}
 		} catch (error) {
 			if (
 				error instanceof Error &&
@@ -574,10 +605,13 @@ export class StoreAdministration<
 			this.contextCache.clear();
 			this.parent = null;
 		});
-		// Publish the final lifecycle transition only after the tree cleanup above
-		// is complete, while owned subscriptions are still active.
-		this.mountedSignal.set(false);
 		this.disposed = true;
-		Array.from(this.ownedDisposers).forEach((dispose) => dispose());
+		this.reactiveRegistrations.forEach((registration) => {
+			registration.disposed = true;
+			registration.stop?.();
+			registration.stop = undefined;
+		});
+		this.reactiveRegistrations.clear();
+		this.mountedSignal.set(false);
 	}
 }
