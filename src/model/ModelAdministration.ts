@@ -8,7 +8,6 @@ import {
 	createComputed,
 	createAtom,
 	reaction,
-	effect,
 	Signal,
 } from "../observables";
 import type { ComputedNode, AtomNode } from "../observables";
@@ -232,7 +231,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
 	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
-	private ownedDisposers = new Set<() => void>();
 	private disposed = false;
 	parentName: PropertyKey | null = null;
 
@@ -256,30 +254,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		if (this.disposed) {
 			throw new Error("r-state-tree: cannot use a disposed model");
 		}
-	}
-
-	private own(disposer: () => void): () => void {
-		this.assertUsable();
-		let active = true;
-		const wrapped = () => {
-			if (!active) return;
-			active = false;
-			this.ownedDisposers.delete(wrapped);
-			disposer();
-		};
-		this.ownedDisposers.add(wrapped);
-		return wrapped;
-	}
-
-	reaction<T>(
-		track: () => T,
-		callback: (value: T, previousValue: T) => void
-	): () => void {
-		return this.own(reaction(track, callback));
-	}
-
-	effect(callback: () => void | (() => void)): () => void {
-		return this.own(effect(callback));
 	}
 
 	private get configuration(): ModelConfiguration<any> {
@@ -650,7 +624,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		this.modelsTraceUnsub.clear();
 		this.contextCache.forEach((computed) => computed.clear());
 		this.contextCache.clear();
-		Array.from(this.ownedDisposers).forEach((dispose) => dispose());
 	}
 
 	getContextValue<T>(

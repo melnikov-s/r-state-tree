@@ -23,7 +23,7 @@ test("can mount a store", () => {
 	expect(store.props.myProp).toBe(1);
 });
 
-test("mounted state is reactive and owned effects are cleaned up on disposal", () => {
+test("owned effects start on mount and are cleaned up on disposal", () => {
 	let acquired = 0;
 	let cleaned = 0;
 
@@ -39,19 +39,13 @@ test("mounted state is reactive and owned effects are cleaned up on disposal", (
 	}
 
 	const store = mount(createStore(AppStore));
-	const mountedStates: boolean[] = [];
-	const stopWatchingMount = effect(() => mountedStates.push(store.isMounted));
-	expect(store.isMounted).toBe(true);
 	expect(acquired).toBe(1);
 
 	store[Symbol.dispose]();
 	store[Symbol.dispose]();
 
-	expect(store.isMounted).toBe(false);
-	expect(mountedStates).toEqual([true, false]);
 	expect(cleaned).toBe(1);
 	expect(() => mount(store)).toThrow();
-	stopWatchingMount();
 });
 
 test("a disposer can cancel a reactive registration before mount", () => {
@@ -72,37 +66,22 @@ test("a disposer can cancel a reactive registration before mount", () => {
 test("store tree effects activate bottom-up after the whole tree is mounted", () => {
 	type Observation = {
 		store: "grandchild" | "child" | "root";
-		mounted: boolean[];
 	};
 	const observations: Observation[] = [];
-	const mountedTransitions: boolean[][] = [];
-	let stopWatchingMount!: () => void;
 	let rootStore!: RootStore;
 	let childStore!: ChildStore;
 	let grandchildStore!: GrandchildStore;
 
 	const observeMount = (store: Observation["store"]) => {
-		observations.push({
-			store,
-			mounted: [
-				grandchildStore.isMounted,
-				childStore.isMounted,
-				rootStore.isMounted,
-			],
-		});
+		expect(rootStore.child).toBe(childStore);
+		expect(childStore.grandchild).toBe(grandchildStore);
+		observations.push({ store });
 	};
 
 	class GrandchildStore extends Store {
 		constructor(props: any) {
 			super(props);
 			grandchildStore = this;
-			stopWatchingMount = effect(() => {
-				mountedTransitions.push([
-					grandchildStore.isMounted,
-					childStore.isMounted,
-					rootStore.isMounted,
-				]);
-			});
 			this.effect(() => observeMount("grandchild"));
 		}
 	}
@@ -136,15 +115,61 @@ test("store tree effects activate bottom-up after the whole tree is mounted", ()
 	mount(createStore(RootStore));
 
 	expect(observations).toEqual([
-		{ store: "grandchild", mounted: [true, true, true] },
-		{ store: "child", mounted: [true, true, true] },
-		{ store: "root", mounted: [true, true, true] },
+		{ store: "grandchild" },
+		{ store: "child" },
+		{ store: "root" },
 	]);
-	expect(mountedTransitions).toEqual([
-		[false, false, false],
-		[true, true, true],
+});
+
+test("dynamically mounted child registrations do not activate reentrantly", () => {
+	const events: string[] = [];
+
+	class SecondStore extends Store {
+		constructor(props: any) {
+			super(props);
+			this.effect(() => void events.push("second effect"));
+		}
+	}
+
+	class FirstStore extends Store<{ parent: ParentStore }> {
+		constructor(props: FirstStore["props"]) {
+			super(props);
+			this.effect(() => {
+				events.push("first effect start");
+				void this.props.parent.second;
+				events.push("first effect end");
+			});
+		}
+	}
+
+	class ParentStore extends Store {
+		@child get first() {
+			return createStore(FirstStore, { parent: this });
+		}
+
+		@child get second() {
+			return createStore(SecondStore);
+		}
+
+		constructor(props: any) {
+			super(props);
+			this.effect(() => {
+				events.push("parent effect start");
+				void this.first;
+				events.push("parent effect end");
+			});
+		}
+	}
+
+	mount(createStore(ParentStore));
+
+	expect(events).toEqual([
+		"parent effect start",
+		"parent effect end",
+		"first effect start",
+		"first effect end",
+		"second effect",
 	]);
-	stopWatchingMount();
 });
 
 test("can update store props with updateStore", () => {
@@ -1587,7 +1612,7 @@ describe("recursive mount diagnostics", () => {
 		constructor(props: any) {
 			super(props);
 			this.effect(() => {
-				if (this.isMounted) this.loop;
+				this.loop;
 			});
 		}
 

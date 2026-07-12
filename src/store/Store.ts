@@ -98,10 +98,6 @@ export default class Store<
 		return this.props.key;
 	}
 
-	get isMounted(): boolean {
-		return getStoreAdm(this).isMounted;
-	}
-
 	reaction<T>(
 		track: () => T,
 		callback: (value: T, previousValue: T) => void

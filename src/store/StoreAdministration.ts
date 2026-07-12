@@ -152,9 +152,50 @@ type ReactiveRegistration = {
 	disposed: boolean;
 };
 
+type ActivationEntry = {
+	store: StoreAdministration;
+	depth: number;
+};
+
 export class StoreAdministration<
 	StoreType extends Store = Store
 > extends ObjectAdministration<Store> {
+	private static pendingActivations: ActivationEntry[] = [];
+	private static isFlushingActivations = false;
+	private static currentActivationDepth = 0;
+
+	private static flushReactiveRegistrations(
+		stores: StoreAdministration[]
+	): void {
+		const depth = this.isFlushingActivations
+			? this.currentActivationDepth + 1
+			: 0;
+		this.pendingActivations.push(...stores.map((store) => ({ store, depth })));
+
+		if (this.isFlushingActivations) return;
+
+		this.isFlushingActivations = true;
+		try {
+			let entry: ActivationEntry | undefined;
+			while ((entry = this.pendingActivations.shift())) {
+				this.currentActivationDepth = entry.depth;
+				if (entry.depth > MAX_MOUNT_DEPTH) {
+					throw createCircularMountError({
+						storeName:
+							(entry.store.proxy.constructor as { name?: string }).name ||
+							"Store",
+						modelsKeys: Object.keys(entry.store.proxy.props?.models ?? {}),
+					});
+				}
+				entry.store.startReactiveRegistrations();
+			}
+		} finally {
+			this.pendingActivations.length = 0;
+			this.currentActivationDepth = 0;
+			this.isFlushingActivations = false;
+		}
+	}
+
 	static proxyTraps: ProxyHandler<object> = Object.assign(
 		{},
 		ObjectAdministration.proxyTraps,
@@ -203,7 +244,7 @@ export class StoreAdministration<
 	);
 
 	parent: StoreAdministration | null = null;
-	private mountedSignal = createSignal(false);
+	private mounted = false;
 	private disposed = false;
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
@@ -425,7 +466,7 @@ export class StoreAdministration<
 	}
 
 	get isMounted(): boolean {
-		return this.mountedSignal.get();
+		return this.mounted;
 	}
 
 	getContextValue<T>(
@@ -559,13 +600,11 @@ export class StoreAdministration<
 						getStoreAdm(stores)?.mount(this, name, registrationsToStart);
 					}
 				});
-				this.mountedSignal.set(true);
+				this.mounted = true;
 				registrationsToStart.push(this);
 			});
 			if (isOutermostMount) {
-				registrationsToStart.forEach((store) =>
-					store.startReactiveRegistrations()
-				);
+				StoreAdministration.flushReactiveRegistrations(registrationsToStart);
 			}
 		} catch (error) {
 			if (
@@ -612,6 +651,6 @@ export class StoreAdministration<
 			registration.stop = undefined;
 		});
 		this.reactiveRegistrations.clear();
-		this.mountedSignal.set(false);
+		this.mounted = false;
 	}
 }

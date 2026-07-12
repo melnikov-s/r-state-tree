@@ -58,17 +58,6 @@ export default class Model implements Disposable {
 		return getModelAdm(this).parent?.proxy ?? null;
 	}
 
-	reaction<T>(
-		track: () => T,
-		callback: (value: T, previousValue: T) => void
-	): () => void {
-		return getModelAdm(this).reaction(track, callback);
-	}
-
-	effect(callback: () => void | (() => void)): () => void {
-		return getModelAdm(this).effect(callback);
-	}
-
 	[Symbol.dispose](): void {
 		getModelAdm(this).dispose();
 	}

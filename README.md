@@ -205,7 +205,7 @@ class ItemsStore extends Store {
 
 ### Store lifetime and owned effects
 
-Mounted stores expose reactive `isMounted` state and implement `Disposable`:
+Stores implement `Disposable`, and their owned effects run only during the mounted lifetime:
 
 ```ts
 class TodoStore extends Store {
@@ -242,9 +242,9 @@ class TodoStore extends Store {
 }
 ```
 
-`Store.effect()` and `Store.reaction()` register mount-scoped behavior. Mounting first links the complete store tree and marks it mounted bottom-up in one transaction. Registrations then activate bottom-up, so even a grandchild's initial effect observes every ancestor and descendant as mounted. A reaction establishes its initial value at activation and still skips its initial callback. Calling the disposer returned during construction cancels the pending registration; after mount, it disposes the live subscription. All registrations are disposed automatically with the store.
+`Store.effect()` and `Store.reaction()` register mount-scoped behavior. Mounting first links the complete store tree and commits its private mounted state bottom-up in one transaction. Registrations then activate bottom-up, so even a grandchild's initial effect sees a complete tree. A reaction establishes its initial value at activation and still skips its initial callback. Calling the disposer returned during construction cancels the pending registration; after mount, it disposes the live subscription. All registrations are disposed automatically with the store.
 
-Use the exported standalone `effect()` or `reaction()` when observing a store from outside its owned lifetime—for example, to observe the public reactive `isMounted` transition to `false`.
+Registration activation is non-reentrant. If an active effect or reaction lazily materializes another child store, the new child's registrations are queued until the current callback and child getter stack have returned. This prevents initialization behavior from running inside the getter that created the store.
 
 ### Context
 
@@ -878,23 +878,19 @@ This keeps snapshot hydration predictable: `create(snapshot)` and `applySnapshot
 
 ### Model attachment and disposal
 
-The public `parent` relationship is reactive. Register a model-owned reaction in the constructor to observe attachment and detachment:
+Models are inert state trees: creating or attaching one does not start reactions or effects. The public `parent` relationship remains reactive, so an external owner may observe it explicitly when needed:
 
 ```ts
-class TodoModel extends Model {
-	@child tags: TagModel[] = [];
-
-	constructor() {
-		super();
-		this.reaction(() => this.parent, (parent, previousParent) => {
-			if (previousParent) console.log("detached", previousParent);
-			if (parent) console.log("attached", parent);
-		});
+const stop = reaction(
+	() => todo.parent,
+	(parent, previousParent) => {
+		if (previousParent) console.log("detached", previousParent);
+		if (parent) console.log("attached", parent);
 	}
-}
+);
 ```
 
-Detachment is reversible; model-owned effects survive reattachment. `model[Symbol.dispose]()` is terminal and recursively disposes owned child models, but never model refs.
+The external caller owns `stop`. Detachment is reversible. `model[Symbol.dispose]()` is terminal and recursively disposes owned child models, but never model refs.
 
 ### Model configuration
 
@@ -1207,15 +1203,9 @@ class ListModel extends Model {
 }
 ```
 
-Lifecycle registration:
+Store lifecycle registration:
 
 ```ts
-class M extends Model {
-	constructor() {
-		super();
-		this.reaction(() => this.parent, (parent, previousParent) => {});
-	}
-}
 class S extends Store {
 	constructor(props) {
 		super(props);
@@ -1284,7 +1274,7 @@ When child stores are created during mount with `models` that point back into th
 - Decorators (Stores): `@child`, `@model`
 - Core: `createStore`, `mount`, `Symbol.dispose`, `updateStore`
 - Snapshots: `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
-- Lifecycle: reactive `Store.isMounted`, reactive `Model.parent`, and owned `reaction`/`effect`
+- Lifecycle: Store-owned `reaction`/`effect`, reactive `Model.parent`, and `Symbol.dispose`
 - Best practices: domain in Models; delegate from Stores; stable keys for `@child`; return cleanup from store effects; don’t shadow `props`.
 
 ## Testing

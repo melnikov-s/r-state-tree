@@ -26,21 +26,17 @@ test("can create a model", () => {
 test("parent reactions observe detach and reattach transitions", () => {
 	const transitions: Array<[Model | null, Model | null]> = [];
 
-	class Item extends Model {
-		constructor() {
-			super();
-			this.reaction(
-				() => this.parent,
-				(next, previous) => transitions.push([next, previous])
-			);
-		}
-	}
+	class Item extends Model {}
 
 	class Parent extends Model {
 		@child item: Item | null = null;
 	}
 
 	const item = Item.create();
+	const stop = reaction(
+		() => item.parent,
+		(next, previous) => transitions.push([next, previous])
+	);
 	const first = Parent.create();
 	const second = Parent.create();
 	first.item = item;
@@ -57,6 +53,7 @@ test("parent reactions observe detach and reattach transitions", () => {
 	expect(() => {
 		first.item = item;
 	}).toThrow(/disposed model/);
+	stop();
 });
 
 test("named factories can prepare input before creating a model", () => {
@@ -400,17 +397,7 @@ describe("model attachment", () => {
 	});
 
 	test("parent reactions observe children attached after creation", () => {
-		let count = 0;
-
-		class CM extends Model {
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent) => parent && count++
-				);
-			}
-		}
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cm!: CM;
@@ -421,23 +408,19 @@ describe("model attachment", () => {
 		}
 
 		const m = M.create();
-		expect(count).toBe(0);
-		m.setCM();
-		expect(count).toBe(1);
+		const observedModel = CM.create();
+		const parents: Array<Model | null> = [];
+		const stop = reaction(
+			() => observedModel.parent,
+			(parent) => parents.push(parent)
+		);
+		m.cm = observedModel;
+		expect(parents).toEqual([m]);
+		stop();
 	});
 
 	test("parent reactions observe children added to a list", () => {
-		let count = 0;
-
-		class CM extends Model {
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent) => parent && count++
-				);
-			}
-		}
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cms: CM[] = [];
@@ -448,69 +431,38 @@ describe("model attachment", () => {
 		}
 
 		const m = M.create();
-		expect(count).toBe(0);
 		m.addCM();
-		expect(count).toBe(1);
 		m.addCM();
-		expect(count).toBe(2);
+		expect(m.cms).toHaveLength(2);
+		m.cms.forEach((child) => expect(child.parent).toBe(m));
 	});
 
 	test("parent reactions observe an initialized child", () => {
-		let attachCount = 0;
-
-		class CM extends Model {
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent) => parent && attachCount++
-				);
-			}
-		}
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cm: CM = CM.create();
 		}
 
 		const m = M.create();
-		expect(attachCount).toBe(1);
 		expect(m.cm).toBeInstanceOf(CM);
+		expect(m.cm.parent).toBe(m);
 	});
 
 	test("parent reactions observe initialized child arrays", () => {
-		let attachCount = 0;
-
-		class CM extends Model {
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent) => parent && attachCount++
-				);
-			}
-		}
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cms: CM[] = [CM.create(), CM.create()];
 		}
 
 		const m = M.create();
-		expect(attachCount).toBe(2);
 		expect(m.cms.length).toBe(2);
+		m.cms.forEach((child) => expect(child.parent).toBe(m));
 	});
 
 	test("parent reactions observe child detachment", () => {
-		let count = 0;
-
-		class CM extends Model {
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent, previousParent) => !parent && previousParent && count++
-				);
-			}
-		}
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cm: CM | null = CM.create();
@@ -521,23 +473,13 @@ describe("model attachment", () => {
 		}
 
 		const m = M.create();
-		expect(count).toBe(0);
+		const observedModel = m.cm!;
 		m.clearCM();
-		expect(count).toBe(1);
+		expect(observedModel.parent).toBe(null);
 	});
 
 	test("parent reactions observe children removed from a list", () => {
-		let count = 0;
-
-		class CM extends Model {
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent, previousParent) => !parent && previousParent && count++
-				);
-			}
-		}
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cms: CM[] = [CM.create(), CM.create()];
@@ -548,25 +490,14 @@ describe("model attachment", () => {
 		}
 
 		const m = M.create();
-		expect(count).toBe(0);
+		const children = [...m.cms];
 		m.popCM();
-		expect(count).toBe(1);
 		m.popCM();
-		expect(count).toBe(2);
+		children.forEach((child) => expect(child.parent).toBe(null));
 	});
 
-	test("will not trigger lifecycle methods when re-ordering", () => {
-		let count = 0;
-
-		class CM extends Model {
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					() => count++
-				);
-			}
-		}
+	test("re-ordering preserves attachment", () => {
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cms: CM[] = [CM.create(), CM.create()];
@@ -577,22 +508,14 @@ describe("model attachment", () => {
 		}
 
 		const m = M.create();
-		expect(count).toBe(2);
+		const children = [...m.cms];
 		m.reverse();
-		expect(count).toBe(2);
+		expect(m.cms).toEqual(children.reverse());
+		m.cms.forEach((child) => expect(child.parent).toBe(m));
 	});
 
-	test("attachment reaction mutations are batched", () => {
-		class CM extends Model {
-			@state count = 0;
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent) => parent && this.count++
-				);
-			}
-		}
+	test("external reactions observe attachment", () => {
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cm!: CM;
@@ -602,21 +525,19 @@ describe("model attachment", () => {
 		}
 
 		const m = M.create();
-		m.setCM();
-		expect(m.cm.count).toBe(1);
+		const observedModel = CM.create();
+		const parents: Array<Model | null> = [];
+		const stop = reaction(
+			() => observedModel.parent,
+			(parent) => parents.push(parent)
+		);
+		m.cm = observedModel;
+		expect(parents).toEqual([m]);
+		stop();
 	});
 
-	test("detachment reaction mutations are batched", () => {
-		class CM extends Model {
-			@state count = 0;
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent, previousParent) => !parent && previousParent && this.count++
-				);
-			}
-		}
+	test("external reactions receive the previous parent on detachment", () => {
+		class CM extends Model {}
 
 		class M extends Model {
 			@child cm: CM | null = CM.create();
@@ -628,28 +549,21 @@ describe("model attachment", () => {
 		}
 
 		const m = M.create();
-		expect(m.cm!.count).toBe(0);
+		const observedModel = m.cm!;
+		const transitions: Array<[Model | null, Model | null]> = [];
+		const stop = reaction(
+			() => observedModel.parent,
+			(parent, previousParent) => transitions.push([parent, previousParent])
+		);
 		m.clearCM();
-		expect(m._temp.count).toBe(1);
+		expect(transitions).toEqual([[null, m]]);
+		stop();
 	});
 });
 
 test("can re-attach an detached model", () => {
-	let detachCount = 0;
-	let attachCount = 0;
-
 	class CM extends Model {
 		state = 0;
-		constructor() {
-			super();
-			this.reaction(
-				() => this.parent,
-				(parent, previousParent) => {
-					if (previousParent) detachCount++;
-					if (parent) attachCount++;
-				}
-			);
-		}
 		incState() {
 			this.state++;
 		}
@@ -676,19 +590,24 @@ test("can re-attach an detached model", () => {
 
 	const m = M.create();
 	m.setCM();
+	const observedModel = m.cm!;
+	const transitions: Array<[Model | null, Model | null]> = [];
+	const stop = reaction(
+		() => observedModel.parent,
+		(parent, previousParent) => transitions.push([parent, previousParent])
+	);
 	m.cm!.incState();
 	expect(m.cm!.computed).toBe(2);
-	expect(attachCount).toBe(1);
-	expect(detachCount).toBe(0);
 	m.clearCM();
-	expect(attachCount).toBe(1);
-	expect(detachCount).toBe(1);
 	m.setCM();
-	expect(attachCount).toBe(2);
-	expect(detachCount).toBe(1);
+	expect(transitions).toEqual([
+		[null, m],
+		[m, null],
+	]);
 	expect(m.cm!.computed).toBe(2);
 	m.cm!.incState();
 	expect(m.cm!.computed).toBe(4);
+	stop();
 });
 
 test("can have a child model", () => {
@@ -887,16 +806,7 @@ test("can get the parent of a model", () => {
 });
 
 test("children models can be set with Object.defineProperty", () => {
-	let childAttachedCount = 0;
-	class MC extends Model {
-		constructor() {
-			super();
-			this.reaction(
-				() => this.parent,
-				(parent) => parent && childAttachedCount++
-			);
-		}
-	}
+	class MC extends Model {}
 
 	class M extends Model {
 		@child mcs!: any;
@@ -918,30 +828,16 @@ test("children models can be set with Object.defineProperty", () => {
 
 	const m = M.create();
 	m.addChild();
-	expect(childAttachedCount).toBe(1);
+	expect(m.mcs[0].parent).toBe(m);
 	m.addChild();
-	expect(childAttachedCount).toBe(2);
+	expect(m.mcs[1].parent).toBe(m);
 });
 
 describe("runtime type switching", () => {
 	describe("child property switching", () => {
 		test("can switch from single child to array of children", () => {
-			let attachCount = 0;
-			let detachCount = 0;
-
 			class MC extends Model {
 				@state value = 0;
-
-				constructor() {
-					super();
-					this.reaction(
-						() => this.parent,
-						(parent, previousParent) => {
-							if (previousParent) detachCount++;
-							if (parent) attachCount++;
-						}
-					);
-				}
 			}
 
 			class M extends Model {
@@ -960,10 +856,10 @@ describe("runtime type switching", () => {
 
 			// Start with single
 			m.setSingle();
+			const oldItem = m.items as MC;
 			expect(Array.isArray(m.items)).toBe(false);
 			expect((m.items as MC).value).toBe(1);
-			expect(attachCount).toBe(1);
-			expect(detachCount).toBe(0);
+			expect(oldItem.parent).toBe(m);
 
 			// Switch to array
 			m.setArray();
@@ -971,27 +867,13 @@ describe("runtime type switching", () => {
 			expect((m.items as MC[]).length).toBe(2);
 			expect((m.items as MC[])[0].value).toBe(2);
 			expect((m.items as MC[])[1].value).toBe(3);
-			expect(attachCount).toBe(3); // 1 from single + 2 from array
-			expect(detachCount).toBe(1); // single was detached
+			expect(oldItem.parent).toBe(null);
+			(m.items as MC[]).forEach((item) => expect(item.parent).toBe(m));
 		});
 
 		test("can switch from array of children to single child", () => {
-			let attachCount = 0;
-			let detachCount = 0;
-
 			class MC extends Model {
 				@state value = 0;
-
-				constructor() {
-					super();
-					this.reaction(
-						() => this.parent,
-						(parent, previousParent) => {
-							if (previousParent) detachCount++;
-							if (parent) attachCount++;
-						}
-					);
-				}
 			}
 
 			class M extends Model {
@@ -1010,17 +892,17 @@ describe("runtime type switching", () => {
 
 			// Start with array
 			m.setArray();
+			const oldItems = [...(m.items as MC[])];
 			expect(Array.isArray(m.items)).toBe(true);
 			expect((m.items as MC[]).length).toBe(2);
-			expect(attachCount).toBe(2);
-			expect(detachCount).toBe(0);
+			oldItems.forEach((item) => expect(item.parent).toBe(m));
 
 			// Switch to single
 			m.setSingle();
 			expect(Array.isArray(m.items)).toBe(false);
 			expect((m.items as MC).value).toBe(1);
-			expect(attachCount).toBe(3); // 2 from array + 1 from single
-			expect(detachCount).toBe(2); // both array items detached
+			expect((m.items as MC).parent).toBe(m);
+			oldItems.forEach((item) => expect(item.parent).toBe(null));
 		});
 
 		test("switching child types is reactive", () => {
@@ -1764,16 +1646,6 @@ describe("model references", () => {
 			@child mc: MC = MC.create();
 			@modelRef(MC) mr!: MC | null;
 			@state setRef: boolean = false;
-
-			constructor() {
-				super();
-				this.reaction(
-					() => this.parent,
-					(parent) => {
-						if (parent && this.setRef) this.mr = this.mc;
-					}
-				);
-			}
 
 			clearModel() {
 				temp = this.mc;
