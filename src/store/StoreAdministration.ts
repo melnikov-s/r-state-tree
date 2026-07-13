@@ -8,15 +8,12 @@ import {
 	batch,
 	untracked,
 	createComputed,
-	getObservable,
-	isObservable,
 } from "../observables";
 import type { ListenerNode, SignalNode, ComputedNode } from "../observables";
 import { allowNewStore } from "./Store";
 import type Store from "./Store";
-import type Model from "../model/Model";
 import type { StoreConfiguration, StoreElement, Props } from "../types";
-import { CommonCfgTypes, StoreCfgTypes } from "../types";
+import { CommonCfgTypes } from "../types";
 import { getConfigType } from "../configuration";
 import { getPropertyDescriptor } from "../utils";
 
@@ -25,7 +22,6 @@ const MAX_MOUNT_DEPTH = 100;
 type MountFrame = {
 	storeName: string;
 	childName?: PropertyKey;
-	modelsKeys: string[];
 };
 
 const mountingStack: MountFrame[] = [];
@@ -45,7 +41,7 @@ function formatMountChain(frame: MountFrame): string {
 		const end = chain.slice(-2);
 		return [
 			...start,
-			{ storeName: "...", modelsKeys: [], childName: undefined },
+			{ storeName: "...", childName: undefined },
 			...end,
 		]
 			.map(formatMountFrame)
@@ -57,31 +53,17 @@ function formatMountChain(frame: MountFrame): string {
 
 function createCircularMountError(frame: MountFrame): Error {
 	const chain = formatMountChain(frame);
-	const models =
-		frame.modelsKeys.length === 0
-			? "no models provided"
-			: `models: ${frame.modelsKeys.join(", ")}`;
 	return new Error(
-		`r-state-tree: detected circular store/model creation while mounting ${chain} (using ${models}). Passing models into child stores during mount can create recursive wiring. Break the ownership cycle.`
+		`r-state-tree: detected circular store creation while mounting ${chain}. Break the ownership cycle.`
 	);
 }
 
 export function updateProps(props: Props, newProps: Props): void {
 	untracked(() => {
 		batch(() => {
-			const propKeys = Object.keys(newProps);
-			propKeys.forEach((k) => {
-				if (k !== "models") {
-					props[k] = newProps[k];
-				}
+			Object.keys(newProps).forEach((key) => {
+				props[key] = newProps[key];
 			});
-
-			if (newProps.models) {
-				if (!props.models || !isObservable(props.models)) {
-					props.models = getObservable(props.models || {});
-				}
-				Object.assign(props.models, newProps.models);
-			}
 		});
 	});
 }
@@ -184,7 +166,6 @@ export class StoreAdministration<
 						storeName:
 							(entry.store.proxy.constructor as { name?: string }).name ||
 							"Store",
-						modelsKeys: Object.keys(entry.store.proxy.props?.models ?? {}),
 					});
 				}
 				entry.store.startReactiveRegistrations();
@@ -209,8 +190,6 @@ export class StoreAdministration<
 				switch (getConfigType(adm.configuration[name as string])) {
 					case CommonCfgTypes.child:
 						return adm.getStore(name);
-					case StoreCfgTypes.model:
-						return adm.getModelRef(name);
 					default:
 						return ObjectAdministration.proxyTraps.get?.apply(
 							null,
@@ -220,19 +199,8 @@ export class StoreAdministration<
 			},
 
 			set(target, name, value) {
-				const adm = getAdministration(target) as StoreAdministration;
-
 				if (name === "props") {
 					throw new Error(`r-state-tree: ${name} is read-only`);
-				}
-
-				if (
-					getConfigType(adm.configuration[name as string]) ===
-					StoreCfgTypes.model
-				) {
-					if (value !== undefined) {
-						throw new Error(`r-state-tree: model ${String(name)} is read-only`);
-					}
 				}
 
 				return ObjectAdministration.proxyTraps.set?.apply(
@@ -455,12 +423,6 @@ export class StoreAdministration<
 		}
 	}
 
-	private getModelRef(name: PropertyKey): Model | Model[] | null {
-		const models = this.proxy.props.models;
-		const ref = models?.[name as string] ?? null;
-		return ref;
-	}
-
 	isRoot(): boolean {
 		return !this.parent;
 	}
@@ -577,7 +539,6 @@ export class StoreAdministration<
 		const frame: MountFrame = {
 			storeName: (this.proxy.constructor as { name?: string }).name || "Store",
 			childName,
-			modelsKeys: Object.keys(this.proxy.props?.models ?? {}),
 		};
 
 		if (mountingStack.length + 1 > MAX_MOUNT_DEPTH) {

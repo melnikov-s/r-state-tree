@@ -13,15 +13,11 @@ export type Context = { [key: string]: unknown };
 export type Props = {
 	[key: string]: unknown;
 	key?: Key;
-	models?: { [key: string]: Model | Model[] | null };
 };
 export type StoreProps<T extends Record<string, any> = Record<string, any>> =
 	T & {
 		[key: string]: unknown;
 		key?: Key;
-		models?: {
-			[key: string]: Model | Model[] | null;
-		};
 	};
 export type StoreCtor<S extends Store = Store> = (new (
 	...args: ConstructorParameters<typeof Store>
@@ -40,10 +36,6 @@ export enum ModelCfgTypes {
 	modelRef = "modelRef",
 }
 
-export enum StoreCfgTypes {
-	model = "model",
-}
-
 export enum ObservableCfgTypes {
 	computed = "computed",
 }
@@ -51,7 +43,6 @@ export enum ObservableCfgTypes {
 export type ConfigurationTypes =
 	| CommonCfgTypes
 	| ModelCfgTypes
-	| StoreCfgTypes
 	| ObservableCfgTypes;
 
 export type ConfigurationValue = {
@@ -155,10 +146,6 @@ export const modelRefType = Object.assign(
 );
 
 export const idType: ConfigurationValue = { type: ModelCfgTypes.id };
-export const modelType: ConfigurationValue = {
-	type: StoreCfgTypes.model,
-};
-
 export const computedType: ConfigurationValue = {
 	type: ObservableCfgTypes.computed,
 };

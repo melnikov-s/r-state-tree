@@ -8,7 +8,6 @@ import {
 	child,
 	id,
 	mount,
-	model,
 	state,
 	toSnapshot,
 } from "../src/index";
@@ -73,22 +72,17 @@ test("configuration merges across inheritance (base decorators + derived static 
 	expect(d.child.name).toBe("y");
 });
 
-test("static types works for store model injection", () => {
+test("models can be passed as ordinary typed props", () => {
 	class User extends Model {
 		@id id = 0;
 		@state name = "";
 	}
 
-	class Profile extends Store {
-		user!: User;
-		static types: any = {
-			user: model,
-		};
-	}
+	class Profile extends Store<{ user: User }> {}
 
 	const user = User.create({ id: 1, name: "Ada" });
-	const store = mount(createStore(Profile, { models: { user } }));
-	expect(store.user.name).toBe("Ada");
+	const store = mount(createStore(Profile, { user }));
+	expect(store.props.user.name).toBe("Ada");
 });
 
 test("static types works for store child getters", () => {

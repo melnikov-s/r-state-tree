@@ -3,8 +3,8 @@ import type {
 	ConfigurationTypes,
 	ConfigurationValue,
 } from "./types";
-import { childType, idType, modelType, stateType } from "./types";
-import { child, id, model, modelRef, state } from "./decorators";
+import { childType, idType, stateType } from "./types";
+import { child, id, modelRef, state } from "./decorators";
 
 type Ctor = Function;
 type Config = Record<PropertyKey, ConfigurationType>;
@@ -29,7 +29,6 @@ function normalizeEntry(entry: unknown): ConfigurationType | undefined {
 		// These are plain functions without a `type` property.
 		if (entry === id) return idType;
 		if (entry === state) return stateType;
-		if (entry === model) return modelType;
 		if (entry === child) return childType;
 		if (entry === modelRef) {
 			throw new Error(

@@ -35,7 +35,7 @@ type CreateStoreProps<T extends Record<string, any>> = {
 		: never;
 } & {
 	[K in keyof T as undefined extends T[K] ? never : K]?: T[K];
-} & Pick<Props, "key" | "models"> &
+} & Pick<Props, "key"> &
 	Partial<Record<string, unknown>>;
 
 export function createStore<

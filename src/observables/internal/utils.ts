@@ -1,10 +1,5 @@
 import type { AtomNode, ComputedNode, SignalNode } from "../preact";
-import {
-	ObservableCfgTypes,
-	ModelCfgTypes,
-	CommonCfgTypes,
-	StoreCfgTypes,
-} from "../../types";
+import { ObservableCfgTypes, ModelCfgTypes, CommonCfgTypes } from "../../types";
 import { getConfigurationValue } from "../../configuration";
 import { getConfigType } from "../../configuration";
 
@@ -66,13 +61,12 @@ export function getPropertyType(
 			case ModelCfgTypes.id:
 			case ModelCfgTypes.modelRef:
 			case CommonCfgTypes.child:
-			case StoreCfgTypes.model:
 				return "observable";
 		}
 	}
 
 	// For accessors on classes, we return null if they are NOT decorated.
-	// This allows @model and @child routing to work, and keeps regular getters non-reactive.
+	// This allows @child routing to work and keeps regular getters non-reactive.
 	if (isAccessor) {
 		return null;
 	}

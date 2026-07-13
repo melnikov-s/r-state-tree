@@ -16,7 +16,7 @@ pnpm add r-state-tree
 
 This library strongly recommends using decorators.
 
-- Recommended: decorators (`@child`, `@model`, `@state`, `@id`, `@modelRef`, `@computed`). Requires TypeScript 5.0+ with `target: "es2022"` or higher.
+- Recommended: decorators (`@child`, `@state`, `@id`, `@modelRef`, `@computed`). Requires TypeScript 5.0+ with `target: "es2022"` or higher.
 - Fallback: `static types` configuration (no decorators) if you can't or don't want to enable decorators in your toolchain.
 
 The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
@@ -291,25 +291,27 @@ batch(() => {
 });
 ```
 
-### Models injection (@model)
+### Passing models to stores
 
-Inject domain models into stores via the `models` creation prop and consume them with `@model` on the store. `@model` fields are read-only references.
+Pass domain models to stores as ordinary typed props.
 
 ```ts
-import { Model, Store, model, createStore, mount } from "r-state-tree";
+import { Model, Store, createStore, mount } from "r-state-tree";
 
 class User extends Model {
 	@id id = 0;
 	@state name = "";
 }
 
-class ProfileStore extends Store {
-	@model user!: User;
+class ProfileStore extends Store<{ user: User }> {
+	get name() {
+		return this.props.user.name;
+	}
 }
 
 const user = User.create({ id: 1, name: "Ada" });
-const profile = mount(createStore(ProfileStore, { models: { user } }));
-profile.user.name; // "Ada"
+const profile = mount(createStore(ProfileStore, { user }));
+profile.name; // "Ada"
 ```
 
 Fallback (no decorators) using `static types`:
@@ -320,7 +322,6 @@ import {
 	Store,
 	createStore,
 	mount,
-	model,
 	id,
 	state,
 } from "r-state-tree";
@@ -331,17 +332,14 @@ class User extends Model {
 	static types = { id, name: state };
 }
 
-class ProfileStore extends Store {
-	user!: User;
-	static types = { user: model };
-}
+class ProfileStore extends Store<{ user: User }> {}
 
 const user = User.create({ id: 1, name: "Ada" });
-const profile = mount(createStore(ProfileStore, { models: { user } }));
-profile.user.name;
+const profile = mount(createStore(ProfileStore, { user }));
+profile.props.user.name;
 ```
 
-Type stores as `Store<Props>` and explicitly type `@model` fields for clarity. The `models` prop may also provide arrays of models.
+Type stores as `Store<Props>`; model values and model arrays use the same prop mechanism as every other dependency.
 
 ## Modeling guide
 
@@ -356,7 +354,7 @@ Type stores as `Store<Props>` and explicitly type `@model` fields for clarity. T
 - Root store: mount a single root Store that composes the application via `@child` properties.
 - View stores: create one Store per view/route/tab. Views render from stores; stores drive view transitions.
 - Keyed children: pass `{ key }` when creating child stores to preserve identity across reorders.
-- Models in stores: pass domain Models via `{ models }` and consume with `@model` on the Store.
+- Models in stores: pass domain Models as typed store props and read them through `this.props`.
 
 ```ts
 import { Store, Model, child, createStore, mount } from "r-state-tree";
@@ -399,24 +397,22 @@ class ListModel extends Model {
 	}
 }
 
-class ItemStore extends Store {
-	@model item!: ItemModel;
+class ItemStore extends Store<{ item: ItemModel }> {
 	get title() {
-		return this.item.title;
+		return this.props.item.title;
 	}
 }
 
-class ListStore extends Store {
-	@model list!: ListModel;
+class ListStore extends Store<{ list: ListModel }> {
 
 	@child get items() {
-		return this.list.items.map((item) =>
-			createStore(ItemStore, { key: item.id, models: { item } })
+		return this.props.list.items.map((item) =>
+			createStore(ItemStore, { key: item.id, item })
 		);
 	}
 
 	addItem(id: number, title: string) {
-		this.list.add(id, title); // delegate to domain
+		this.props.list.add(id, title); // delegate to domain
 	}
 }
 ```
@@ -1014,7 +1010,7 @@ class ContainerModel extends Model {
 	- `Model`, `Model.create()`
   - configuration: decorators (`@state`, `@id`, `@child`, `@modelRef`) or `static types` with `state`, `id`, `child`, `modelRef`
 - Store configuration
-  - decorators (`@child`, `@model`) or `static types` with `child`, `model`
+	- decorator `@child` or `static types` with `child`
 - Snapshots
   - `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
   - Types: `Snapshot`, `SnapshotDiff`, `IdType`, `Configuration`
@@ -1166,24 +1162,21 @@ class ViewStore extends Store<{ q?: string }> {
 }
 ```
 
-Store with an injected `@model`:
+Store with a model prop:
 
 ```ts
-class ItemStore extends Store {
-	@model item!: ItemModel;
-}
+class ItemStore extends Store<{ item: ItemModel }> {}
 const item = ItemModel.create({ id: 1, title: "X" });
-const s = mount(createStore(ItemStore, { models: { item } }));
+const s = mount(createStore(ItemStore, { item }));
 ```
 
 `@child` mapping from a model array (stable keys):
 
 ```ts
-class ListStore extends Store {
-	@model list!: ListModel;
+class ListStore extends Store<{ list: ListModel }> {
 	@child get items() {
-		return this.list.items.map((item) =>
-			createStore(ItemStore, { key: item.id, models: { item } })
+		return this.props.list.items.map((item) =>
+			createStore(ItemStore, { key: item.id, item })
 		);
 	}
 }
@@ -1235,11 +1228,11 @@ const off = onSnapshot(m, (snap) =>
 - Mutating raw `@state` arrays/objects in place (`push`, `obj.x = 1`) and expecting snapshots to update. Snapshots are memoized; use reassignment or store `observable()` containers / `signal()` values in `@state`.
 - Passing observables to third‑party APIs that expect cloneable/serializable values (e.g. `structuredClone`). Use `source(value)` to get the backing value. It will be observable-free for values written via r-state-tree’s observable APIs (unwrap-on-write), but `source(...)` is **not** guaranteed observable-free if you manually seed observables into backing sources.
 - Creating child stores in constructors: `@child` must be on getters so identity and lifecycle can be managed by the framework.
-- Passing `models` into child stores during mount can create a recursive mount loop. Break the ownership cycle rather than wiring models back through a child during mount.
+- Passing props back into child stores during mount can create a recursive mount loop. Break the ownership cycle rather than wiring parent dependencies back through a child during mount.
 
-### Circular store/model creation
+### Circular store creation
 
-When child stores are created during mount with `models` that point back into the parent, it is easy to trigger an endless mount loop. The runtime guards this with a descriptive circular-creation error. Break the cycle so models are produced independently of the child mount.
+When child stores are created during mount with props that point back into the parent, it is easy to trigger an endless mount loop. The runtime guards this with a descriptive circular-creation error. Break the cycle so dependencies are produced independently of the child mount.
 
 ## LLM implementation checklist
 
@@ -1259,19 +1252,19 @@ When child stores are created during mount with `models` that point back into th
 - Avoid barrel files if they cause import confusion; prefer direct imports.
 - Keep file boundaries clean: one model per file; avoid piling multiple models together.
 - Do not shadow `props`; constructors are the registration phase for owned reactions and effects.
-- Use `@model`/`model` for injected models; `@child`/`child` for child stores; stable keys for arrays.
+- Pass models as typed props; use `@child`/`child` for child stores and stable keys for arrays.
 
 ## Typing recipes
 
 - Type stores as `Store<Props>`; read `this.props` inside methods/getters.
-- Explicitly type `@model` fields on stores, and pass matching values via the `models` creation prop.
+- Include model dependencies in the store's prop type and read them through `this.props`.
 - When a store has no props, use `class X extends Store {}`.
 
 ## Cheat sheet
 
-- Configuration (no decorators): `static types = { ... }` with `state`, `id`, `child`, `modelRef`, `model`, `computed`
+- Configuration (no decorators): `static types = { ... }` with `state`, `id`, `child`, `modelRef`, `computed`
 - Decorators (Models): `@state`, `@id`, `@child`, `@modelRef`
-- Decorators (Stores): `@child`, `@model`
+- Decorators (Stores): `@child`
 - Core: `createStore`, `mount`, `Symbol.dispose`, `updateStore`
 - Snapshots: `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
 - Lifecycle: Store-owned `reaction`/`effect`, reactive `Model.parent`, and `Symbol.dispose`

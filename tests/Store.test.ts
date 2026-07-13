@@ -5,7 +5,6 @@ import {
 	createStore,
 	mount,
 	Model,
-	model,
 	updateStore,
 	reaction,
 	effect,
@@ -210,7 +209,6 @@ test("can use interface as props without index signature", () => {
 		createStore(TTSStore, {
 			voice: "nova",
 			pageStore,
-			models: { someModel: null },
 			key: "tts-1",
 		})
 	);
@@ -283,15 +281,14 @@ test("can access models from props in constructor", () => {
 	class S extends Store<any> {
 		model = M.create();
 		@child get child() {
-			return createStore(C, { models: { model: this.model } });
+			return createStore(C, { model: this.model });
 		}
 	}
 	class C extends Store<any> {
-		@model model!: M;
 		prop: any;
 		constructor(propsValue: any) {
 			super(propsValue);
-			this.prop = this.model;
+			this.prop = this.props.model;
 		}
 	}
 
@@ -712,55 +709,22 @@ test("when props change only those computed methods that are directly affected a
 	expect(count).toBe(1);
 });
 
-test("models on the store can be accessed", () => {
+test("models can be passed as regular store props", () => {
 	class M extends Model {}
-	class S extends Store<any> {
-		@model m!: M;
-	}
+	class S extends Store<{ m: M }> {}
 
 	const m = M.create();
-	const s = mount(createStore(S, { models: { m } }));
-	expect(s.m).toBe(m);
+	const s = mount(createStore(S, { m }));
+	expect(s.props.m).toBe(m);
 });
 
-test("models on the store default to null", () => {
+test("model arrays can be passed as regular store props", () => {
 	class M extends Model {}
-	class S extends Store<any> {
-		@model m!: M;
-	}
+	class S extends Store<{ ms: M[] }> {}
 
-	const s = mount(createStore(S));
-	expect(s.m).toBe(null);
-});
-
-test("models on the store are read only", () => {
-	class M extends Model {}
-	class S extends Store<any> {
-		@model m!: M;
-	}
-
-	const s = mount(createStore(S));
-	expect(() => (s.m = M.create())).toThrow();
-});
-
-test("models on the store can't have an initializer", () => {
-	class M extends Model {}
-	class S extends Store<any> {
-		@model m: M = M.create();
-	}
-
-	expect(() => mount(createStore(S))).toThrow();
-});
-
-test("models on the store can be an array", () => {
-	class M extends Model {}
-	class S extends Store<any> {
-		@model ms!: M[];
-	}
-
-	const models = [M.create(), M.create()];
-	const s = mount(createStore(S, { models: { ms: models } }));
-	expect(s.ms).toEqual(models);
+	const ms = [M.create(), M.create()];
+	const s = mount(createStore(S, { ms }));
+	expect(s.props.ms).toEqual(ms);
 });
 
 test("models on the store can be updated", () => {
@@ -771,9 +735,7 @@ test("models on the store can be updated", () => {
 		state = 0;
 	}
 
-	class CS extends Store<any> {
-		@model m!: M1 | M2;
-	}
+	class CS extends Store<{ m: M1 | M2 }> {}
 
 	class S extends Store<any> {
 		_state = observable({ active: false });
@@ -784,26 +746,23 @@ test("models on the store can be updated", () => {
 			this._state.active = v;
 		}
 
-		@model m1!: M1;
-		@model m2!: M2;
-
 		switchModel() {
 			this.state = !this.state;
 		}
 
 		@child get cs() {
 			return createStore(CS, {
-				models: { m: this.state ? this.m2 : this.m1 },
+				m: this.state ? this.props.m2 : this.props.m1,
 			});
 		}
 	}
 
 	const m1 = M1.create();
 	const m2 = M2.create();
-	const s = mount(createStore(S, { models: { m1, m2 } }));
-	expect(s.cs.m).toBe(m1);
+	const s = mount(createStore(S, { m1, m2 }));
+	expect(s.cs.props.m).toBe(m1);
 	s.switchModel();
-	expect(s.cs.m).toBe(m2);
+	expect(s.cs.props.m).toBe(m2);
 });
 test("models on the store are reactive", () => {
 	let count = 0;
@@ -815,19 +774,13 @@ test("models on the store are reactive", () => {
 		state = 0;
 	}
 
-	class CS extends Store<any> {
-		@model m!: M1 | M2;
-		@model m1!: M1;
-
+	class CS extends Store<{ m: M1 | M2; m1: M1 }> {
 		@computed get models() {
-			return [this.m1];
+			return [this.props.m1];
 		}
 	}
 
 	class S extends Store<any> {
-		@model m1!: M1;
-		@model m2!: M2;
-
 		_state = observable({ active: false });
 		get state() {
 			return this._state.active;
@@ -842,17 +795,18 @@ test("models on the store are reactive", () => {
 
 		@child get cs() {
 			return createStore(CS, {
-				models: { m: this.state ? this.m1 : this.m2, m1: this.m1 },
+				m: this.state ? this.props.m1 : this.props.m2,
+				m1: this.props.m1,
 			});
 		}
 	}
 
 	const m1 = M1.create();
 	const m2 = M2.create();
-	const s = mount(createStore(S, { models: { m1, m2 } }));
+	const s = mount(createStore(S, { m1, m2 }));
 
 	reaction(
-		() => s.cs.m,
+		() => s.cs.props.m,
 		() => count++
 	);
 
@@ -1606,9 +1560,7 @@ describe("store context", () => {
 describe("recursive mount diagnostics", () => {
 	class SharedModel extends Model {}
 
-	class RecursiveStore extends Store<{ models: { shared: SharedModel } }> {
-		@model shared!: SharedModel;
-
+	class RecursiveStore extends Store<{ shared: SharedModel }> {
 		constructor(props: any) {
 			super(props);
 			this.effect(() => {
@@ -1617,20 +1569,20 @@ describe("recursive mount diagnostics", () => {
 		}
 
 		@child get loop() {
-			return createStore(RecursiveStore, { models: { shared: this.shared } });
+			return createStore(RecursiveStore, { shared: this.props.shared });
 		}
 	}
 
 	const mountRecursiveStore = () =>
 		mount(
 			createStore(RecursiveStore, {
-				models: { shared: SharedModel.create() },
+				shared: SharedModel.create(),
 			})
 		);
 
 	test("recursive mount surfaces circular creation error instead of stack overflow", () => {
 		expect(mountRecursiveStore).toThrowError(
-			/detected circular store\/model creation/
+			/detected circular store creation/
 		);
 	});
 
@@ -1639,11 +1591,8 @@ describe("recursive mount diagnostics", () => {
 			mountRecursiveStore();
 		} catch (error) {
 			if (error instanceof Error) {
-				expect(error.message).toContain(
-					"detected circular store/model creation"
-				);
+				expect(error.message).toContain("detected circular store creation");
 				expect(error.message).toContain("RecursiveStore");
-				expect(error.message).toContain("models: shared");
 				expect(error.message).toContain("Break the ownership cycle");
 				return;
 			}
@@ -1970,22 +1919,20 @@ test("store dynamic observable properties", async () => {
 });
 
 describe("Accessor + Decorators Regression", () => {
-	test("Store @model is still resolved via props.models (not as an observable field)", () => {
+	test("models remain accessible through regular props", () => {
 		class RootModel extends Model {
 			// no state needed
 		}
-		class S extends Store<{ models: { root: RootModel } }> {
-			@model root!: RootModel;
-			// Accessing root must not throw and must return the model from props
+		class S extends Store<{ root: RootModel }> {
 			get ok() {
-				return this.root instanceof RootModel;
+				return this.props.root instanceof RootModel;
 			}
 		}
 
 		const root = RootModel.create({});
-		const s = mount(createStore(S, { models: { root } }));
+		const s = mount(createStore(S, { root }));
 		expect(s.ok).toBe(true);
-		expect(s.root).toBe(root);
+		expect(s.props.root).toBe(root);
 	});
 
 	test("Store @child getter still returns a mounted child store instance", () => {
