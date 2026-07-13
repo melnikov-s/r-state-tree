@@ -25,23 +25,30 @@ export function allowNewStore<T>(fn: () => T): T {
 	}
 }
 
-type CreateStoreProps<T extends Record<string, any>> = {
-	[K in keyof T as undefined extends T[K] ? K : never]?: T[K] extends infer U
-		? U extends undefined
-			? never
-			: undefined extends U
-			? U | undefined
-			: U
-		: never;
-} & {
-	[K in keyof T as undefined extends T[K] ? never : K]?: T[K];
-} & Pick<Props, "key"> &
+type RequiredKeys<T> = {
+	[K in keyof T]-?: {} extends Pick<T, K> ? never : K;
+}[keyof T];
+
+type CreateStoreProps<T extends Record<string, any>> = T &
+	Pick<Props, "key"> &
 	Partial<Record<string, unknown>>;
+
+type UpdateStoreProps<T extends Record<string, any>> = Partial<T> &
+	Pick<Props, "key"> &
+	Partial<Record<string, unknown>>;
+
+type PropsOfStore<T extends Store<any>> = T extends Store<infer P> ? P : never;
 
 export function createStore<
 	K extends Store<any>,
 	T extends Record<string, any> = K extends Store<infer P> ? P : never
->(Type: new (props: StoreProps<T>) => K, props?: CreateStoreProps<T>): K {
+>(
+	Type: new (props: StoreProps<T>) => K,
+	...args: RequiredKeys<T> extends never
+		? [props?: CreateStoreProps<T>]
+		: [props: CreateStoreProps<T>]
+): K {
+	const props = args[0];
 	return {
 		Type,
 		props: props ?? {},
@@ -49,9 +56,9 @@ export function createStore<
 	} as unknown as K;
 }
 
-export function updateStore<K extends Store<T>, T extends Record<string, any>>(
+export function updateStore<K extends Store<any>>(
 	store: K,
-	props: CreateStoreProps<T>
+	props: UpdateStoreProps<PropsOfStore<K>>
 ): K {
 	updateProps(store.props, props);
 

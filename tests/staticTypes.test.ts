@@ -10,6 +10,7 @@ import {
 	mount,
 	state,
 	toSnapshot,
+	updateStore,
 } from "../src/index";
 
 test("static types config works for models", () => {
@@ -83,6 +84,46 @@ test("models can be passed as ordinary typed props", () => {
 	const user = User.create({ id: 1, name: "Ada" });
 	const store = mount(createStore(Profile, { user }));
 	expect(store.props.user.name).toBe("Ada");
+});
+
+test("createStore requires required props and preserves optional props", () => {
+	class EmptyStore extends Store<Record<string, never>> {}
+	createStore(EmptyStore);
+	createStore(EmptyStore, {});
+	class OptionalStore extends Store<{ label?: string }> {}
+	createStore(OptionalStore);
+	createStore(OptionalStore, { label: "Example" });
+
+	interface ResourceProps {
+		resourceId: string;
+		rootModel: Model;
+		label?: string;
+	}
+
+	class ResourceStore extends Store<ResourceProps> {}
+	const rootModel = Model.create();
+
+	createStore(ResourceStore, { resourceId: "1", rootModel });
+	createStore(ResourceStore, {
+		resourceId: "1",
+		rootModel,
+		label: "Example",
+	});
+	createStore(ResourceStore, { resourceId: "1", rootModel, key: "1" });
+
+	// @ts-expect-error required creation props cannot be omitted
+	createStore(ResourceStore);
+	// @ts-expect-error all required creation props must be supplied
+	createStore(ResourceStore, {});
+	// @ts-expect-error resourceId is required even when other props are supplied
+	createStore(ResourceStore, { rootModel });
+	// @ts-expect-error rootModel is required even when optional props are supplied
+	createStore(ResourceStore, { resourceId: "1", label: "Example" });
+
+	class PatchStore extends Store<{ id: string; label?: string }> {}
+	const store = mount(createStore(PatchStore, { id: "1" }));
+	updateStore(store, { label: "Updated" });
+	expect(store.props.label).toBe("Updated");
 });
 
 test("static types works for store child getters", () => {
