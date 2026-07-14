@@ -1057,7 +1057,7 @@ describe("store context", () => {
 	});
 
 	test("can create and consume context without default value", () => {
-		const UserContext = createContext<{ name: string } | null>();
+		const UserContext = createContext<{ name: string }>();
 
 		class C extends Store {
 			get user() {
@@ -1067,6 +1067,30 @@ describe("store context", () => {
 
 		const c = mount(createStore(C));
 		expect(c.user).toBe(undefined);
+	});
+
+	test("treats an explicit undefined argument as a supplied default", () => {
+		const UserContext = createContext<{ name: string } | undefined>(undefined);
+
+		class C extends Store {
+			get user() {
+				return UserContext.consume(this);
+			}
+		}
+
+		const c = mount(createStore(C));
+		expect(c.user).toBe(undefined);
+		expect(UserContext.defaultValue).toBe(undefined);
+	});
+
+	test("rejects consuming context from a model at runtime", () => {
+		const ThemeContext = createContext("light");
+		const model = Model.create();
+		const unsafeConsume = ThemeContext.consume as (value: unknown) => string;
+
+		expect(() => unsafeConsume(model)).toThrow(
+			"r-state-tree: Context can only be consumed by Stores"
+		);
 	});
 
 	test("context flows down from parent to child store", () => {

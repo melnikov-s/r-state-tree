@@ -172,3 +172,50 @@ test("static types works with context consumption (getter stays passthrough)", (
 	const root = mount(createStore(Root));
 	expect(root.child.v).toBe("b");
 });
+
+test("context types reflect whether a default value was supplied", () => {
+	type User = { name: string };
+
+	const ThemeContext = createContext("light");
+	const NullableUserContext = createContext<User | null>(null);
+	const OptionalUserContext = createContext<User>();
+	const ExplicitUndefinedContext = createContext<User | undefined>(undefined);
+
+	const checkConsumers = (store: Store, model: Model) => {
+		const theme: string = ThemeContext.consume(store);
+		const nullableUser: User | null = NullableUserContext.consume(store);
+		const optionalUser: User | undefined = OptionalUserContext.consume(store);
+		// @ts-expect-error Context can only be consumed from the Store tree.
+		const modelUser = OptionalUserContext.consume(model);
+		const explicitlyUndefined: User | undefined =
+			ExplicitUndefinedContext.consume(store);
+
+		const themeDefault: string = ThemeContext.defaultValue;
+		const optionalDefault: User | undefined = OptionalUserContext.defaultValue;
+
+		// @ts-expect-error A context without a default may return undefined.
+		const requiredUser: User = OptionalUserContext.consume(store);
+		// @ts-expect-error A nullable default remains part of the consumed type.
+		const nonNullableUser: User = NullableUserContext.consume(store);
+
+		void theme;
+		void nullableUser;
+		void optionalUser;
+		void modelUser;
+		void explicitlyUndefined;
+		void themeDefault;
+		void optionalDefault;
+		void requiredUser;
+		void nonNullableUser;
+	};
+
+	const providedUser: User = { name: "Ada" };
+	class UserProvider extends Store {
+		[OptionalUserContext.provide](): User {
+			return providedUser;
+		}
+	}
+
+	void checkConsumers;
+	void UserProvider;
+});

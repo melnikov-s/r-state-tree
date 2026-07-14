@@ -64,7 +64,7 @@ export default defineConfig({
 
 - Stores: application/view state containers. Create with `createStore()`, attach with `mount()`, and dispose with `Symbol.dispose`. Compose with `@child` and register owned `effect`/`reaction` behavior in constructors. Update reactive `props` via `updateStore()`.
 - Models: domain state containers. Create with `Model.create()`. Persistent via snapshots (`toSnapshot`, `applySnapshot`, `onSnapshot`, diffs via `onSnapshotDiff`). Structure with `@state`, `@child`, identifiers via `@id`, and references via `@modelRef`.
-- Context: pass data through Store/Model trees without prop drilling using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendants.
+- Context: pass ambient behavioral dependencies through the Store tree using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendant Stores.
 - Reactivity: powered by signals. Use `observable()`, `computed` / `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
 
 ## Separation of concerns
@@ -248,36 +248,67 @@ Registration activation is non-reentrant. If an active effect or reaction lazily
 
 ### Context
 
-Share data across the store tree without prop drilling:
+Pass ambient behavioral dependencies through the Store tree without prop drilling:
 
 ```ts
 import { createContext } from "r-state-tree";
 
-const ThemeContext = createContext<"light" | "dark">("light");
+type VoiceServices = {
+	speak(text: string): void;
+};
 
-class AppStore extends Store {
-	theme = "dark";
+const VoiceContext = createContext<VoiceServices | null>(null);
 
-	[ThemeContext.provide]() {
-		return this.theme;
+class RootStore extends Store {
+	voiceServices: VoiceServices | null = null;
+
+	[VoiceContext.provide]() {
+		return this.voiceServices;
 	}
 
-	@child get todo() {
-		return createStore(TodoStore);
-	}
-}
-
-class TodoStore extends Store {
-	get theme() {
-		return ThemeContext.consume(this);
+	@child get editor() {
+		return createStore(EditorStore);
 	}
 }
 
-const app = mount(createStore(AppStore));
-app.todo.theme; // "dark"
+class EditorStore extends Store {
+	get voiceServices() {
+		return VoiceContext.consume(this);
+	}
+}
 ```
 
 Context is reactive and updates automatically when the provided value changes.
+When there is no default, consumption includes `undefined` because a provider may
+not exist:
+
+```ts
+type User = { name: string };
+
+const UserContext = createContext<User>();
+const user = UserContext.consume(store); // User | undefined
+
+if (user) {
+	console.log(user.name);
+}
+```
+
+Use a nullable default when `null` better represents the missing value:
+
+```ts
+const UserContext = createContext<User | null>(null);
+const user = UserContext.consume(store); // User | null
+
+if (user !== null) {
+	console.log(user.name);
+}
+```
+
+Context is exclusively a Store-tree facility. Models express domain relationships
+through child Models, model references, state, ordinary fields, and explicit method
+parameters. Passing a Model through Store props keeps it available as an ordinary
+typed value; it does not attach the Model to the Store tree or expose Store Context
+to that Model.
 
 ### Actions and batching
 
@@ -1106,30 +1137,6 @@ applySnapshot(todo, history[history.length - 1].undo);
 
 // Redo
 applySnapshot(todo, history[history.length - 1].redo);
-```
-
-### Context with Models
-
-Models also support context:
-
-```ts
-const AuthContext = createContext<User | null>(null);
-
-class AppModel extends Model {
-	@child currentUser = User.create({ id: 1, name: "Alice" });
-
-	[AuthContext.provide]() {
-		return this.currentUser;
-	}
-
-	@child project = ProjectModel.create();
-}
-
-class ProjectModel extends Model {
-	get currentUser() {
-		return AuthContext.consume(this);
-	}
-}
 ```
 
 ## Do/Don’t guide

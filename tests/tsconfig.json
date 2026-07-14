@@ -1,19 +1,11 @@
 {
+	"extends": "../tsconfig.json",
 	"compilerOptions": {
 		"rootDir": "../",
-		"target": "es2022",
-		"alwaysStrict": false,
 		"noImplicitReturns": false,
 		"noUnusedLocals": false,
-		"noImplicitAny": false,
-		"noImplicitThis": false,
-		"lib": ["es2022"],
-		"types": ["vitest/globals"],
-		"strictNullChecks": false,
-		"downlevelIteration": true,
-		"esModuleInterop": true,
-		"moduleResolution": "node"
+		"noEmit": true
 	},
-	"include": ["*"],
+	"include": ["../src/**/*", "*"],
 	"exclude": ["node_modules"]
 }
