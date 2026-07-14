@@ -105,6 +105,10 @@ export default class Store<
 		return this.props.key;
 	}
 
+	get signal(): AbortSignal {
+		return getStoreAdm(this).signal;
+	}
+
 	reaction<T>(
 		track: () => T,
 		callback: (value: T, previousValue: T) => void

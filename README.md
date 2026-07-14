@@ -226,6 +226,46 @@ store[Symbol.dispose]();
 } // Symbol.dispose is called automatically
 ```
 
+Every realized Store exposes a readonly `AbortSignal` for its terminal lifetime. It
+is active while the Store is alive and aborts when disposal begins, before child
+disposal and effect cleanup. This is a standard `AbortSignal`, not a reactive
+signal. Pass it to APIs that support cancellation:
+
+```ts
+class LibraryStore extends Store {
+	async load() {
+		const response = await fetch("/api/library", { signal: this.signal });
+		const data = await response.json();
+		if (this.signal.aborted) return;
+		this.apply(data);
+	}
+}
+```
+
+For a promise that cannot be canceled, check the signal before applying its
+result:
+
+```ts
+const saved = await loadPersistedState();
+if (this.signal.aborted) return;
+this.applySavedState(saved);
+```
+
+An operation that also needs independent cancellation can combine both lifetimes
+where `AbortSignal.any()` is supported:
+
+```ts
+const operation = new AbortController();
+const signal = AbortSignal.any([this.signal, operation.signal]);
+const response = await fetch(url, { signal });
+
+operation.abort(); // cancels only this operation
+```
+
+The Store signal only represents disposal. Per-operation cancellation, run IDs,
+and take-latest behavior remain application concerns; the library does not manage
+loading state, errors, polling, or concurrency policy.
+
 ### Reactions
 
 Create side effects that run when reactive values change:

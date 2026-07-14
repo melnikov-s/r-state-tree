@@ -22,6 +22,136 @@ test("can mount a store", () => {
 	expect(store.props.myProp).toBe(1);
 });
 
+describe("Store lifetime signal", () => {
+	test("is active while mounted and aborts exactly once on root disposal", () => {
+		class S extends Store {}
+		const store = mount(createStore(S));
+		let aborts = 0;
+		store.signal.addEventListener("abort", () => aborts++);
+
+		expect(store.signal.aborted).toBe(false);
+		store[Symbol.dispose]();
+		expect(store.signal.aborted).toBe(true);
+		expect(aborts).toBe(1);
+
+		expect(() => store[Symbol.dispose]()).not.toThrow();
+		expect(aborts).toBe(1);
+	});
+
+	test("aborts a materialized child when its parent is disposed", () => {
+		class ChildStore extends Store {}
+		class ParentStore extends Store {
+			@child get child() {
+				return createStore(ChildStore);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		const childStore = parent.child;
+		expect(childStore.signal.aborted).toBe(false);
+
+		parent[Symbol.dispose]();
+		expect(childStore.signal.aborted).toBe(true);
+	});
+
+	test("aborts a child removed by reconciliation", () => {
+		class ChildStore extends Store {}
+		class ParentStore extends Store {
+			state = observable({ visible: true });
+
+			@child get child() {
+				return this.state.visible ? createStore(ChildStore) : null;
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		const removed = parent.child!;
+		parent.state.visible = false;
+
+		expect(parent.child).toBe(null);
+		expect(removed.signal.aborted).toBe(true);
+	});
+
+	test("aborts a replaced keyed child without aborting its replacement", () => {
+		class FirstChild extends Store<any> {}
+		class SecondChild extends Store<any> {}
+		class ParentStore extends Store {
+			state = observable({ replacement: false });
+
+			@child get children() {
+				const Type = this.state.replacement ? SecondChild : FirstChild;
+				return [createStore(Type, { key: "item" })];
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		const original = parent.children[0];
+		parent.state.replacement = true;
+		const replacement = parent.children[0];
+
+		expect(replacement).toBeInstanceOf(SecondChild);
+		expect(original.signal.aborted).toBe(true);
+		expect(replacement.signal.aborted).toBe(false);
+	});
+
+	test("aborts before effect cleanup runs", () => {
+		let abortedDuringCleanup = false;
+		class S extends Store {
+			constructor(props: S["props"]) {
+				super(props);
+				this.effect(() => () => {
+					abortedDuringCleanup = this.signal.aborted;
+				});
+			}
+		}
+
+		const store = mount(createStore(S));
+		store[Symbol.dispose]();
+		expect(abortedDuringCleanup).toBe(true);
+	});
+
+	test("aborts during rollback when mounting fails", () => {
+		let failedStore!: Store;
+		class FailingStore extends Store {
+			constructor(props: FailingStore["props"]) {
+				super(props);
+				failedStore = this;
+				this.effect(() => {
+					throw new Error("mount failed");
+				});
+			}
+		}
+
+		expect(() => mount(createStore(FailingStore))).toThrow("mount failed");
+		expect(failedStore.signal.aborted).toBe(true);
+	});
+
+	test("can guard an asynchronous completion after disposal", async () => {
+		let resolve!: (value: string) => void;
+		const result = new Promise<string>((done) => {
+			resolve = done;
+		});
+
+		class S extends Store {
+			value = "initial";
+
+			async load() {
+				const value = await result;
+				if (this.signal.aborted) return;
+				this.value = value;
+			}
+		}
+
+		const store = mount(createStore(S));
+		const loading = store.load();
+		store[Symbol.dispose]();
+		resolve("loaded");
+		await loading;
+
+		expect(store.value).toBe("initial");
+	});
+});
+
 test("owned effects start on mount and are cleaned up on disposal", () => {
 	let acquired = 0;
 	let cleaned = 0;

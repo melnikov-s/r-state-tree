@@ -227,12 +227,16 @@ export class StoreAdministration<
 	);
 
 	parent: StoreAdministration | null = null;
+	private readonly abortController = new AbortController();
 	private mounted = false;
-	private disposed = false;
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
 	private reactiveRegistrations = new Set<ReactiveRegistration>();
 	private configurationGetter?: () => StoreConfiguration<StoreType>;
+
+	get signal(): AbortSignal {
+		return this.abortController.signal;
+	}
 
 	setConfiguration(
 		configurationGetter: () => StoreConfiguration<StoreType>
@@ -511,7 +515,7 @@ export class StoreAdministration<
 	}
 
 	private register(start: () => () => void): () => void {
-		if (this.disposed) {
+		if (this.signal.aborted) {
 			throw new Error(
 				"r-state-tree: cannot register reactive resources on a disposed store"
 			);
@@ -553,7 +557,7 @@ export class StoreAdministration<
 		childName?: PropertyKey,
 		activationQueue?: StoreAdministration[]
 	): void {
-		if (this.disposed) {
+		if (this.signal.aborted) {
 			throw new Error("r-state-tree: cannot mount a disposed store");
 		}
 		if (this.isMounted) {
@@ -605,10 +609,11 @@ export class StoreAdministration<
 	}
 
 	dispose(internal = false): void {
-		if (this.disposed) return;
+		if (this.signal.aborted) return;
 		if (!internal && !this.isRoot()) {
 			throw new Error("r-state-tree: can only dispose root stores");
 		}
+		this.abortController.abort();
 		batch(() => {
 			this.childStoreDataMap.forEach((data) => {
 				const { value, computed, listener } = data;
@@ -628,7 +633,6 @@ export class StoreAdministration<
 			this.contextCache.clear();
 			this.parent = null;
 		});
-		this.disposed = true;
 		this.reactiveRegistrations.forEach((registration) => {
 			registration.disposed = true;
 			registration.stop?.();
