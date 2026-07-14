@@ -547,6 +547,108 @@ test("child stores with keys", () => {
 	expect(stores[2]).toBe(s.cs[0]);
 });
 
+describe("child store duplicate keys", () => {
+	test("throws before initially materializing duplicate keyed children", () => {
+		let created = 0;
+		class FirstChild extends Store<any> {
+			constructor(props: any) {
+				super(props);
+				created++;
+			}
+		}
+		class SecondChild extends Store<any> {
+			constructor(props: any) {
+				super(props);
+				created++;
+			}
+		}
+		class ParentStore extends Store<any> {
+			@child get chapters() {
+				return [
+					createStore(FirstChild, { key: "chapter-1" }),
+					createStore(SecondChild, { key: "chapter-1" }),
+				];
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(() => parent.chapters).toThrowError(
+			'r-state-tree: duplicate key "chapter-1" in child property "chapters" of ParentStore'
+		);
+		expect(created).toBe(0);
+	});
+
+	test("throws before mutating the existing tree during reactive reconciliation", () => {
+		class ItemStore extends Store<any> {}
+		class ParentStore extends Store<any> {
+			items = observable([
+				{ key: "first", value: 1 },
+				{ key: "second", value: 2 },
+			]);
+
+			@child get children() {
+				return this.items.map(({ key, value }) =>
+					createStore(ItemStore, { key, value })
+				);
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		const originalChildren = parent.children.slice();
+
+		expect(() => {
+			parent.items = observable([
+				{ key: "first", value: 10 },
+				{ key: "first", value: 20 },
+			]);
+			parent.children;
+		}).toThrowError(/duplicate key "first"/);
+
+		expect(originalChildren.map((item) => item.props.value)).toEqual([1, 2]);
+		parent.items = observable([
+			{ key: "second", value: 3 },
+			{ key: "first", value: 4 },
+		]);
+		expect(parent.children).toEqual([originalChildren[1], originalChildren[0]]);
+		expect(parent.children.map((item) => item.props.value)).toEqual([3, 4]);
+	});
+
+	test("allows unkeyed and null entries and distinguishes numeric keys", () => {
+		class ItemStore extends Store<any> {}
+		class ParentStore extends Store<any> {
+			@child get children() {
+				return [
+					createStore(ItemStore),
+					null,
+					createStore(ItemStore),
+					createStore(ItemStore, { key: 1 }),
+					createStore(ItemStore, { key: "1" }),
+				];
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.children).toHaveLength(4);
+	});
+
+	test("scopes duplicate validation to each child property", () => {
+		class ItemStore extends Store<any> {}
+		class ParentStore extends Store<any> {
+			@child get first() {
+				return [createStore(ItemStore, { key: "shared" })];
+			}
+
+			@child get second() {
+				return [createStore(ItemStore, { key: "shared" })];
+			}
+		}
+
+		const parent = mount(createStore(ParentStore));
+		expect(parent.first).toHaveLength(1);
+		expect(parent.second).toHaveLength(1);
+	});
+});
+
 test("props are reactive", () => {
 	let propsCounter = 0;
 

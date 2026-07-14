@@ -72,47 +72,62 @@ export function getStoreAdm(store: Store): StoreAdministration {
 	return getAdministration(store) as unknown as StoreAdministration;
 }
 
+function isStoreElement(value: unknown): value is StoreElement {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"Type" in value &&
+		"props" in value &&
+		typeof value.Type === "function" &&
+		typeof value.props === "object"
+	);
+}
+
 function validateStoreChildValue(
 	value: unknown,
-	propertyName: PropertyKey
+	propertyName: PropertyKey,
+	parentTypeName: string
 ): void {
 	if (value === null || value === undefined) {
 		return;
 	}
 
 	if (Array.isArray(value)) {
-		const invalidItem = value.find(
-			(item) =>
-				item !== null &&
-				(typeof item !== "object" ||
-					!("Type" in item) ||
-					!("props" in item) ||
-					typeof (item as StoreElement).Type !== "function" ||
-					typeof (item as StoreElement).props !== "object")
+		const elements = value.map(
+			(item: unknown): StoreElement | null | undefined => {
+				if (item === null || item === undefined || isStoreElement(item)) {
+					return item;
+				}
+				throw new Error(
+					`r-state-tree: child property '${String(
+						propertyName
+					)}' must be a StoreElement ({ Type, props, key }), an array of StoreElements, or null/undefined. Found invalid array item: ${typeof item}`
+				);
+			}
 		);
-		if (invalidItem !== undefined) {
-			throw new Error(
-				`r-state-tree: child property '${String(
-					propertyName
-				)}' must be a StoreElement ({ Type, props, key }), an array of StoreElements, or null/undefined. Found invalid array item: ${typeof invalidItem}`
-			);
+
+		const keys = new Set<unknown>();
+		for (const item of elements) {
+			if (item === null || item === undefined || item.key === undefined)
+				continue;
+			if (keys.has(item.key)) {
+				const formattedKey =
+					typeof item.key === "string"
+						? JSON.stringify(item.key)
+						: String(item.key);
+				throw new Error(
+					`r-state-tree: duplicate key ${formattedKey} in child property ${JSON.stringify(
+						String(propertyName)
+					)} of ${parentTypeName}`
+				);
+			}
+			keys.add(item.key);
 		}
 		return;
 	}
 
-	if (
-		typeof value === "object" &&
-		value !== null &&
-		"Type" in value &&
-		"props" in value
-	) {
-		const element = value as StoreElement;
-		if (
-			typeof element.Type === "function" &&
-			typeof element.props === "object"
-		) {
-			return;
-		}
+	if (isStoreElement(value)) {
+		return;
 	}
 
 	throw new Error(
@@ -231,6 +246,14 @@ export class StoreAdministration<
 
 	private createChildStore(element: StoreElement): Store {
 		return allowNewStore(() => new element.Type(element.props));
+	}
+
+	private validateStoreChildValue(value: unknown, name: PropertyKey): void {
+		validateStoreChildValue(
+			value,
+			name,
+			(this.proxy.constructor as { name?: string }).name || "Store"
+		);
 	}
 
 	private setStoreList(
@@ -371,7 +394,7 @@ export class StoreAdministration<
 		const storeElement = childStoreData.listener.track(() =>
 			childStoreData.computed.get()
 		);
-		validateStoreChildValue(storeElement, name);
+		this.validateStoreChildValue(storeElement, name);
 		Array.isArray(storeElement)
 			? this.setStoreList(name, storeElement)
 			: this.setSingleStore(name, storeElement as StoreElement | null);
@@ -400,7 +423,7 @@ export class StoreAdministration<
 		const storeElement = childStoreData.listener.track(() =>
 			childStoreData.computed.get()
 		);
-		validateStoreChildValue(storeElement, name);
+		this.validateStoreChildValue(storeElement, name);
 		Array.isArray(storeElement)
 			? this.setStoreList(name, storeElement)
 			: this.setSingleStore(name, storeElement as StoreElement | null);
@@ -415,7 +438,7 @@ export class StoreAdministration<
 			return this.childStoreDataMap.get(name)!.value.get() as Store | null;
 		} else {
 			const storeElement = untracked(() => childStoreData.computed.get());
-			validateStoreChildValue(storeElement, name);
+			this.validateStoreChildValue(storeElement, name);
 			Array.isArray(storeElement)
 				? this.setStoreList(name, storeElement)
 				: this.setSingleStore(name, storeElement as StoreElement | null);
