@@ -1,6 +1,6 @@
 {
 	"name": "r-state-tree",
-	"version": "0.10.0",
+	"version": "0.10.1",
 	"description": "reactive state management library",
 	"main": "dist/r-state-tree.cjs",
 	"module": "dist/r-state-tree.js",
@@ -10,17 +10,24 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/r-state-tree.js",
 			"require": "./dist/r-state-tree.cjs"
+		},
+		"./react": {
+			"types": "./dist/react.d.ts",
+			"import": "./dist/react.js",
+			"require": "./dist/react.cjs"
 		}
 	},
 	"files": [
 		"dist/*",
+		"skills",
 		"README.md",
 		"LICENSE"
 	],
 	"scripts": {
-		"test": "vitest run",
+		"test": "vitest run && pnpm run test:types",
 		"test:watch": "vitest",
 		"test:cover": "vitest run --coverage",
+		"test:types": "tsc --noEmit -p tests/tsconfig.json",
 		"build": "vite build && pnpm run build:types",
 		"build:types": "tsc --emitDeclarationOnly",
 		"lint": "eslint ./src ./tests --ext .ts",
@@ -38,7 +45,10 @@
 	},
 	"homepage": "https://github.com/melnikov-s/r-state-tree#readme",
 	"devDependencies": {
+		"@preact/signals-react": "^3.10.3",
 		"@tsmetadata/polyfill": "^1.1.3",
+		"@types/react": "^19.2.17",
+		"@types/react-dom": "^19.2.3",
 		"@typescript-eslint/eslint-plugin": "^5.8.1",
 		"@typescript-eslint/parser": "^5.8.1",
 		"eslint": "^8.5.0",
@@ -47,13 +57,28 @@
 		"eslint-import-resolver-typescript": "^2.5.0",
 		"eslint-plugin-import": "^2.25.3",
 		"eslint-plugin-prettier": "^4.0.0",
+		"jsdom": "^26.1.0",
 		"prettier": "^2.8.4",
+		"react": "^19.2.7",
+		"react-dom": "^19.2.7",
 		"tslib": "^2.5.0",
 		"typescript": "5.9.3",
 		"vite": "7.1.9",
 		"vitest": "3.2.4"
 	},
 	"dependencies": {
-		"@preact/signals-core": "^1.12.1"
+		"@preact/signals-core": "^1.14.4"
+	},
+	"peerDependencies": {
+		"@preact/signals-react": "^3.10.3",
+		"react": "^18.2.0 || ^19.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@preact/signals-react": {
+			"optional": true
+		},
+		"react": {
+			"optional": true
+		}
 	}
 }

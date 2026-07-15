@@ -132,7 +132,7 @@ export type { ReadonlySignal };
 export function reaction<T>(
 	fn: () => T,
 	callback: (value: T, previousValue: T) => void
-) {
+): () => void {
 	let initialized = false;
 	let currentValue: T;
 

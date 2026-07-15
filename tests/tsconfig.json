@@ -2,6 +2,7 @@
 	"extends": "../tsconfig.json",
 	"compilerOptions": {
 		"rootDir": "../",
+		"lib": ["es2022", "esnext", "dom"],
 		"noImplicitReturns": false,
 		"noUnusedLocals": false,
 		"noEmit": true

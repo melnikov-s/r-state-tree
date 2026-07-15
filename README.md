@@ -12,6 +12,13 @@ r-state-tree is a reactive state management library for building complex applica
 pnpm add r-state-tree
 ```
 
+### Agent skill
+
+An official r-state-tree skill ships at [`skills/r-state-tree`](skills/r-state-tree)
+and `node_modules/r-state-tree/skills/r-state-tree`. Copy it into your agent's
+project skills directory for guidance on Store and Model design, lifecycle and
+async ownership, React integration, and architecture reviews.
+
 ### Requirements
 
 This library strongly recommends using decorators.
@@ -20,6 +27,78 @@ This library strongly recommends using decorators.
 - Fallback: `static types` configuration (no decorators) if you can't or don't want to enable decorators in your toolchain.
 
 The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
+
+## React integration
+
+Install the optional React peers when using the `r-state-tree/react` entry point:
+
+```bash
+pnpm add react @preact/signals-react
+```
+
+```tsx
+import { createStore, mount, Store } from "r-state-tree";
+import {
+	observer,
+	StoreProvider,
+	useOptionalStore,
+	useStore,
+} from "r-state-tree/react";
+
+class CounterStore extends Store {
+	count = 0;
+
+	increment() {
+		this.count++;
+	}
+}
+
+const Counter = observer(function Counter() {
+	const store = useStore(CounterStore);
+
+	return <button onClick={() => store.increment()}>{store.count}</button>;
+});
+
+const counterStore = mount(createStore(CounterStore));
+
+function App() {
+	return (
+		<StoreProvider store={counterStore}>
+			<Counter />
+		</StoreProvider>
+	);
+}
+```
+
+### `observer(Component)`
+
+Wraps a function component and rerenders it when an r-state-tree/Preact Signal
+read during rendering changes. The result uses React's default `memo` behavior,
+so unchanged props do not cause a parent-driven rerender.
+
+`observer` only manages reactive rendering. It does not inspect Store-valued
+props, provide Stores, mount Stores, or dispose Stores. Use `StoreProvider`
+explicitly at every React lookup boundary.
+
+### `StoreProvider`
+
+Makes one realized Store available to descendants by its exact runtime class.
+Providers can be nested, and the nearest provider for the requested class wins.
+A subclass provider does not satisfy a lookup for its base Store class.
+
+React provider ancestry is only a view lookup mechanism. It does not change the
+r-state-tree ownership parent, mount state, or lifetime of the Store. Unmounting
+a provider does not dispose its Store.
+
+### `useStore(StoreType)` and `useOptionalStore(StoreType)`
+
+`useStore(StoreType)` returns the nearest Store provided for that exact class and
+throws a descriptive error when none exists. `useOptionalStore(StoreType)` uses
+the same lookup but returns `null` when no matching provider exists.
+
+The React adapter is not loaded when importing only `r-state-tree`. Preact
+applications can use this entry point through `preact/compat`; native Preact
+integration without React compatibility aliases is not currently provided.
 
 ## TypeScript config (Stage 3 decorators)
 

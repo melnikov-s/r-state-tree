@@ -1,0 +1,4 @@
+interface:
+  display_name: "r-state-tree"
+  short_description: "Build and review r-state-tree applications"
+  default_prompt: "Use $r-state-tree to design or review this application state architecture."

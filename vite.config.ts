@@ -9,14 +9,26 @@ export default defineConfig({
 		emptyOutDir: true,
 		minify: false,
 		lib: {
-			entry: resolve(rootDir, "src/index.ts"),
+			entry: {
+				index: resolve(rootDir, "src/index.ts"),
+				react: resolve(rootDir, "src/react.ts"),
+			},
 			name: "RStateTree",
 			formats: ["es", "cjs"],
-			fileName: (format) =>
-				format === "es" ? "r-state-tree.js" : "r-state-tree.cjs",
+			fileName: (format, entryName) => {
+				if (entryName === "index") {
+					return format === "es" ? "r-state-tree.js" : "r-state-tree.cjs";
+				}
+
+				return format === "es" ? `${entryName}.js` : `${entryName}.cjs`;
+			},
 		},
 		rollupOptions: {
-			external: ["@preact/signals-core"],
+			external: [
+				"@preact/signals-core",
+				"@preact/signals-react/runtime",
+				"react",
+			],
 			output: {
 				exports: "named",
 			},
