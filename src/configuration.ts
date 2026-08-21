@@ -3,8 +3,8 @@ import type {
 	ConfigurationTypes,
 	ConfigurationValue,
 } from "./types";
-import { childType, idType, stateType } from "./types";
-import { child, id, modelRef, state } from "./decorators";
+import { childType, idType, transientType, snapshotType } from "./types";
+import { child, id, modelRef, transient, snapshot } from "./decorators";
 
 type Ctor = Function;
 type Config = Record<PropertyKey, ConfigurationType>;
@@ -28,7 +28,8 @@ function normalizeEntry(entry: unknown): ConfigurationType | undefined {
 		// Allow using the exported decorators directly in `static types`.
 		// These are plain functions without a `type` property.
 		if (entry === id) return idType;
-		if (entry === state) return stateType;
+		if (entry === transient) return transientType;
+		if (entry === snapshot) return snapshotType;
 		if (entry === child) return childType;
 		if (entry === modelRef) {
 			throw new Error(

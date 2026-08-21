@@ -23,6 +23,7 @@ export default class Model implements Disposable {
 		}
 		const adm = getModelAdm(instance);
 		try {
+			adm.validateSnapshotFields();
 			snapshot && adm.loadSnapshot(snapshot);
 		} catch (error) {
 			adm.dispose(true);

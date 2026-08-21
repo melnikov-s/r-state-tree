@@ -2,6 +2,11 @@ import type { ModelConfiguration } from "./types";
 import { CommonCfgTypes } from "./types";
 import { Signal } from "@preact/signals-core";
 import { isPlainObject } from "./observables/internal/utils";
+import {
+	getObservable,
+	getSource,
+	isObservable,
+} from "./observables/internal/lookup";
 import { getConfigType } from "./configuration";
 
 export function getPropertyDescriptor(
@@ -30,8 +35,8 @@ export function getParentConstructor(
 /**
  * Recursively clones a value for snapshotting.
  *
- * Snapshots are JSON-only:
- * - Primitives (string, number, boolean, null, undefined) pass through.
+ * Snapshot values:
+ * - Supported primitives pass through, including undefined and non-finite numbers.
  * - Arrays are recursively cloned.
  * - Plain objects (prototype === Object.prototype or null) are recursively cloned.
  * - Dates serialize to ISO strings.
@@ -43,15 +48,13 @@ export function getParentConstructor(
  * @param path - Internal: the current key path for error messages.
  */
 export function clone<T>(val: T, path: string = ""): T {
-	// Primitives pass through
+	const atPath = path ? ` at path "${path}"` : "";
+
 	if (val === null || val === undefined) {
 		return val;
 	}
 
 	if (typeof val !== "object") {
-		// Snapshots are JSON-only (with Dates and Signals handled below).
-		// Reject non-JSON primitives early with a descriptive error.
-		// Note: `undefined` is allowed (handled above) but is not JSON-serializable.
 		if (
 			typeof val === "string" ||
 			typeof val === "number" ||
@@ -60,31 +63,29 @@ export function clone<T>(val: T, path: string = ""): T {
 			return val;
 		}
 
-		const atPath = path ? ` at path "${path}"` : "";
-
 		if (typeof val === "bigint") {
 			throw new Error(
 				`r-state-tree: snapshots do not support bigint${atPath}. ` +
-					`Snapshots are JSON-only (primitives, arrays, plain objects, Dates as ISO strings).`
+					`Snapshots support scalar values, arrays, plain objects, and Dates as ISO strings.`
 			);
 		}
 		if (typeof val === "symbol") {
 			throw new Error(
 				`r-state-tree: snapshots do not support symbol${atPath}. ` +
-					`Snapshots are JSON-only (primitives, arrays, plain objects, Dates as ISO strings).`
+					`Snapshots support scalar values, arrays, plain objects, and Dates as ISO strings.`
 			);
 		}
 		if (typeof val === "function") {
 			throw new Error(
 				`r-state-tree: snapshots do not support function${atPath}. ` +
-					`Snapshots are JSON-only (primitives, arrays, plain objects, Dates as ISO strings).`
+					`Snapshots support scalar values, arrays, plain objects, and Dates as ISO strings.`
 			);
 		}
 
 		// Fallback: if we ever get here (e.g. rare host primitives), reject.
 		throw new Error(
 			`r-state-tree: snapshots do not support ${typeof val}${atPath}. ` +
-				`Snapshots are JSON-only (primitives, arrays, plain objects, Dates as ISO strings).`
+				`Snapshots support scalar values, arrays, plain objects, and Dates as ISO strings.`
 		);
 	}
 
@@ -116,7 +117,7 @@ export function clone<T>(val: T, path: string = ""): T {
 		const atPath = path ? ` at path "${path}"` : "";
 		throw new Error(
 			`r-state-tree: snapshots do not support ${typeName}${atPath}. ` +
-				`Snapshots are JSON-only (primitives, arrays, plain objects, Dates as ISO strings).`
+				`Snapshots support scalar values, arrays, plain objects, and Dates as ISO strings.`
 		);
 	}
 
@@ -131,6 +132,129 @@ export function clone<T>(val: T, path: string = ""): T {
 	}
 
 	return cloned;
+}
+
+/**
+ * Rehydrates a JSON snapshot value into the runtime shape established by a
+ * field's default value. This preserves Signals, observable/plain containers,
+ * and Dates while applying serialized data.
+ */
+export type HydrationChangeTracker = {
+	changed: boolean;
+};
+
+export function hydrateSnapshotValue(
+	currentValue: unknown,
+	snapshotValue: unknown,
+	changeTracker: HydrationChangeTracker = { changed: false }
+): unknown {
+	if (currentValue instanceof Signal) {
+		currentValue.value = hydrateSnapshotValue(
+			currentValue.value,
+			snapshotValue,
+			changeTracker
+		);
+		return currentValue;
+	}
+
+	if (currentValue instanceof Date && typeof snapshotValue === "string") {
+		const date = new Date(snapshotValue);
+		if (Number.isNaN(date.getTime())) {
+			throw new Error(
+				`r-state-tree: invalid ISO date string in snapshot: ${JSON.stringify(
+					snapshotValue
+				)}`
+			);
+		}
+		if (currentValue.getTime() !== date.getTime()) {
+			changeTracker.changed = true;
+			currentValue.setTime(date.getTime());
+		}
+		return currentValue;
+	}
+
+	if (Array.isArray(currentValue) && Array.isArray(snapshotValue)) {
+		const currentItems = [...currentValue];
+		const exemplar = currentItems[0];
+		if (currentItems.length !== snapshotValue.length) {
+			changeTracker.changed = true;
+		}
+		const nextItems = snapshotValue.map((item, index) => {
+			const currentItem =
+				index < currentItems.length
+					? currentItems[index]
+					: cloneHydrationTarget(exemplar);
+			return hydrateSnapshotValue(currentItem, item, changeTracker);
+		});
+		const structureChanged =
+			currentItems.length !== nextItems.length ||
+			nextItems.some((item, index) => !Object.is(currentItems[index], item));
+		if (structureChanged) {
+			currentValue.splice(0, currentValue.length, ...nextItems);
+		}
+		return currentValue;
+	}
+
+	if (isPlainObject(currentValue) && isPlainObject(snapshotValue)) {
+		const currentRecord = currentValue as Record<string, unknown>;
+		const snapshotRecord = snapshotValue as Record<string, unknown>;
+
+		Object.keys(snapshotRecord).forEach((key) => {
+			if (!Object.prototype.hasOwnProperty.call(currentRecord, key)) {
+				changeTracker.changed = true;
+			}
+			currentRecord[key] = hydrateSnapshotValue(
+				currentRecord[key],
+				snapshotRecord[key],
+				changeTracker
+			);
+		});
+
+		Object.keys(currentRecord).forEach((key) => {
+			if (!Object.prototype.hasOwnProperty.call(snapshotRecord, key)) {
+				changeTracker.changed = true;
+				delete currentRecord[key];
+			}
+		});
+
+		return currentValue;
+	}
+
+	if (!Object.is(currentValue, snapshotValue)) {
+		changeTracker.changed = true;
+	}
+	return snapshotValue;
+}
+
+function cloneHydrationTarget(value: unknown): unknown {
+	if (value instanceof Signal) {
+		return new Signal(cloneHydrationTarget(value.value));
+	}
+
+	const shouldRemainObservable = isObservable(value);
+	const sourceValue = shouldRemainObservable ? getSource(value) : value;
+	let clonedValue: unknown;
+
+	if (sourceValue instanceof Date) {
+		clonedValue = new Date(sourceValue.getTime());
+	} else if (Array.isArray(sourceValue)) {
+		clonedValue = sourceValue.map(cloneHydrationTarget);
+	} else if (isPlainObject(sourceValue)) {
+		const clone = Object.create(Object.getPrototypeOf(sourceValue)) as Record<
+			string,
+			unknown
+		>;
+		Object.keys(sourceValue).forEach((key) => {
+			clone[key] = cloneHydrationTarget(
+				(sourceValue as Record<string, unknown>)[key]
+			);
+		});
+		clonedValue = clone;
+	} else {
+		return value;
+	}
+
+	return shouldRemainObservable ? getObservable(clonedValue) : clonedValue;
 }
 
 /**
@@ -172,14 +296,21 @@ export function getDiff<T extends object>(
 	for (let i = 0; i < keys.length; i++) {
 		const key = keys[i];
 
-		if (obj1[key] !== obj2[key]) {
+		if (!Object.is(obj1[key], obj2[key])) {
 			if (getConfigType(config?.[key]) === CommonCfgTypes.child) {
 				const value = obj2[key];
-				if (Array.isArray(value)) {
+				const previousValue = obj1[key];
+				if (
+					value == null ||
+					previousValue == null ||
+					Array.isArray(value) !== Array.isArray(previousValue)
+				) {
+					diff[key] = value;
+				} else if (Array.isArray(value)) {
 					// Array of children
 					diff[key] = value.map((model: object, index: number) => {
-						if (obj1[key][index]) {
-							return getDiff(obj1[key][index], model, getConfig);
+						if (previousValue[index]) {
+							return getDiff(previousValue[index], model, getConfig);
 						}
 
 						return model;

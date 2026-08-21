@@ -1,5 +1,10 @@
 import type { AtomNode, ComputedNode, SignalNode } from "../preact";
-import { ObservableCfgTypes, ModelCfgTypes, CommonCfgTypes } from "../../types";
+import {
+	ObservableCfgTypes,
+	ModelCfgTypes,
+	StoreCfgTypes,
+	CommonCfgTypes,
+} from "../../types";
 import { getConfigurationValue } from "../../configuration";
 import { getConfigType } from "../../configuration";
 
@@ -57,7 +62,8 @@ export function getPropertyType(
 		switch (getConfigType(config)) {
 			case ObservableCfgTypes.computed:
 				return "computed";
-			case ModelCfgTypes.state:
+			case ModelCfgTypes.transient:
+			case StoreCfgTypes.snapshot:
 			case ModelCfgTypes.id:
 			case ModelCfgTypes.modelRef:
 			case CommonCfgTypes.child:

@@ -23,7 +23,7 @@ async ownership, React integration, and architecture reviews.
 
 This library strongly recommends using decorators.
 
-- Recommended: decorators (`@child`, `@state`, `@id`, `@modelRef`, `@computed`). Requires TypeScript 5.0+ with `target: "es2022"` or higher.
+- Recommended: decorators (`@child`, `@id`, `@modelRef`, `@transient`, `@snapshot`, `@computed`). Requires TypeScript 5.0+ with `target: "es2022"` or higher.
 - Fallback: `static types` configuration (no decorators) if you can't or don't want to enable decorators in your toolchain.
 
 The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
@@ -142,19 +142,22 @@ export default defineConfig({
 ## Core concepts
 
 - Stores: application/view state containers. Create with `createStore()`, attach with `mount()`, and dispose with `Symbol.dispose`. Compose with `@child` and register owned `effect`/`reaction` behavior in constructors. Update reactive `props` via `updateStore()`.
-- Models: domain state containers. Create with `Model.create()`. Persistent via snapshots (`toSnapshot`, `applySnapshot`, `onSnapshot`, diffs via `onSnapshotDiff`). Structure with `@state`, `@child`, identifiers via `@id`, and references via `@modelRef`.
+- Models: domain state containers. Create with `Model.create()`. Ordinary fields participate in snapshots by default; exclude runtime-only fields with `@transient`. Structure with `@child`, identifiers via `@id`, and references via `@modelRef`.
 - Context: pass ambient behavioral dependencies through the Store tree using `createContext<T>()`, `[Context.provide]`, and `Context.consume(this)`. Context is reactive and can be overridden by descendant Stores.
 - Reactivity: powered by signals. Use `observable()`, `computed` / `@computed`, `effect`, `reaction`, `batch`, and `untracked` for precise updates.
 
 ## Separation of concerns
 
-- Models: domain state + domain logic. Keep invariants, domain mutations (in-place updates), and computed/derived getters here. Models are serializable; mutate arrays/maps/sets in place and expose methods to add/remove/upsert. Derive values via getters.
+- Models: domain state + domain logic. Keep invariants, domain mutations, and computed/derived getters here. Models are serializable; use observable containers when persistent collections need in-place mutation, and mark runtime-only caches or resources with `@transient`. Derive values via getters.
 - Stores: application/view state + orchestration. Coordinate routing, timers, reactions, and I/O. Stores call model methods to perform domain changes. Avoid embedding domain rules in stores.
 
 ### Why Stores and Models (motivation)
 
 - What is a Model? Persistent domain state plus domain rules. It holds identifiers, references, invariants, and exposes pure domain mutations and derived getters. It is serializable (snapshots), re-hydratable, and safe to reuse across views.
-- What is a Store? Application/view state and orchestration. It wires effects (reactions, timers, I/O), reacts to user intent, and delegates domain changes to Models. Stores are not snapshotted.
+- What is a Store? Application/view state and orchestration. It wires effects
+  (reactions, timers, I/O), reacts to user intent, and delegates domain changes
+  to Models. Explicit `@snapshot` fields can be snapshotted for session/view
+  restoration; Models remain the durable domain source of truth.
 - Why separate?
   - Snapshots/undo/redo work cleanly when only domain lives in Models.
   - Views stay simple: UI reads derived getters, calls Store methods; Stores call Model methods.
@@ -162,7 +165,7 @@ export default defineConfig({
   - Testability: Models are deterministic and easy to unit test; Stores are thin orchestrators.
   - Performance/identity: Models mutate in place; Stores manage child identity with `key`.
 - Quick rule of thumb:
-  - If it should be in a snapshot or referenced by id, put it in a Model (`@state`, `@child`, `@id`, `@modelRef`).
+  - If it should be in a snapshot or referenced by id, put it in a Model. Ordinary Model fields are snapshotted; use `@child`, `@id`, and `@modelRef` for structure and identity.
   - If it is ephemeral UI/app state or side-effect orchestration, put it in a Store.
   - Components should read from one Store; if a component needs multiple sources, compose them into a higher-level Store.
 
@@ -243,6 +246,49 @@ import { updateStore } from "r-state-tree";
 
 updateStore(app.todo, { title: "Ship release" });
 ```
+
+### Store snapshots and mount-time hydration
+
+Use `@snapshot` to opt Store-owned session/view state into snapshots. Other Store
+fields remain reactive but are not serialized. Props, Context values, effects,
+and reactions are never included.
+
+```ts
+class EditorStore extends Store {
+	@snapshot draft = "";
+	@snapshot scrollTop = 0;
+	hoveredLine: number | null = null; // reactive, not snapshotted
+}
+
+const saved = {
+	state: { draft: "Recovered", scrollTop: 120 },
+	children: {},
+};
+
+const editor = mount(createStore(EditorStore), { snapshot: saved });
+```
+
+Hydration happens before mounted effects and reactions activate when a snapshot
+is passed to `mount(..., { snapshot })` or applied via `applySnapshot` before
+mounting. `applySnapshot(store, snapshot)` also works on an already-mounted
+Store: state updates and child reconciliation go through the same reactive
+machinery as any props-driven update, so live effects and reactions simply
+observe the change.
+
+`toSnapshot(store)` and `onSnapshot(store, callback)` use this shape:
+
+```ts
+type StoreSnapshot = {
+	state: Record<string, unknown>;
+	children: Record<string, StoreChildSnapshot | StoreChildSnapshot[] | null>;
+};
+```
+
+Reactive child snapshots are matched within their parent child property by
+stable `key`. Pending snapshots are retained while a child property remains lazy
+and are applied before matching children mount. Once the property is realized,
+unmatched snapshots are discarded. Use stable keys for snapshotted child arrays;
+unkeyed children are matched positionally.
 
 ### Child stores
 
@@ -450,7 +496,7 @@ import { Model, Store, createStore, mount } from "r-state-tree";
 
 class User extends Model {
 	@id id = 0;
-	@state name = "";
+	name = "";
 }
 
 class ProfileStore extends Store<{ user: User }> {
@@ -467,19 +513,12 @@ profile.name; // "Ada"
 Fallback (no decorators) using `static types`:
 
 ```ts
-import {
-	Model,
-	Store,
-	createStore,
-	mount,
-	id,
-	state,
-} from "r-state-tree";
+import { Model, Store, createStore, mount, id } from "r-state-tree";
 
 class User extends Model {
 	id = 0;
 	name = "";
-	static types = { id, name: state };
+	static types = { id };
 }
 
 class ProfileStore extends Store<{ user: User }> {}
@@ -529,7 +568,7 @@ Derive child stores directly from model arrays with stable keys; delegate mutati
 ```ts
 class ItemModel extends Model {
 	@id id = 0;
-	@state title = "";
+	title = "";
 }
 
 class ListModel extends Model {
@@ -554,7 +593,6 @@ class ItemStore extends Store<{ item: ItemModel }> {
 }
 
 class ListStore extends Store<{ list: ListModel }> {
-
 	@child get items() {
 		return this.props.list.items.map((item) =>
 			createStore(ItemStore, { key: item.id, item })
@@ -569,7 +607,7 @@ class ListStore extends Store<{ list: ListModel }> {
 
 ## Mutability rules
 
-- Models: model fields are shallow-reactive, but values are not auto-wrapped. For raw `@state` arrays/objects, prefer **reassignment** (immutability) so snapshots stay up to date. If you want in-place mutation (`push`, `splice`, `set`, etc.) to trigger updates and snapshot invalidation, store an `observable()` container (or `signal()`) in `@state`.
+- Models: ordinary fields are shallow-reactive snapshot fields by default, but values are not auto-wrapped. For raw arrays/objects, prefer **reassignment** (immutability) so snapshots stay up to date. If you want in-place mutation (`push`, `splice`, `set`, etc.) to trigger updates and snapshot invalidation, store an `observable()` container (or `signal()`) in the field.
 - Stores: store fields are shallow-reactive. Use `observable()` containers (or `signal()`) when you want in-place mutations of nested values/collections to trigger updates.
 
 ### `Observable` base class
@@ -855,22 +893,15 @@ const snapshot = structuredClone(source(tree));
 
 Models capture persistent state with snapshot utilities.
 
-**Important:** `@state` is **shallow-reactive** at the property level (assignments track), but values are **not auto-wrapped**. If you need nested mutations to be reactive (and to invalidate snapshot caches on in-place mutation), store `observable()` containers or `signal()` values inside `@state`.
+**Important:** ordinary Model fields are snapshot fields and are **shallow-reactive** at the property level (assignments track), but values are **not auto-wrapped**. If you need nested mutations to be reactive (and to invalidate snapshot caches on in-place mutation), store `observable()` containers or `signal()` values in the field. Mark runtime-only Model fields with `@transient`.
 
 ```ts
-import {
-	Model,
-	state,
-	id,
-	applySnapshot,
-	onSnapshot,
-	toSnapshot,
-} from "r-state-tree";
+import { Model, id, applySnapshot, onSnapshot, toSnapshot } from "r-state-tree";
 
 class TodoModel extends Model {
 	@id id = 0;
-	@state title = "";
-	@state completed = false;
+	title = "";
+	completed = false;
 }
 
 const todo = TodoModel.create({ id: 1, title: "Learn signals" });
@@ -885,19 +916,28 @@ stop();
 
 ### Snapshot data contract
 
-**Snapshots are JSON-only**: they contain primitives, arrays, plain objects, and Dates (serialized as ISO strings).
+Snapshots are plain JavaScript representations. r-state-tree creates and loads
+the representation; the application owns transport encoding, schema validation,
+normalization, and migrations. A snapshot can be passed through Zod and encoded
+as JSON, Protobuf, or another format.
 
-- **Primitives**: `string`, `number`, `boolean`, `null`, `undefined` pass through.
+- **Primitives**: strings, numbers (including `NaN` and infinities), booleans,
+  `null`, and `undefined` pass through.
 - **Arrays**: recursively cloned.
 - **Plain objects**: recursively cloned (prototype must be `Object.prototype` or `null`).
 - **Dates**: serialize to ISO strings (e.g., `"2024-01-15T10:30:00.000Z"`).
 - **Signals**: serialize to their current `.value` (recursively cloned).
-- **Map/Set/WeakMap/WeakSet and other non-plain objects are rejected** with a descriptive error. Convert them to plain structures before storing in `@state`.
+- **Map/Set/WeakMap/WeakSet and other non-plain objects are rejected** with a descriptive error. Convert persistent values to plain structures or mark runtime-only fields with `@transient`.
+
+`JSON.stringify()` does not preserve every supported snapshot value: it omits
+object properties containing `undefined` and converts `NaN` and infinities to
+`null`. Applications using JSON should validate or normalize the snapshot before
+stringifying it.
 
 ```ts
 class Event extends Model {
-	@state title = "Meeting";
-	@state createdAt = new Date(); // Date → ISO string in snapshot
+	title = "Meeting";
+	createdAt = new Date(); // Date → ISO string in snapshot
 }
 
 const event = Event.create();
@@ -905,12 +945,17 @@ toSnapshot(event);
 // { title: "Meeting", createdAt: "2024-01-15T10:30:00.000Z" }
 ```
 
-If you store a `Map` or class instance in `@state`, snapshotting will throw:
+When the current runtime value is a `Date`, snapshot hydration converts its ISO
+string back into a `Date`. The default runtime shape therefore acts as the
+hydration shape for Dates, Signals, arrays, and plain objects.
+
+If an implicit Model snapshot field contains a `Map` or class instance, Model creation fails immediately:
 
 ```ts
 class M extends Model {
-	@state cache = new Map(); // ❌ Will throw on toSnapshot()
+	cache = new Map();
 }
+M.create(); // ❌ Throws; use @transient for a runtime-only cache
 // Error: r-state-tree: snapshots do not support Map at path "cache". ...
 ```
 
@@ -918,7 +963,7 @@ Convert to a plain structure instead:
 
 ```ts
 class M extends Model {
-	@state cache: Record<string, unknown> = {}; // ✅ Plain object
+	cache: Record<string, unknown> = {}; // ✅ Plain object
 }
 ```
 
@@ -926,16 +971,19 @@ class M extends Model {
 
 Snapshots are **memoized computeds**. Once a snapshot is observed (via `onSnapshot`, `onSnapshotDiff`, or `toSnapshot`), subsequent calls return the cached value unless a reactive dependency changes.
 
-Because snapshots are **memoized computeds** and observables are **shallow**, the snapshot cache is invalidated only by:
+During normal application updates, the snapshot cache is invalidated by:
 
-1. **Reassigning** the `@state` field itself.
+1. **Reassigning** the Model snapshot field itself.
 2. **Mutating observable containers** (`observable()`) or **signals** (`signal()`) stored in the field.
 
-**Rule:** Treat raw `@state` values (plain objects/arrays) as immutable. If you mutate them in place without reassignment, the snapshot cache goes stale—`onSnapshot` won't fire and `toSnapshot` returns the old cached value.
+**Rule for application code:** Treat raw Model snapshot values (plain objects/arrays)
+as immutable. If you mutate them in place without reassignment, the snapshot
+cache goes stale—`onSnapshot` won't fire and `toSnapshot` returns the old cached
+value.
 
 ```ts
 class M extends Model {
-	@state tags: string[] = [];
+	tags: string[] = [];
 
 	// ❌ In-place mutation — snapshot cache goes stale
 	addTagBroken(tag: string) {
@@ -954,7 +1002,7 @@ If you need in-place mutations **and** snapshot updates, wrap the value in `obse
 ```ts
 class M extends Model {
 	// ✅ observable() container — in-place mutations invalidate cache
-	@state items: { id: number }[] = observable([]);
+	items: { id: number }[] = observable([]);
 
 	addItem(id: number) {
 		this.items.push({ id }); // onSnapshot fires
@@ -963,7 +1011,7 @@ class M extends Model {
 
 class Counter extends Model {
 	// ✅ signal() — .value updates invalidate cache
-	@state count = signal(0);
+	count = signal(0);
 
 	increment() {
 		this.count.value++; // onSnapshot fires
@@ -973,7 +1021,8 @@ class Counter extends Model {
 
 ### Snapshots and persistence
 
-- Snapshots capture Models (not Stores).
+- Model snapshots capture ordinary Model fields and durable domain trees. Store
+  snapshots capture explicit `@snapshot` session/view fields and keyed reactive children.
 - Hydrate/persist with `applySnapshot` and `onSnapshot`:
 
 ```ts
@@ -999,7 +1048,7 @@ Mutate Models through domain methods and let snapshots record changes automatica
 ```ts
 class TodoModel extends Model {
 	@id id = "";
-	@state title = "";
+	title = "";
 
 	static new(title = "Untitled") {
 		return this.create({
@@ -1045,16 +1094,16 @@ Recommended: configure model properties with decorators.
 Fallback: if you can't or don't want to use decorators, use `static types`.
 
 ```ts
-import { Model, state, id, child, modelRef } from "r-state-tree";
+import { Model, id, child, modelRef } from "r-state-tree";
 
 class User extends Model {
 	@id id = 0;
-	@state name = "";
+	name = "";
 }
 
 class TodoModel extends Model {
 	@id id = 0;
-	@state title = "";
+	title = "";
 	@modelRef(User) assignee?: User; // Reference to another model by ID
 	@child metadata = MetadataModel.create(); // Nested child model
 	@child tags: TagModel[] = []; // Array of child models
@@ -1064,12 +1113,12 @@ class TodoModel extends Model {
 Fallback (no decorators) using `static types`:
 
 ```ts
-import { Model, id, state, child, modelRef } from "r-state-tree";
+import { Model, id, child, modelRef } from "r-state-tree";
 
 class User extends Model {
 	id = 0;
 	name = "";
-	static types = { id, name: state };
+	static types = { id };
 }
 
 class TodoModel extends Model {
@@ -1081,7 +1130,6 @@ class TodoModel extends Model {
 
 	static types = {
 		id,
-		title: state,
 		assignee: modelRef(User),
 		metadata: child(MetadataModel),
 		tags: child(TagModel),
@@ -1133,7 +1181,7 @@ Both `@child` and `@modelRef` support runtime type switching between single valu
 ```ts
 class ItemModel extends Model {
 	@id id = 0;
-	@state value = 0;
+	value = 0;
 }
 
 class ContainerModel extends Model {
@@ -1157,10 +1205,10 @@ class ContainerModel extends Model {
 - Stores
   - `Store`, `createStore`, `mount`, `updateStore`
 - Models
-	- `Model`, `Model.create()`
-  - configuration: decorators (`@state`, `@id`, `@child`, `@modelRef`) or `static types` with `state`, `id`, `child`, `modelRef`
+  - `Model`, `Model.create()`
+  - Model configuration: ordinary fields are snapshotted; use `@transient`, `@id`, `@child`, and `@modelRef` (or their `static types` equivalents)
 - Store configuration
-	- decorator `@child` or `static types` with `child`
+  - decorator `@child` or `static types` with `child`
 - Snapshots
   - `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
   - Types: `Snapshot`, `SnapshotDiff`, `IdType`, `Configuration`
@@ -1267,7 +1315,7 @@ Do:
 - Use `@child` for child stores (getter-based)
 - Use stable `key` values for child stores
 - Mutate **`@child` model collections** and **`observable()` containers** in place (push/splice/set/add/etc.)
-- Treat **raw `@state` arrays/objects** as immutable: use reassignment so snapshots stay up to date (or store an `observable()` container / `signal()` inside `@state`)
+- Treat **raw Model snapshot arrays/objects** as immutable: use reassignment so snapshots stay up to date (or store an `observable()` container / `signal()` in the field)
 
 Don’t:
 
@@ -1351,7 +1399,7 @@ const off = onSnapshot(m, (snap) =>
 
 - Forgetting stable keys for `@child` arrays causes identity churn.
 - Assuming **deep** reactivity: nested plain objects/arrays are not reactive unless you explicitly wrap them (or use `toObservableTree` for initial hydration).
-- Mutating raw `@state` arrays/objects in place (`push`, `obj.x = 1`) and expecting snapshots to update. Snapshots are memoized; use reassignment or store `observable()` containers / `signal()` values in `@state`.
+- Mutating raw Model snapshot arrays/objects in place (`push`, `obj.x = 1`) and expecting snapshots to update. Snapshots are memoized; use reassignment or store `observable()` containers / `signal()` values in the field.
 - Passing observables to third‑party APIs that expect cloneable/serializable values (e.g. `structuredClone`). Use `source(value)` to get the backing value. It will be observable-free for values written via r-state-tree’s observable APIs (unwrap-on-write), but `source(...)` is **not** guaranteed observable-free if you manually seed observables into backing sources.
 - Creating child stores in constructors: `@child` must be on getters so identity and lifecycle can be managed by the framework.
 - Passing props back into child stores during mount can create a recursive mount loop. Break the ownership cycle rather than wiring parent dependencies back through a child during mount.
@@ -1388,9 +1436,9 @@ When child stores are created during mount with props that point back into the p
 
 ## Cheat sheet
 
-- Configuration (no decorators): `static types = { ... }` with `state`, `id`, `child`, `modelRef`, `computed`
-- Decorators (Models): `@state`, `@id`, `@child`, `@modelRef`
-- Decorators (Stores): `@child`
+- Configuration (no decorators): `static types = { ... }` with `transient`, `snapshot`, `id`, `child`, `modelRef`, `computed`
+- Decorators (Models): `@transient`, `@id`, `@child`, `@modelRef`
+- Decorators (Stores): `@snapshot`, `@child`
 - Core: `createStore`, `mount`, `Symbol.dispose`, `updateStore`
 - Snapshots: `onSnapshot`, `toSnapshot`, `applySnapshot`, `onSnapshotDiff`
 - Lifecycle: Store-owned `reaction`/`effect`, reactive `Model.parent`, and `Symbol.dispose`

@@ -1,6 +1,6 @@
 import { observable } from "../observables";
 import type { IdType } from "../types";
-import Model from "./Model";
+import type Model from "./Model";
 
 export type ModelConstructor<T extends Model = Model> = new (
 	...args: any[]

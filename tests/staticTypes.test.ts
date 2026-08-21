@@ -8,7 +8,8 @@ import {
 	child,
 	id,
 	mount,
-	state,
+	snapshot,
+	transient,
 	toSnapshot,
 	updateStore,
 } from "../src/index";
@@ -19,7 +20,6 @@ test("static types config works for models", () => {
 		title = "a";
 		static types: any = {
 			id,
-			title: state,
 		};
 	}
 
@@ -31,7 +31,7 @@ test("static types config works for models", () => {
 
 test("static types takes precedence over decorator metadata for the same key", () => {
 	class M extends Model {
-		@state x = 0;
+		@transient x = 0;
 		static types: any = {
 			x: id,
 		};
@@ -47,7 +47,7 @@ test("static types takes precedence over decorator metadata for the same key", (
 test("configuration merges across inheritance (base decorators + derived static types)", () => {
 	class Child extends Model {
 		@id id = 0;
-		@state name = "";
+		name = "";
 	}
 
 	class Base extends Model {
@@ -76,7 +76,7 @@ test("configuration merges across inheritance (base decorators + derived static 
 test("models can be passed as ordinary typed props", () => {
 	class User extends Model {
 		@id id = 0;
-		@state name = "";
+		name = "";
 	}
 
 	class Profile extends Store<{ user: User }> {}
@@ -142,6 +142,20 @@ test("static types works for store child getters", () => {
 
 	const root = mount(createStore(Root));
 	expect(root.child.x).toBe(1);
+});
+
+test("static types config works for Store snapshot fields", () => {
+	class S extends Store {
+		count = 1;
+		temporary = "runtime only";
+		static types: any = { count: snapshot };
+	}
+
+	const store = mount(createStore(S));
+	expect(toSnapshot(store)).toEqual({
+		state: { count: 1 },
+		children: {},
+	});
 });
 
 test("static types works with context consumption (getter stays passthrough)", () => {

@@ -6,6 +6,8 @@ export type StoreElement = {
 	Type: new (...args: unknown[]) => Store;
 	props: Props;
 	key: string | number;
+	/** Snapshot stashed by applySnapshot before instantiation; consumed by mount(). */
+	snapshot?: StoreSnapshot;
 };
 export type ChildStore = Store | Store[] | null;
 export type Key = string | number | undefined;
@@ -31,9 +33,13 @@ export enum CommonCfgTypes {
 }
 
 export enum ModelCfgTypes {
-	state = "state",
+	transient = "transient",
 	id = "id",
 	modelRef = "modelRef",
+}
+
+export enum StoreCfgTypes {
+	snapshot = "snapshot",
 }
 
 export enum ObservableCfgTypes {
@@ -43,6 +49,7 @@ export enum ObservableCfgTypes {
 export type ConfigurationTypes =
 	| CommonCfgTypes
 	| ModelCfgTypes
+	| StoreCfgTypes
 	| ObservableCfgTypes;
 
 export type ConfigurationValue = {
@@ -60,7 +67,8 @@ export type Configuration<T> = ModelConfiguration<T> | StoreConfiguration<T>;
 
 /**
  * Types that are explicitly rejected in snapshots.
- * Runtime guards enforce this; storing these in `@state` throws on `toSnapshot()`.
+ * Runtime guards enforce this; implicit Model snapshot fields and Store
+ * `@snapshot` fields containing these values throw on `toSnapshot()`.
  */
 type NonSnapshotable =
 	| Map<unknown, unknown>
@@ -74,8 +82,9 @@ type NonSnapshotable =
 /**
  * Converts a type to its snapshot representation.
  *
- * Snapshot contract (JSON-only):
- * - Primitives (string, number, boolean, null, undefined) pass through.
+ * Snapshot contract:
+ * - Supported JavaScript primitives pass through, including undefined and
+ *   non-finite numbers. Applications choose their own transport codec.
  * - Arrays are recursively converted.
  * - Plain objects are recursively converted (see note below).
  * - Date → string (ISO format).
@@ -106,13 +115,7 @@ export type SnapshotValue<T> = T extends bigint | symbol | Function
 	: T;
 
 export type Snapshot<T extends Model = Model> = {
-	[K in keyof T]?: T[K] extends infer U
-		? U extends Model | Model[]
-			? SnapshotValue<U> | null
-			: U extends null | undefined
-			? null
-			: SnapshotValue<Exclude<U, null | undefined>> | null
-		: never;
+	[K in keyof T]?: SnapshotValue<T[K]> | null;
 };
 
 export type SnapshotDiff<T extends Model = Model> = {
@@ -125,6 +128,20 @@ export type SnapshotChange<T extends Model = Model> = (
 	model: T
 ) => void;
 
+export type StoreSnapshot = {
+	state: Record<string, unknown>;
+	children: Record<string, StoreChildSnapshot | StoreChildSnapshot[] | null>;
+};
+
+export type StoreChildSnapshot = StoreSnapshot & {
+	key?: string | number;
+};
+
+export type StoreSnapshotChange<T extends Store = Store> = (
+	snapshot: StoreSnapshot,
+	store: T
+) => void;
+
 export type RefSnapshot = { [key: string]: IdType; [key: number]: IdType };
 
 export const childType = Object.assign(
@@ -134,8 +151,12 @@ export const childType = Object.assign(
 	{ type: CommonCfgTypes.child }
 );
 
-export const stateType: ConfigurationValue = {
-	type: ModelCfgTypes.state,
+export const transientType: ConfigurationValue = {
+	type: ModelCfgTypes.transient,
+};
+
+export const snapshotType: ConfigurationValue = {
+	type: StoreCfgTypes.snapshot,
 };
 
 export const modelRefType = Object.assign(

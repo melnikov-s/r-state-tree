@@ -4,15 +4,15 @@ Use this reference when creating or reviewing Stores, Models, Store Context, sna
 
 ## Store and Model placement
 
-| Concern | Owner |
-| --- | --- |
-| Serializable domain data | `Model` |
-| Domain invariants and mutations | `Model` |
-| Identifiers and model references | `Model` |
-| View/session state | `Store` |
-| Async orchestration, routing, timers | `Store` |
-| Mounted subscriptions/resources | `Store` |
-| Tiny DOM/view-only state | UI framework |
+| Concern                              | Owner        |
+| ------------------------------------ | ------------ |
+| Serializable domain data             | `Model`      |
+| Domain invariants and mutations      | `Model`      |
+| Identifiers and model references     | `Model`      |
+| View/session state                   | `Store`      |
+| Async orchestration, routing, timers | `Store`      |
+| Mounted subscriptions/resources      | `Store`      |
+| Tiny DOM/view-only state             | UI framework |
 
 Models are inert serializable state trees. Stores are behavioral trees with mounted lifetimes. Referencing a Model from a Store does not make the Store a persistence boundary.
 
@@ -55,9 +55,7 @@ class ItemStore extends Store<{ id: string }> {}
 
 class ListStore extends Store<{ ids: string[] }> {
 	@child get items() {
-		return this.props.ids.map((id) =>
-			createStore(ItemStore, { key: id, id })
-		);
+		return this.props.ids.map((id) => createStore(ItemStore, { key: id, id }));
 	}
 }
 ```
@@ -100,12 +98,12 @@ Use one source for a dependency. Do not alternate between an explicit prop and a
 Create Models with `Model.create()` and configure persisted fields with decorators or `static types`:
 
 ```ts
-import { child, id, Model, state } from "r-state-tree";
+import { child, id, Model } from "r-state-tree";
 
 class TodoModel extends Model {
 	@id id = "";
-	@state title = "";
-	@state completed = false;
+	title = "";
+	completed = false;
 
 	complete() {
 		this.completed = true;
@@ -132,7 +130,12 @@ Use:
 - `findModelById(root, ModelType, id)` for typed identifier lookup;
 - `@modelRef(ModelType)` for references to attached Models of that exact type.
 
-Snapshots belong to Models, not Stores.
+Models and Stores both support snapshots. Ordinary Model fields are included by
+default; mark runtime-only Model fields with `@transient`. Store snapshots include
+explicit `@snapshot` session/view fields and keyed reactive children. Hydrate via
+`mount(createStore(Type), { snapshot })`, or with `applySnapshot(store, snapshot)`
+before or after mounting (post-mount application reconciles children like any
+reactive update).
 
 ## Observable behavior
 

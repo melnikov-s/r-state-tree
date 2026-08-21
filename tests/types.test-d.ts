@@ -44,6 +44,9 @@ const _numCheck: number = numSnap;
 declare const boolSnap: SnapshotValue<boolean>;
 const _boolCheck: boolean = boolSnap;
 
+declare const undefinedSnap: SnapshotValue<undefined>;
+const _undefinedCheck: undefined = undefinedSnap;
+
 // Test: Arrays are recursively mapped
 declare const arrSnap: SnapshotValue<Date[]>;
 const _arrCheck: string[] = arrSnap;
@@ -121,6 +124,7 @@ void _dateCheck;
 void _strCheck;
 void _numCheck;
 void _boolCheck;
+void _undefinedCheck;
 void _arrCheck;
 void _objCheck;
 void _objWithSignalCheck;

@@ -53,5 +53,7 @@ export type {
 	SnapshotValue,
 	IdType,
 	SnapshotDiff,
+	StoreSnapshot,
+	StoreChildSnapshot,
 } from "./types";
 export type { Context } from "./context";

@@ -1,5 +1,11 @@
 import "@tsmetadata/polyfill";
-import { childType, modelRefType, idType, stateType } from "./types";
+import {
+	childType,
+	modelRefType,
+	idType,
+	transientType,
+	snapshotType,
+} from "./types";
 
 function makeDecorator(type: unknown): any {
 	return function <T>(value: T, context: DecoratorContext): T {
@@ -45,4 +51,5 @@ export function modelRef<T extends Function>(
 	return modelRefDecorator(childCtor);
 }
 export const id = makeDecorator(idType);
-export const state = makeDecorator(stateType);
+export const transient = makeDecorator(transientType);
+export const snapshot = makeDecorator(snapshotType);

@@ -3,10 +3,12 @@ import {
 	id,
 	modelRef,
 	child,
-	state,
+	transient,
 	toSnapshot,
 	applySnapshot,
 	onSnapshot,
+	onSnapshotDiff,
+	computed,
 	effect,
 	reaction,
 	isObservable,
@@ -21,6 +23,28 @@ test("can create a model", () => {
 	const model = M.create();
 
 	expect(model instanceof Model).toBe(true);
+});
+
+test("ordinary Model fields are snapshotted and transient fields are excluded", () => {
+	class M extends Model {
+		title = "saved";
+		@transient cache = observable(new Map<string, number>());
+	}
+
+	const model = M.create();
+	model.cache.set("runtime", 1);
+
+	expect(toSnapshot(model)).toEqual({ title: "saved" });
+});
+
+test("unsupported implicit Model fields fail during creation", () => {
+	class M extends Model {
+		cache = new Map<string, number>();
+	}
+
+	expect(() => M.create()).toThrow(
+		/snapshots do not support Map.*cache.*Mark runtime-only Model fields with @transient/
+	);
 });
 
 test("parent reactions observe detach and reattach transitions", () => {
@@ -59,7 +83,7 @@ test("parent reactions observe detach and reattach transitions", () => {
 test("named factories can prepare input before creating a model", () => {
 	class Item extends Model {
 		@id id?: number;
-		@state title = "";
+		title = "";
 
 		static fromTitle(title = "new") {
 			return this.create({ id: 1, title: title.trim() });
@@ -73,9 +97,7 @@ test("named factories can prepare input before creating a model", () => {
 
 test("root snapshots stay fresh when nested child model updates an observable state array", () => {
 	class Chat extends Model {
-		@state messages: { id: number; parts: { type: string }[] }[] = observable(
-			[]
-		);
+		messages: { id: number; parts: { type: string }[] }[] = observable([]);
 
 		setMessages(ids: number[]) {
 			this.messages.splice(
@@ -88,7 +110,7 @@ test("root snapshots stay fresh when nested child model updates an observable st
 
 	class Threads extends Model {
 		@child(Chat) chats: Chat[] = [Chat.create()];
-		@state activeChatId = "";
+		activeChatId = "";
 	}
 
 	class Root extends Model {
@@ -146,10 +168,8 @@ test("root snapshots stay fresh when nested child model updates an observable st
 
 test("root snapshots stay fresh after adding a child model and then mutating its observable state array", () => {
 	class Chat extends Model {
-		@state id = "";
-		@state messages: { id: number; parts: { type: string }[] }[] = observable(
-			[]
-		);
+		id = "";
+		messages: { id: number; parts: { type: string }[] }[] = observable([]);
 
 		setMessages(ids: number[]) {
 			this.messages.splice(
@@ -162,7 +182,7 @@ test("root snapshots stay fresh after adding a child model and then mutating its
 
 	class Threads extends Model {
 		@child(Chat) chats: Chat[] = [];
-		@state activeChatId = "";
+		activeChatId = "";
 
 		addChat(chat: Chat) {
 			this.chats.push(chat);
@@ -219,10 +239,10 @@ test("root snapshots stay fresh after adding a child model and then mutating its
 	off();
 });
 
-test("snapshot hydration preserves observable @state containers and references", () => {
+test("snapshot hydration preserves observable containers and references", () => {
 	class Chat extends Model {
-		@state messages: { id: number }[] = observable([]);
-		@state draft = observable({ title: "", unread: 0 });
+		messages: { id: number }[] = observable([]);
+		draft = observable({ title: "", unread: 0 });
 
 		setMessages(ids: number[]) {
 			this.messages.splice(
@@ -270,10 +290,10 @@ test("snapshot hydration preserves observable @state containers and references",
 	});
 });
 
-test("snapshot hydration preserves plain @state container references", () => {
+test("snapshot hydration preserves plain container references", () => {
 	class Chat extends Model {
-		@state messages: { id: number }[] = [];
-		@state draft = { title: "", unread: 0 };
+		messages: { id: number }[] = [];
+		draft = { title: "", unread: 0 };
 	}
 
 	const chat = Chat.create({
@@ -294,9 +314,9 @@ test("snapshot hydration preserves plain @state container references", () => {
 	expect(chat.draft).toStrictEqual({ title: "updated", unread: 2 });
 });
 
-test("snapshot hydration preserves nested plain @state references by index", () => {
+test("snapshot hydration preserves nested plain references by index", () => {
 	class Chat extends Model {
-		@state messages: {
+		messages: {
 			id: number;
 			meta: { unread: number };
 		}[] = [];
@@ -327,9 +347,9 @@ test("snapshot hydration preserves nested plain @state references by index", () 
 	});
 });
 
-test("hydrated observable arrays in @state stay live for in-place mutation", () => {
+test("hydrated observable arrays in stay live for in-place mutation", () => {
 	class Chat extends Model {
-		@state messages: { id: number }[] = observable([]);
+		messages: { id: number }[] = observable([]);
 
 		setMessages(ids: number[]) {
 			this.messages.splice(
@@ -360,7 +380,7 @@ test("direct new calls are disallowed", () => {
 describe("model attachment", () => {
 	test("the initial snapshot is loaded before create returns", () => {
 		class M extends Model {
-			@state prop = 0;
+			prop = 0;
 		}
 
 		const m = M.create({ prop: 1 });
@@ -369,7 +389,7 @@ describe("model attachment", () => {
 
 	test("named factories accept domain-specific creation parameters", () => {
 		class M extends Model {
-			@state prop = 0;
+			prop = 0;
 			static fromValue(prop: number) {
 				return this.create({ prop });
 			}
@@ -380,7 +400,7 @@ describe("model attachment", () => {
 
 	test("snapshot loading is batched", () => {
 		class M extends Model {
-			@state count = 0;
+			count = 0;
 		}
 
 		const m = M.create({ count: 1 });
@@ -389,7 +409,7 @@ describe("model attachment", () => {
 
 	test("models can be created without a snapshot", () => {
 		class M extends Model {
-			@state prop = 0;
+			prop = 0;
 		}
 
 		const m = M.create();
@@ -612,7 +632,7 @@ test("can re-attach an detached model", () => {
 
 test("can have a child model", () => {
 	class MC extends Model {
-		@state state = 0;
+		state = 0;
 	}
 
 	class M extends Model {
@@ -740,7 +760,7 @@ describe("model identifiers", () => {
 	test("correct id shows up in snapshot after being re-assigned", () => {
 		class M extends Model {
 			@id myId = 1;
-			@state test = "me";
+			test = "me";
 
 			setId() {
 				this.myId = 2;
@@ -756,7 +776,7 @@ describe("model identifiers", () => {
 		mp.m.setId();
 		expect(toSnapshot(mp)).toStrictEqual({
 			m: { myId: 2, test: "me" },
-			mr: undefined,
+			mr: { myId: 1 },
 		});
 	});
 
@@ -837,7 +857,7 @@ describe("runtime type switching", () => {
 	describe("child property switching", () => {
 		test("can switch from single child to array of children", () => {
 			class MC extends Model {
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -873,7 +893,7 @@ describe("runtime type switching", () => {
 
 		test("can switch from array of children to single child", () => {
 			class MC extends Model {
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -907,7 +927,7 @@ describe("runtime type switching", () => {
 
 		test("switching child types is reactive", () => {
 			class MC extends Model {
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -947,7 +967,7 @@ describe("runtime type switching", () => {
 
 		test("parent references are correct after switching", () => {
 			class MC extends Model {
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -975,7 +995,7 @@ describe("runtime type switching", () => {
 		test("can switch from single modelRef to array of modelRefs", () => {
 			class MC extends Model {
 				@id id!: any;
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -1016,7 +1036,7 @@ describe("runtime type switching", () => {
 		test("can switch from array of modelRefs to single modelRef", () => {
 			class MC extends Model {
 				@id id!: any;
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -1055,7 +1075,7 @@ describe("runtime type switching", () => {
 		test("switching modelRef types is reactive", () => {
 			class MC extends Model {
 				@id id!: any;
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -1106,7 +1126,7 @@ describe("runtime type switching", () => {
 		test("snapshots work correctly when switching child types", () => {
 			class MC extends Model {
 				@id id!: any;
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -1140,7 +1160,7 @@ describe("runtime type switching", () => {
 		test("can load snapshot with different type than current", () => {
 			class MC extends Model {
 				@id id!: any;
-				@state value = 0;
+				value = 0;
 			}
 
 			class M extends Model {
@@ -1324,7 +1344,7 @@ describe("model references", () => {
 	test("snapshot reconciliation uses the declared child type with overlapping ids", () => {
 		class User extends Model {
 			@id id!: number;
-			@state name = "";
+			name = "";
 		}
 		class Project extends Model {
 			@id id!: number;
@@ -1414,11 +1434,11 @@ describe("model references", () => {
 	test("singular snapshot reconciliation uses the declared child type", () => {
 		class User extends Model {
 			@id id = 1;
-			@state name = "";
+			name = "";
 		}
 		class Project extends Model {
 			@id id = 1;
-			@state name = "";
+			name = "";
 		}
 		class Root extends Model {
 			@child(User) item: User = Project.create() as unknown as User;
@@ -1505,7 +1525,7 @@ describe("model references", () => {
 		}
 
 		class M extends Model {
-			mctemp = MC.create({ id: 1 });
+			@transient mctemp = MC.create({ id: 1 });
 			@child mc: MC | null = null;
 			@modelRef(MC) mr: MC = this.mctemp as any;
 
@@ -1645,7 +1665,7 @@ describe("model references", () => {
 		class M extends Model {
 			@child mc: MC = MC.create();
 			@modelRef(MC) mr!: MC | null;
-			@state setRef: boolean = false;
+			setRef: boolean = false;
 
 			clearModel() {
 				temp = this.mc;
@@ -1824,13 +1844,13 @@ describe("child type validation", () => {
 	});
 });
 
-// `@state` is shallow-reactive (assignment triggers reactivity) and participates in snapshots.
-// Values stored in `@state` are not deep-wrapped. Treat plain objects/arrays as immutable, or
+// Ordinary Model fields are shallow-reactive and participate in snapshots by default.
+// Their values are not deep-wrapped. Treat plain objects/arrays as immutable, or
 // store `observable()` containers / `signal()` values if you need in-place mutation + snapshot updates.
-describe("@state (snapshots; shallow by default)", () => {
-	test("@state fields are reactive on assignment (property-level)", () => {
+describe("implicit Model snapshot fields", () => {
+	test("fields are reactive on assignment (property-level)", () => {
 		class M extends Model {
-			@state title = "a";
+			title = "a";
 			setTitle(t: string) {
 				this.title = t;
 			}
@@ -1848,9 +1868,9 @@ describe("@state (snapshots; shallow by default)", () => {
 		expect(count).toBe(2);
 	});
 
-	test("toSnapshot updates after @state assignment (no stale cache)", () => {
+	test("toSnapshot updates after assignment (no stale cache)", () => {
 		class M extends Model {
-			@state title = "a";
+			title = "a";
 			setTitle(t: string) {
 				this.title = t;
 			}
@@ -1862,9 +1882,9 @@ describe("@state (snapshots; shallow by default)", () => {
 		expect(toSnapshot(m)).toStrictEqual({ title: "b" });
 	});
 
-	test("@state + observable() container mutations update snapshots", () => {
+	test("observable() container mutations update snapshots", () => {
 		class M extends Model {
-			@state items: { value: number }[] = observable([]);
+			items: { value: number }[] = observable([]);
 			addItem(value: number) {
 				this.items.push({ value });
 			}
@@ -1879,9 +1899,9 @@ describe("@state (snapshots; shallow by default)", () => {
 		expect(isObservable(m.items[0])).toBe(false);
 	});
 
-	test("@state + nested observable() containers update snapshots on deep mutation", () => {
+	test("nested observable() containers update snapshots on deep mutation", () => {
 		class M extends Model {
-			@state data = observable({ nested: observable({ value: 1 }) });
+			data = observable({ nested: observable({ value: 1 }) });
 		}
 
 		const m = M.create();
@@ -1890,9 +1910,9 @@ describe("@state (snapshots; shallow by default)", () => {
 		expect(toSnapshot(m)).toStrictEqual({ data: { nested: { value: 2 } } });
 	});
 
-	test("@state + signal() serializes current value and stays up to date", () => {
+	test("signal() serializes current value and stays up to date", () => {
 		class M extends Model {
-			@state count = signal(0);
+			count = signal(0);
 		}
 
 		const m = M.create();
@@ -1903,7 +1923,7 @@ describe("@state (snapshots; shallow by default)", () => {
 
 	test("raw in-place mutation does NOT trigger onSnapshot; reassignment does", () => {
 		class M extends Model {
-			@state tags: string[] = [];
+			tags: string[] = [];
 
 			pushTag(tag: string) {
 				this.tags.push(tag); // in-place
@@ -1937,9 +1957,9 @@ describe("@state (snapshots; shallow by default)", () => {
 		off();
 	});
 
-	test("observable() container in @state triggers onSnapshot on mutation", () => {
+	test("observable() container triggers onSnapshot on mutation", () => {
 		class M extends Model {
-			@state items: { id: number }[] = observable([]);
+			items: { id: number }[] = observable([]);
 
 			addItem(id: number) {
 				this.items.push({ id });
@@ -1961,9 +1981,25 @@ describe("@state (snapshots; shallow by default)", () => {
 		off();
 	});
 
+	test("applying an unchanged observable array snapshot does not emit", () => {
+		class M extends Model {
+			items: number[] = observable([1, 2]);
+		}
+
+		const m = M.create();
+		const snapshot = toSnapshot(m);
+		const snapshots: unknown[] = [];
+		const stop = onSnapshot(m, (nextSnapshot) => snapshots.push(nextSnapshot));
+
+		applySnapshot(m, snapshot);
+
+		expect(snapshots).toEqual([]);
+		stop();
+	});
+
 	test("state is included in snapshots", () => {
 		class M extends Model {
-			@state items: { value: number }[] = [];
+			items: { value: number }[] = [];
 
 			addItem(value: number) {
 				this.items.push({ value });
@@ -1980,7 +2016,7 @@ describe("@state (snapshots; shallow by default)", () => {
 
 	test("state can be restored from snapshot", () => {
 		class M extends Model {
-			@state items: { value: number }[] = [];
+			items: { value: number }[] = [];
 		}
 
 		const m = M.create();
@@ -1991,9 +2027,37 @@ describe("@state (snapshots; shallow by default)", () => {
 		expect(isObservable(m.items[0])).toBe(false);
 	});
 
+	test("invalidates changed raw state after in-place hydration without replacing it", () => {
+		class M extends Model {
+			settings = { theme: "light" };
+
+			@computed get theme() {
+				return this.settings.theme;
+			}
+		}
+
+		const m = M.create();
+		const settings = m.settings;
+		const snapshots: unknown[] = [];
+		const stop = onSnapshot(m, (snapshot) => snapshots.push(snapshot));
+
+		expect(m.theme).toBe("light");
+
+		applySnapshot(m, { settings: { theme: "dark" } });
+
+		expect(m.settings).toBe(settings);
+		expect(m.theme).toBe("dark");
+		expect(snapshots).toEqual([{ settings: { theme: "dark" } }]);
+
+		applySnapshot(m, { settings: { theme: "dark" } });
+
+		expect(snapshots).toHaveLength(1);
+		stop();
+	});
+
 	test("state allows structuredClone of values", () => {
 		class M extends Model {
-			@state data: { value: number } = { value: 1 };
+			data: { value: number } = { value: 1 };
 		}
 
 		const m = M.create();
@@ -2003,11 +2067,148 @@ describe("@state (snapshots; shallow by default)", () => {
 	});
 });
 
-describe("snapshot serialization rules (JSON-only)", () => {
+describe("snapshot serialization rules", () => {
+	test("preserves JavaScript primitive values for application codecs", () => {
+		class M extends Model {
+			missing: unknown = undefined;
+			notANumber = Number.NaN;
+			positiveInfinity = Infinity;
+			negativeInfinity = -Infinity;
+		}
+
+		const m = M.create();
+		const snapshot = toSnapshot(m);
+
+		expect(snapshot.missing).toBeUndefined();
+		expect(snapshot.notANumber).toBeNaN();
+		expect(snapshot.positiveInfinity).toBe(Infinity);
+		expect(snapshot.negativeInfinity).toBe(-Infinity);
+	});
+
+	test("does not report unchanged NaN state in snapshot diffs", () => {
+		class M extends Model {
+			notANumber = Number.NaN;
+			count = 0;
+		}
+
+		const m = M.create();
+		const diffs: unknown[] = [];
+		const stop = onSnapshotDiff(m, (diff) => diffs.push(diff));
+
+		m.count = 1;
+
+		expect(diffs).toEqual([
+			{
+				undo: { count: 0 },
+				redo: { count: 1 },
+			},
+		]);
+		stop();
+	});
+
+	test("serializes an unresolved model ref as null", () => {
+		class Item extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(Item) items: Item[] = [];
+			@modelRef(Item) selected?: Item;
+		}
+
+		const root = Root.create();
+		const snapshot = toSnapshot(root);
+
+		expect(snapshot).toEqual({ items: [], selected: null });
+		expect(JSON.parse(JSON.stringify(snapshot))).toEqual(snapshot);
+		expect(() => applySnapshot(root, snapshot)).not.toThrow();
+		expect(root.selected).toBeUndefined();
+	});
+
+	test("round-trips null child snapshots without creating a child", () => {
+		class Child extends Model {}
+		class Root extends Model {
+			@child(Child) child: Child | null = null;
+		}
+
+		const root = Root.create();
+		const snapshot = JSON.parse(JSON.stringify(toSnapshot(root)));
+
+		expect(snapshot).toEqual({ child: null });
+		expect(() => applySnapshot(root, snapshot)).not.toThrow();
+		expect(root.child).toBeNull();
+	});
+
+	test("diffs transitions to and from a null child snapshot", () => {
+		class Child extends Model {
+			value = 1;
+		}
+		class Root extends Model {
+			@child(Child) child: Child | null = null;
+		}
+
+		const root = Root.create();
+		const diffs: unknown[] = [];
+		const stop = onSnapshotDiff(root, (diff) => diffs.push(diff));
+
+		root.child = Child.create();
+		root.child = null;
+
+		expect(diffs).toEqual([
+			{
+				undo: { child: null },
+				redo: { child: { value: 1 } },
+			},
+			{
+				undo: { child: { value: 1 } },
+				redo: { child: null },
+			},
+		]);
+		stop();
+	});
+
+	test("round-trips null snapshots for child types with identifiers", () => {
+		class Child extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@child(Child) child: Child | null = null;
+		}
+
+		const root = Root.create();
+		const snapshot = JSON.parse(JSON.stringify(toSnapshot(root)));
+
+		expect(snapshot).toEqual({ child: null });
+		expect(() => applySnapshot(root, snapshot)).not.toThrow();
+		expect(root.child).toBeNull();
+	});
+
+	test("preserves unresolved model ref ids in snapshots", () => {
+		class Item extends Model {
+			@id id!: number;
+		}
+		class Root extends Model {
+			@child(Item) items = [Item.create({ id: 1 })];
+			@modelRef(Item) selected: Item | undefined = this.items[0];
+		}
+
+		const root = Root.create();
+		const selected = root.items[0];
+		root.items = [];
+
+		expect(root.selected).toBeUndefined();
+		expect(toSnapshot(root)).toEqual({
+			items: [],
+			selected: { id: 1 },
+		});
+
+		root.items = [selected];
+		expect(root.selected).toBe(selected);
+	});
+
 	describe("Date serialization", () => {
 		test("Date serializes to ISO string in snapshots", () => {
 			class M extends Model {
-				@state createdAt: Date = new Date("2024-01-15T10:30:00.000Z");
+				createdAt: Date = new Date("2024-01-15T10:30:00.000Z");
 			}
 
 			const m = M.create();
@@ -2017,9 +2218,53 @@ describe("snapshot serialization rules (JSON-only)", () => {
 			expect(typeof snapshot.createdAt).toBe("string");
 		});
 
+		test("Date state hydrates back into the runtime Date shape", () => {
+			class M extends Model {
+				createdAt = new Date("2024-01-15T10:30:00.000Z");
+				nested = {
+					updatedAt: new Date("2024-01-16T10:30:00.000Z"),
+				};
+			}
+
+			const m = M.create();
+			applySnapshot(m, {
+				createdAt: "2025-02-01T12:00:00.000Z",
+				nested: { updatedAt: "2025-02-02T12:00:00.000Z" },
+			});
+
+			expect(m.createdAt).toBeInstanceOf(Date);
+			expect(m.createdAt.toISOString()).toBe("2025-02-01T12:00:00.000Z");
+			expect(m.nested.updatedAt).toBeInstanceOf(Date);
+			expect(m.nested.updatedAt.toISOString()).toBe("2025-02-02T12:00:00.000Z");
+		});
+
+		test("observable Date state remains observable after hydration", () => {
+			class M extends Model {
+				createdAt = observable(new Date("2024-01-15T10:30:00.000Z"));
+			}
+
+			const m = M.create();
+			applySnapshot(m, {
+				createdAt: "2025-02-01T12:00:00.000Z",
+			});
+
+			expect(isObservable(m.createdAt)).toBe(true);
+
+			const snapshots: unknown[] = [];
+			const stop = onSnapshot(m, (snapshot) => snapshots.push(snapshot));
+
+			m.createdAt.setUTCFullYear(2026);
+
+			expect(snapshots).toEqual([{ createdAt: "2026-02-01T12:00:00.000Z" }]);
+			expect(toSnapshot(m)).toEqual({
+				createdAt: "2026-02-01T12:00:00.000Z",
+			});
+			stop();
+		});
+
 		test("Date in nested object serializes to ISO string", () => {
 			class M extends Model {
-				@state data = { timestamp: new Date("2024-06-20T15:00:00.000Z") };
+				data = { timestamp: new Date("2024-06-20T15:00:00.000Z") };
 			}
 
 			const m = M.create();
@@ -2032,7 +2277,7 @@ describe("snapshot serialization rules (JSON-only)", () => {
 
 		test("Date in array serializes to ISO string", () => {
 			class M extends Model {
-				@state dates: Date[] = [
+				dates: Date[] = [
 					new Date("2024-01-01T00:00:00.000Z"),
 					new Date("2024-12-31T23:59:59.999Z"),
 				];
@@ -2046,12 +2291,29 @@ describe("snapshot serialization rules (JSON-only)", () => {
 				"2024-12-31T23:59:59.999Z",
 			]);
 		});
+
+		test("Date array hydration preserves the element shape when the array grows", () => {
+			class M extends Model {
+				dates = [new Date("2024-01-01T00:00:00.000Z")];
+			}
+
+			const m = M.create({
+				dates: ["2025-01-01T00:00:00.000Z", "2025-01-02T00:00:00.000Z"],
+			});
+
+			expect(m.dates).toHaveLength(2);
+			expect(m.dates.every((date) => date instanceof Date)).toBe(true);
+			expect(m.dates.map((date) => date.toISOString())).toEqual([
+				"2025-01-01T00:00:00.000Z",
+				"2025-01-02T00:00:00.000Z",
+			]);
+		});
 	});
 
 	describe("Signal serialization", () => {
 		test("signals serialize to their current .value in snapshots", () => {
 			class M extends Model {
-				@state count = signal(42);
+				count = signal(42);
 			}
 
 			const m = M.create();
@@ -2061,9 +2323,21 @@ describe("snapshot serialization rules (JSON-only)", () => {
 			expect(typeof snapshot.count).toBe("number");
 		});
 
+		test("Signal array hydration preserves distinct elements when the array grows", () => {
+			class M extends Model {
+				counts = [signal(0)];
+			}
+
+			const m = M.create({ counts: [1, 2] });
+
+			expect(m.counts).toHaveLength(2);
+			expect(m.counts[0]).not.toBe(m.counts[1]);
+			expect(m.counts.map((count) => count.value)).toEqual([1, 2]);
+		});
+
 		test("signal with object value serializes the object", () => {
 			class M extends Model {
-				@state data = signal({ nested: { value: 123 } });
+				data = signal({ nested: { value: 123 } });
 			}
 
 			const m = M.create();
@@ -2074,7 +2348,7 @@ describe("snapshot serialization rules (JSON-only)", () => {
 
 		test("signal with array value serializes the array", () => {
 			class M extends Model {
-				@state items = signal([1, 2, 3]);
+				items = signal([1, 2, 3]);
 			}
 
 			const m = M.create();
@@ -2085,7 +2359,7 @@ describe("snapshot serialization rules (JSON-only)", () => {
 
 		test("signal with Date value serializes to ISO string", () => {
 			class M extends Model {
-				@state when = signal(new Date("2024-03-15T12:00:00.000Z"));
+				when = signal(new Date("2024-03-15T12:00:00.000Z"));
 			}
 
 			const m = M.create();
@@ -2096,149 +2370,128 @@ describe("snapshot serialization rules (JSON-only)", () => {
 	});
 
 	describe("Non-plain object rejection", () => {
-		test("Map in @state throws on snapshot", () => {
+		test("Map field fails during creation", () => {
 			class M extends Model {
-				@state data = new Map([["key", "value"]]);
+				data = new Map([["key", "value"]]);
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support Map at path "data"/
 			);
 		});
 
-		test("Set in @state throws on snapshot", () => {
+		test("Set field fails during creation", () => {
 			class M extends Model {
-				@state items = new Set([1, 2, 3]);
+				items = new Set([1, 2, 3]);
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support Set at path "items"/
 			);
 		});
 
-		test("WeakMap in @state throws on snapshot", () => {
+		test("WeakMap field fails during creation", () => {
 			class M extends Model {
-				@state cache = new WeakMap();
+				cache = new WeakMap();
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support WeakMap at path "cache"/
 			);
 		});
 
-		test("WeakSet in @state throws on snapshot", () => {
+		test("WeakSet field fails during creation", () => {
 			class M extends Model {
-				@state visited = new WeakSet();
+				visited = new WeakSet();
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support WeakSet at path "visited"/
 			);
 		});
 
-		test("class instance in @state throws on snapshot", () => {
+		test("class instance field fails during creation", () => {
 			class CustomClass {
 				value = 42;
 			}
 
 			class M extends Model {
-				@state instance = new CustomClass();
+				instance = new CustomClass();
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support class instance \(CustomClass\) at path "instance"/
 			);
 		});
 
 		test("nested Map throws with correct path", () => {
 			class M extends Model {
-				@state data = { level1: { level2: new Map() } };
+				data = { level1: { level2: new Map() } };
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support Map at path "data\.level1\.level2"/
 			);
 		});
 
 		test("Map in array throws with correct path", () => {
 			class M extends Model {
-				@state items: any[] = [{ nested: new Map() }];
+				items: any[] = [{ nested: new Map() }];
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support Map at path "items\[0\]\.nested"/
 			);
 		});
 
-		test("RegExp in @state throws on snapshot", () => {
+		test("RegExp field fails during creation", () => {
 			class M extends Model {
-				@state pattern = /test/gi;
+				pattern = /test/gi;
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support RegExp at path "pattern"/
 			);
 		});
 
-		test("Error in @state throws on snapshot", () => {
+		test("Error field fails during creation", () => {
 			class M extends Model {
-				@state lastError = new Error("oops");
+				lastError = new Error("oops");
 			}
 
-			const m = M.create();
-
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support Error at path "lastError"/
 			);
 		});
 	});
 
-	describe("Non-JSON primitive rejection", () => {
-		test("bigint in @state throws on snapshot", () => {
+	describe("Unsupported primitive rejection", () => {
+		test("bigint field fails during creation", () => {
 			class M extends Model {
-				@state id = 1n;
+				id = 1n;
 			}
 
-			const m = M.create();
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support bigint at path "id"/
 			);
 		});
 
-		test("symbol in @state throws on snapshot", () => {
+		test("symbol field fails during creation", () => {
 			class M extends Model {
-				@state token = Symbol("t");
+				token = Symbol("t");
 			}
 
-			const m = M.create();
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support symbol at path "token"/
 			);
 		});
 
-		test("function in @state throws on snapshot", () => {
+		test("function field fails during creation", () => {
 			class M extends Model {
-				@state fn = () => 1;
+				fn = () => 1;
 			}
 
-			const m = M.create();
-			expect(() => toSnapshot(m)).toThrowError(
+			expect(() => M.create()).toThrowError(
 				/r-state-tree: snapshots do not support function at path "fn"/
 			);
 		});
@@ -2247,7 +2500,7 @@ describe("snapshot serialization rules (JSON-only)", () => {
 	describe("Valid snapshot values", () => {
 		test("plain objects are allowed", () => {
 			class M extends Model {
-				@state data = { a: 1, b: { c: 2 } };
+				data = { a: 1, b: { c: 2 } };
 			}
 
 			const m = M.create();
@@ -2258,7 +2511,7 @@ describe("snapshot serialization rules (JSON-only)", () => {
 
 		test("arrays are allowed", () => {
 			class M extends Model {
-				@state items = [1, "two", { three: 3 }];
+				items = [1, "two", { three: 3 }];
 			}
 
 			const m = M.create();
@@ -2269,10 +2522,10 @@ describe("snapshot serialization rules (JSON-only)", () => {
 
 		test("primitives are allowed", () => {
 			class M extends Model {
-				@state str = "hello";
-				@state num = 42;
-				@state bool = true;
-				@state nil: null = null;
+				str = "hello";
+				num = 42;
+				bool = true;
+				nil: null = null;
 			}
 
 			const m = M.create();
@@ -2286,7 +2539,7 @@ describe("snapshot serialization rules (JSON-only)", () => {
 
 		test("null prototype objects are allowed", () => {
 			class M extends Model {
-				@state data = Object.create(null);
+				data = Object.create(null);
 			}
 
 			const m = M.create();

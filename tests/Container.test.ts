@@ -7,6 +7,7 @@ import {
 	effect,
 	observable,
 	computed,
+	transient,
 } from "../src/index";
 
 export function createContainer<
@@ -128,6 +129,8 @@ export function createContainer<
 				}
 
 				_stateB = observable({ value: new Map() });
+				static types: any =
+					Container === Model ? { _stateA: transient, _stateB: transient } : {};
 				get stateB() {
 					return this._stateB.value;
 				}
@@ -176,6 +179,8 @@ export function createContainer<
 				}
 
 				_stateB = observable({ value: new Set() });
+				static types: any =
+					Container === Model ? { _stateA: transient, _stateB: transient } : {};
 				get stateB() {
 					return this._stateB.value;
 				}
@@ -360,6 +365,7 @@ export function createContainer<
 	test(`(${Container.name}) has dynamic observable properties`, async () => {
 		class S extends Container {
 			map = observable(new Map());
+			static types: any = Container === Model ? { map: transient } : {};
 
 			@computed get valueGetter() {
 				return this.map.get("value");
