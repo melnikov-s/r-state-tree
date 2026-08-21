@@ -8,7 +8,6 @@ import {
 	createComputed,
 	createAtom,
 	reaction,
-	Signal,
 } from "../observables";
 import type { ComputedNode, AtomNode } from "../observables";
 import Model from "../model/Model";
@@ -27,7 +26,7 @@ import {
 	onModelDetached,
 	setIdentifier,
 } from "./idMap";
-import { clone } from "../utils";
+import { clone, hydrateSnapshotValue } from "../utils";
 import {
 	getConfigChildType,
 	getConfigType,
@@ -38,7 +37,6 @@ import {
 	observe,
 } from "./ChildModelsAdministration";
 import type { MutationEvent } from "./ChildModelsAdministration";
-import { isPlainObject } from "../observables/internal/utils";
 
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
@@ -67,11 +65,12 @@ function getIdKey(Ctor: typeof Model): string | number | null {
 	return ctorIdKeyMap.get(Ctor) ?? null;
 }
 
-function getModelRefSnapshot<T extends Model>(modelRef: T): RefSnapshot | null {
-	const Ctor = Object.getPrototypeOf(modelRef).constructor as typeof Model;
+function getModelRefSnapshotFromId(
+	Ctor: typeof Model,
+	id: IdType
+): RefSnapshot | null {
 	const idKey = getIdKey(Ctor);
-
-	return idKey ? { [idKey]: getIdentifier(modelRef)! } : null;
+	return idKey ? { [idKey]: id } : null;
 }
 
 function getSnapshotId(snapshot: Snapshot, Ctor: typeof Model): IdType | null {
@@ -184,10 +183,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							adm.setId(name as string, value as IdType);
 							break;
 						}
-						case ModelCfgTypes.state: {
-							adm.setState(name as string, value);
-							break;
-						}
 					}
 
 					return PreactObjectAdministration.proxyTraps.set?.apply(
@@ -268,63 +263,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		}
 
 		return a!;
-	}
-
-	private setState(name: string, value: unknown): void {
-		const oldValue = this.source[name];
-		if (value !== oldValue) {
-			batch(() => {
-				PreactObjectAdministration.proxyTraps.set!(
-					this.source,
-					name,
-					value,
-					this.proxy
-				);
-			});
-		}
-	}
-
-	private hydrateStateValue(
-		currentValue: unknown,
-		snapshotValue: unknown
-	): unknown {
-		if (currentValue instanceof Signal) {
-			currentValue.value = this.hydrateStateValue(
-				currentValue.value,
-				snapshotValue
-			);
-			return currentValue;
-		}
-
-		if (Array.isArray(currentValue) && Array.isArray(snapshotValue)) {
-			const nextItems = snapshotValue.map((item, index) =>
-				this.hydrateStateValue(currentValue[index], item)
-			);
-			currentValue.splice(0, currentValue.length, ...nextItems);
-			return currentValue;
-		}
-
-		if (isPlainObject(currentValue) && isPlainObject(snapshotValue)) {
-			const currentRecord = currentValue as Record<string, unknown>;
-			const snapshotRecord = snapshotValue as Record<string, unknown>;
-
-			Object.keys(snapshotRecord).forEach((key) => {
-				currentRecord[key] = this.hydrateStateValue(
-					currentRecord[key],
-					snapshotRecord[key]
-				);
-			});
-
-			Object.keys(currentRecord).forEach((key) => {
-				if (!(key in snapshotRecord)) {
-					delete currentRecord[key];
-				}
-			});
-
-			return currentValue;
-		}
-
-		return snapshotValue;
 	}
 
 	private setId(name: string, v: IdType): void {
@@ -451,11 +389,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			})
 		);
 
+		const oldModelSet = Array.isArray(currentValue)
+			? new Set((currentValue as Model[]).map((m) => getSource(m)))
+			: new Set();
+
 		newModels.forEach((child) => {
-			// Use getSource to normalize comparison - currentValue may contain proxies
-			const oldModelSet = Array.isArray(currentValue)
-				? new Set((currentValue as Model[]).map((m) => getSource(m)))
-				: new Set();
 			if (!oldModelSet.has(getSource(child))) {
 				const internalModel = getModelAdm(child);
 				internalModel.attach(this, name);
@@ -622,32 +560,36 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private toJSON(): Snapshot<Model> {
-		return Object.keys(this.configuration).reduce((json: any, key) => {
+		const keys = new Set([
+			...Object.keys(this.source),
+			...Object.keys(this.configuration),
+		]);
+		return Array.from(keys).reduce((json: any, key) => {
 			switch (getConfigType(this.configuration[key])) {
-				case ModelCfgTypes.state: {
-					json[key] = clone(this.proxy[key], key);
+				case ModelCfgTypes.transient:
 					break;
-				}
 				case ModelCfgTypes.id:
 					json[key] = clone(getSource(this.proxy[key]), key);
 					break;
 				case ModelCfgTypes.modelRef:
-					const model: Model[] | Model | undefined = this.proxy[key];
-					if (Array.isArray(model)) {
-						if (!this.snapshotMap.has(key)) {
-							this.snapshotMap.set(
-								key,
-								createComputed(() => {
-									const models: Model[] = this.proxy[key] ?? [];
-									return models.map((m) => getModelRefSnapshot(m)) as unknown[];
-								})
-							);
-						}
-
-						json[key] = this.snapshotMap.get(key)!.get();
+					this.getReferencedAtom(key).reportObserved();
+					const Type = this.getRequiredModelRefType(key);
+					const reference = this.source[key] as
+						| IdType
+						| IdType[]
+						| null
+						| undefined;
+					if (Array.isArray(reference)) {
+						json[key] = clone(
+							reference.map((id) => getModelRefSnapshotFromId(Type, id)),
+							key
+						);
 						break;
 					}
-					json[key] = model && getModelRefSnapshot(model);
+					json[key] =
+						reference == null
+							? null
+							: clone(getModelRefSnapshotFromId(Type, reference), key);
 					break;
 				case CommonCfgTypes.child:
 					const child: Model | Model[] | undefined = this.proxy[key];
@@ -667,11 +609,34 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						json[key] = this.snapshotMap.get(key)!.get();
 						break;
 					}
-					json[key] = getModelAdm(child!)?.getSnapshot();
+					json[key] = child ? getModelAdm(child).getSnapshot() : null;
+					break;
+				default:
+					if (Object.prototype.hasOwnProperty.call(this.source, key)) {
+						json[key] = clone(this.proxy[key], key);
+					}
 					break;
 			}
 			return json;
 		}, {}) as Snapshot<any>;
+	}
+
+	validateSnapshotFields(): void {
+		Object.keys(this.source).forEach((key) => {
+			if (this.getCfgType(key) === undefined) {
+				try {
+					clone(this.proxy[key], key);
+				} catch (error) {
+					if (error instanceof Error) {
+						throw new Error(
+							`${error.message} Mark runtime-only Model fields with @transient.`,
+							{ cause: error }
+						);
+					}
+					throw error;
+				}
+			}
+		});
 	}
 
 	onSnapshotChange(onChange: SnapshotChange<any>): () => void {
@@ -695,14 +660,40 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 		untracked(() => {
 			batch(() => {
+				let hasInPlaceStateChange = false;
 				Object.keys(snapshot).forEach((key) => {
 					const type = this.getCfgType(key);
 					const childType = this.getCfgChildType(key);
 					const value = snapshot[key];
 
 					switch (type) {
-						case ModelCfgTypes.state:
-							this.proxy[key] = this.hydrateStateValue(this.proxy[key], value);
+						case undefined: {
+							if (!Object.prototype.hasOwnProperty.call(this.source, key)) {
+								console.warn(
+									`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
+								);
+								break;
+							}
+							const currentValue = this.proxy[key];
+							const changeTracker = { changed: false };
+							const hydratedValue = hydrateSnapshotValue(
+								currentValue,
+								value,
+								changeTracker
+							);
+							this.proxy[key] = hydratedValue;
+							if (
+								changeTracker.changed &&
+								Object.is(currentValue, hydratedValue)
+							) {
+								hasInPlaceStateChange = true;
+							}
+							break;
+						}
+						case ModelCfgTypes.transient:
+							console.warn(
+								`r-state-tree: transient Model key '${key}' found in snapshot, ignored.`
+							);
 							break;
 						case ModelCfgTypes.modelRef:
 							if (Array.isArray(value)) {
@@ -717,6 +708,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 								break;
 							} else if (value instanceof Model) {
 								this.proxy[key] = value;
+							} else if (value == null) {
+								this.source[key] = undefined;
+								this.referencedAtoms?.get(key)?.reportChanged();
 							} else {
 								this.source[key] = getSnapshotRefId(value);
 								this.referencedAtoms?.get(key)?.reportChanged();
@@ -726,6 +720,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							this.setId(key, value as IdType);
 							break;
 						case CommonCfgTypes.child:
+							if (value == null) {
+								this.proxy[key] = null;
+								break;
+							}
+
 							let model: Model;
 
 							if (Array.isArray(value)) {
@@ -806,6 +805,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							);
 					}
 				});
+				if (hasInPlaceStateChange) {
+					this.atom.reportChanged();
+				}
 			});
 		});
 	}
