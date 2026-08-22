@@ -139,7 +139,40 @@ reactive update).
 
 ## Observable behavior
 
-Store and Model fields configured by r-state-tree are reactive. For standalone data structures use `observable()`.
+Every Store and Model field is individually observable at the assignment level, like
+fields of a MobX observable class: reading a field in a tracked context subscribes to
+it, and assigning the field notifies observers.
+
+Assignment never converts the assigned value. This is deliberately different from
+MobX's default deep conversion: a plain array or object stored in a field — whether
+assigned later or initialized inline — is an **inert** value. Mutating it in place
+(`push`, `splice`, index/key writes, property writes) notifies no one. Wrap a value
+with `observable()` (or `toObservableTree()`, or declare it `@child`) if you need
+structural tracking; otherwise reassign the whole field.
+
+```ts
+class SessionsStore extends Store {
+	// Wrong: inert plain array. `this.ids.push(id)` updates nothing in the UI.
+	ids: string[] = [];
+
+	// Right: observable container; push/splice/index writes are tracked.
+	ids: string[] = observable([]);
+
+	// Also right: keep the plain array but always reassign the field.
+	trustedPaths: string[] = [];
+
+	trust(path: string) {
+		// Wrong: this.trustedPaths.push(path);
+		this.trustedPaths = [...this.trustedPaths, path];
+	}
+}
+```
+
+When reviewing or writing code, treat any `push`/`splice`/index write on a collection
+that was not initialized with `observable()` (or produced by an observable container)
+as a reactivity bug.
+
+For standalone data structures use `observable()`.
 
 `observable()` is shallow:
 
@@ -150,7 +183,12 @@ const state = observable({
 });
 ```
 
-Mutate observable arrays, maps, sets, and objects in place. Copy-on-write is not required for reactivity. Derived collection methods such as `slice()` and `filter()` return plain containers while preserving element identity.
+Items inserted into an observable container are not wrapped: an observable array of
+plain objects tracks the array's structure (length, index, iteration) but not the
+objects' fields. Wrap an item with `observable()` (or `toObservableTree()`) before
+inserting it if its fields will be mutated in place.
+
+Mutate observable arrays, maps, sets, and objects in place. Copy-on-write is not required for reactivity. Derived collection methods such as `slice()` and `filter()` return plain containers while preserving element identity; the derivation itself is tracked, but the returned copy is not a live container.
 
 Use `toObservableTree()` for a one-time recursive wrap of existing nested plain objects and arrays. Later assignments remain shallow and are not auto-wrapped.
 

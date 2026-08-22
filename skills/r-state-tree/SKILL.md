@@ -40,6 +40,7 @@ Use the public API documented by the installed package or repository version. Wh
 - Keep command preconditions with the Store that owns the command. Across Store boundaries, call an intent method such as `tryExitFocusMode()` instead of reading `isFocusMode` and then calling `exitFocusMode()` yourself.
 - Do not read lazy child getters only to start their effects. Move always-on work to the parent owner or let a real consumer materialize the child.
 - Keep observable collections observable and mutate them in place. Once a field holds an `observable()` array, object, `Map`, or `Set`, do not replace it with a copied container such as `{ ...field }`, `[...field]`, `field.slice()`, `field.filter(...)`, or `field.map(...)`; mutate the existing observable container instead. Copy only when producing a plain derived value or crossing a snapshot, persistence, or transport boundary. `observable()` is shallow unless nested values are wrapped explicitly or initialized with `toObservableTree()`.
+- Every Store/Model field is observable at the assignment level only. A field declared or assigned a plain array or object (for example `ids: string[] = []`) is an inert value: in-place `push`/`splice`/index/property writes on it notify no one. Initialize collections with `observable()` and mutate them in place, or reassign the whole field (`this.ids = [...this.ids, id]`). Never call `push` or `splice` on a collection that was not wrapped with `observable()`.
 - Dispose terminal Store and Model roots with `[Symbol.dispose]()` when their owner ends.
 
 ## React rules
@@ -49,6 +50,7 @@ Use the public API documented by the installed package or repository version. Wh
 - Establish every React lookup scope explicitly with `<StoreProvider store={store}>`.
 - `useStore(StoreType)` performs exact-class lookup and throws when missing. `useOptionalStore(StoreType)` returns `null` when missing.
 - React provider ancestry never changes r-state-tree Store ownership.
+- Tracking follows reactive reads across boundaries: reading one Store's state through another Store's props subscribes the observer to the held Store, materializing a lazy `@child` getter during a render is safe, and `createStore` with the same key reconciles to the existing child instance.
 - Preact may use the React adapter through `preact/compat`; native Preact integration is a separate design concern.
 
 Read [references/react.md](references/react.md) for React implementation and migration work.
@@ -69,6 +71,7 @@ Read [references/react.md](references/react.md) for React implementation and mig
 - Confirm async work has both a Store-lifetime policy and an operation concurrency policy.
 - Confirm workflow Stores call intent-level external-system ports and do not construct transport envelopes, command discriminants, or correlation DTOs.
 - Confirm every observable collection retains its identity: reject assignments that replace an observable-backed field with a spread, `slice`, `filter`, `map`, or another newly allocated container. Require in-place mutation through the observable wrapper; allow copies only as outbound plain values.
+- Confirm no in-place mutation (`push`, `splice`, index write, property write) targets a plain array or object held in a Store/Model field; such values are inert and must either be wrapped with `observable()` or reassigned wholesale.
 - Confirm persistence cannot overwrite hydrated state with constructor defaults.
 - Confirm React lookup scopes are explicit and provider unmount does not dispose Stores.
 - Run the repository's focused tests, type checks, and build in proportion to the change.

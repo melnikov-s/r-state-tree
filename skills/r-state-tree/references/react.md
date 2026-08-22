@@ -63,6 +63,16 @@ const WorkspaceBoundary = observer(function WorkspaceBoundary({
 
 Prefer splitting a boundary wrapper and observed content when that makes one lookup style consistent across the feature.
 
+## Tracking boundaries
+
+Tracking follows reactive reads, not component or Store boundaries:
+
+- **Store-to-Store props.** Store `props` are observable. When a Store holds another Store as a prop, reads through that prop (for example `this.props.catalog.projectSessions(path)`) subscribe the rendering observer to the held Store's state. Mutations in the held Store re-render observers that read through the chain.
+- **Lazy children during render.** Materializing a lazy `@child` getter inside an observed render is safe and supported. The first read constructs (or reconciles) the child and the render's reads of its state are tracked like any other.
+- **Keyed reconciliation.** Calling `createStore(ChildStore, { key })` repeatedly with the same key returns the same realized child instance; it is a lookup, not a new instance. Child getters that map over observable arrays and call `createStore` per item are tracked through the array read.
+
+If a consumer still sees stale UI, suspect an untracked read (an inert plain collection or a value captured outside the render) before suspecting these boundaries.
+
 ## Lookup semantics
 
 - `useStore(StoreType)` returns the nearest provider for the exact runtime class and throws descriptively when absent.
