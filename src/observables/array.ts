@@ -167,9 +167,11 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 	};
 
 	static methods: Partial<{
-		[K in keyof typeof Array.prototype as (typeof Array.prototype)[K] extends Function
-			? K
-			: never]: (typeof Array.prototype)[K];
+		[
+			K in keyof typeof Array.prototype as (typeof Array.prototype)[K] extends Function
+				? K
+				: never
+		]: (typeof Array.prototype)[K];
 	}> = {
 		fill<T>(
 			this: T[],
@@ -192,8 +194,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 				end == null
 					? length
 					: end < 0
-					? Math.max(length + end, 0)
-					: Math.min(end, length);
+						? Math.max(length + end, 0)
+						: Math.min(end, length);
 
 			if (from < to) {
 				adm.onArrayChanged(false, from, to - from);
@@ -635,7 +637,7 @@ function createFilterMethod(method: string): any {
 			return (Array.prototype as any)[method].call(
 				observedInput,
 				(_element: unknown, index: number) => {
-				return callback.call(thisArg, (this as any)[index], index, this);
+					return callback.call(thisArg, (this as any)[index], index, this);
 				}
 			);
 		}

@@ -7,6 +7,6 @@
 		"noUnusedLocals": false,
 		"noEmit": true
 	},
-	"include": ["../src/**/*", "*"],
+	"include": ["../src/**/*", "*", "../vite.config.mts", "../vitest.config.mts"],
 	"exclude": ["node_modules"]
 }

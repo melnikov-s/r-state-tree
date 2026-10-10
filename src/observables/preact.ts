@@ -21,7 +21,7 @@ import {
 export { isObservable } from "./index";
 
 export class PreactObjectAdministration<
-	T extends object
+	T extends object,
 > extends ObjectAdministration<T> {}
 
 export interface AtomNode {

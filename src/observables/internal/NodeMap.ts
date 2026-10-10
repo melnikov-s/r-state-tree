@@ -6,7 +6,7 @@ class NodeMap<
 	K = unknown,
 	GraphNode extends AtomNode | SignalNode<unknown> =
 		| AtomNode
-		| SignalNode<unknown>
+		| SignalNode<unknown>,
 > {
 	private map: Map<unknown, GraphNode> | undefined;
 	private weakMap: WeakMap<object, GraphNode> | undefined;
@@ -30,7 +30,6 @@ class NodeMap<
 		}
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
 	protected createNode(_initialValue?: unknown): GraphNode {
 		return {} as GraphNode;
 	}

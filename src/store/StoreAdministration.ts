@@ -164,7 +164,7 @@ type ActivationEntry = {
 };
 
 export class StoreAdministration<
-	StoreType extends Store = Store
+	StoreType extends Store = Store,
 > extends ObjectAdministration<Store> {
 	private static pendingActivations: ActivationEntry[] = [];
 	private static isFlushingActivations = false;
@@ -283,7 +283,7 @@ export class StoreAdministration<
 					? pending.findIndex((item) => item?.key === key)
 					: pending.findIndex(
 							(item) => item === null || item.key === undefined
-					  );
+						);
 			if (matchIndex >= 0) snapshot = pending[matchIndex];
 		} else if (
 			pending &&

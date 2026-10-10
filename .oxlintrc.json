@@ -1,0 +1,36 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"plugins": ["typescript"],
+	"categories": {
+		"correctness": "error"
+	},
+	"rules": {
+		"no-unused-vars": "off",
+		"no-unused-expressions": "off",
+		"typescript/no-this-alias": "off",
+		"typescript/no-wrapper-object-types": "off",
+		"typescript/no-duplicate-type-constituents": "off",
+		"typescript/unbound-method": "off",
+		"typescript/consistent-type-imports": [
+			"error",
+			{ "prefer": "type-imports", "fixStyle": "separate-type-imports" }
+		],
+		"typescript/consistent-type-exports": [
+			"error",
+			{ "fixMixedExportsWithInlineTypeSpecifier": true }
+		]
+	},
+	"overrides": [
+		{
+			"files": ["tests/**/*.ts"],
+			"rules": {
+				"typescript/no-array-delete": "off",
+				"typescript/no-for-in-array": "off",
+				"typescript/no-base-to-string": "off",
+				"typescript/require-array-sort-compare": "off",
+				"typescript/no-floating-promises": "off",
+				"typescript/no-meaningless-void-operator": "off"
+			}
+		}
+	]
+}

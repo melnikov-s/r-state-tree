@@ -155,8 +155,7 @@ test("sort parameters are raw (non-observable)", () => {
 				expect(this).toBe(context);
 
 				return true;
-			},
-			context);
+			}, context);
 
 			if (result && typeof result === "object") {
 				// filter/map now return observable arrays
@@ -453,12 +452,10 @@ test("[mobx-test] array modifications", function () {
 					const a1 = arrays[k].slice();
 					a2.splice(0, a2.length, ...a1);
 
-					// eslint-disable-next-line prefer-spread
 					const res1 = (a1.splice as any).apply(
 						a1,
 						[inputs[i] as any, inputs[j] as any].concat(arrays[l])
 					);
-					// eslint-disable-next-line prefer-spread
 					const res2 = (a2.splice as any).apply(
 						a2,
 						[inputs[i] as any, inputs[j] as any].concat(arrays[l])
@@ -1036,15 +1033,12 @@ describe("Detailed ArrayAdministration behavior", () => {
 				return items;
 			}, [] as unknown[]);
 
-			const reducedRight = arr.reduceRight(
-				(items: unknown[], v, i, self) => {
-					expect(v).toBe(arr[i]);
-					expect(self).toBe(arr);
-					items.push(v);
-					return items;
-				},
-				[] as unknown[]
-			);
+			const reducedRight = arr.reduceRight((items: unknown[], v, i, self) => {
+				expect(v).toBe(arr[i]);
+				expect(self).toBe(arr);
+				items.push(v);
+				return items;
+			}, [] as unknown[]);
 
 			expect(reduced).toStrictEqual([arr[0], arr[1]]);
 			expect(reducedRight).toStrictEqual([arr[1], arr[0]]);

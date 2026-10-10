@@ -1455,10 +1455,20 @@ When child stores are created during mount with props that point back into the p
 ## Testing
 
 The repository ships with Vitest suites covering stores, models, containers, and observable primitives.
+Use Node.js 24 LTS (or another Node version supported by Vitest 5) and pnpm.
 
 ```bash
+pnpm install --frozen-lockfile
 pnpm test
+pnpm lint
+pnpm format
+pnpm test:cover
 ```
+
+Linting and formatting use oxlint and oxfmt. `pnpm lint` checks both;
+`pnpm format` applies formatting. Type checks and declarations use TypeScript 7.
+Vitest uses esbuild for standard decorators because Vite 8's Oxc transform
+supports only legacy decorators.
 
 ## Build & publishing
 

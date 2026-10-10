@@ -41,7 +41,7 @@ type PropsOfStore<T extends Store<any>> = T extends Store<infer P> ? P : never;
 
 export function createStore<
 	K extends Store<any>,
-	T extends Record<string, any> = K extends Store<infer P> ? P : never
+	T extends Record<string, any> = K extends Store<infer P> ? P : never,
 >(
 	Type: new (props: StoreProps<T>) => K,
 	...args: RequiredKeys<T> extends never
@@ -72,9 +72,8 @@ export function types<T extends Store>(
 }
 
 export default class Store<
-	PropsType extends Record<string, any> = StoreProps<Props>
-> implements Disposable
-{
+	PropsType extends Record<string, any> = StoreProps<Props>,
+> implements Disposable {
 	declare static types?: StoreConfiguration<unknown>;
 
 	props!: StoreProps<PropsType>;

@@ -14,11 +14,10 @@ import type { SnapshotValue } from "../src/types";
 // @ts-ignore
 type _Expect<T extends true> = T;
 // @ts-ignore
-type _Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B
-	? 1
-	: 2
-	? true
-	: false;
+type _Equal<A, B> =
+	(<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+		? true
+		: false;
 
 // --- SnapshotValue tests ---
 
@@ -114,9 +113,6 @@ const _symbolFail: symbol = symbolSnap;
 declare const fnSnap: SnapshotValue<() => void>;
 // @ts-ignore
 const _fnFail: Function = fnSnap;
-
-// This is a type-only test file - no runtime tests
-export {};
 
 void _signalNumCheck;
 void _nestedSignalCheck;

@@ -13,12 +13,12 @@ export function getAdministration<T extends object>(
 ): T extends Set<infer S>
 	? CollectionAdministration<S>
 	: T extends Map<infer K, infer V>
-	? CollectionAdministration<K, V>
-	: T extends Array<infer R>
-	? ArrayAdministration<R>
-	: T extends Date
-	? DateAdministration
-	: PreactObjectAdministration<any> {
+		? CollectionAdministration<K, V>
+		: T extends Array<infer R>
+			? ArrayAdministration<R>
+			: T extends Date
+				? DateAdministration
+				: PreactObjectAdministration<any> {
 	return administrationMap.get(obj as object)! as ReturnType<
 		typeof getAdministration
 	>;

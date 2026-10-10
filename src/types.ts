@@ -99,20 +99,20 @@ type NonSnapshotable =
 export type SnapshotValue<T> = T extends bigint | symbol | Function
 	? never // Rejected at runtime; never here causes type errors
 	: T extends NonSnapshotable
-	? never // Rejected at runtime; never here causes type errors
-	: T extends Signal<infer U>
-	? SnapshotValue<U> // Signals unwrap to their value type
-	: T extends Model
-	? Snapshot<T>
-	: T extends Date
-	? string // Dates serialize to ISO strings
-	: T extends Array<infer R>
-	? R extends Model
-		? Array<Snapshot<R>>
-		: Array<SnapshotValue<R>>
-	: T extends object
-	? { [K in keyof T]: SnapshotValue<T[K]> } // Recursively convert object properties
-	: T;
+		? never // Rejected at runtime; never here causes type errors
+		: T extends Signal<infer U>
+			? SnapshotValue<U> // Signals unwrap to their value type
+			: T extends Model
+				? Snapshot<T>
+				: T extends Date
+					? string // Dates serialize to ISO strings
+					: T extends Array<infer R>
+						? R extends Model
+							? Array<Snapshot<R>>
+							: Array<SnapshotValue<R>>
+						: T extends object
+							? { [K in keyof T]: SnapshotValue<T[K]> } // Recursively convert object properties
+							: T;
 
 export type Snapshot<T extends Model = Model> = {
 	[K in keyof T]?: SnapshotValue<T[K]> | null;

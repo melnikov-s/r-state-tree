@@ -42,6 +42,7 @@ test("reportObserved on object (shallow)", () => {
 		count++;
 	});
 
+	// oxlint-disable-next-line no-self-assign -- assigning the same value must not notify subscribers
 	o.value = o.value;
 	expect(count).toBe(1);
 	o.value++;

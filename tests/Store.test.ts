@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
 	applySnapshot,
 	Store,
@@ -2051,7 +2050,7 @@ test("reaction in a store will auto unsub after store is unmounted ", () => {
 						inc: this.inc.bind(this),
 						prop: this.prop,
 						countUp: () => this.count++,
-				  })
+					})
 				: null;
 		}
 

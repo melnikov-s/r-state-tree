@@ -585,7 +585,6 @@ test("[mobx-test] .keys() subscribes for key changes", () => {
 
 	effect(() => {
 		effectInvocationCount++;
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.keys()) {
 		}
 	});
@@ -603,7 +602,6 @@ test("[mobx-test] .values() subscribes for key changes", () => {
 
 	effect(() => {
 		effectInvocationCount++;
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.values()) {
 		}
 	});
@@ -621,7 +619,6 @@ test("[mobx-test] .entries() subscribes for key changes", () => {
 
 	effect(() => {
 		effectInvocationCount++;
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.entries()) {
 		}
 	});
@@ -645,7 +642,6 @@ test("[mobx-test] .entries() subscribes for value changes", () => {
 
 	effect(() => {
 		effectInvocationCount++;
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.entries()) {
 		}
 	});
@@ -669,7 +665,6 @@ test("[mobx-test] .values() subscribes for value changes", () => {
 
 	effect(() => {
 		effectInvocationCount++;
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.values()) {
 		}
 	});
@@ -715,7 +710,6 @@ test("[mobx-test] .keys() does NOT subscribe for value changes", () => {
 
 	effect(() => {
 		effectInvocationCount++;
-		// eslint-disable-next-line @typescript-eslint/no-unused-vars
 		for (const _ of m.keys()) {
 		}
 	});

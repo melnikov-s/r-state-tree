@@ -11,7 +11,7 @@ import {
 } from "../src/index";
 
 export function createContainer<
-	T extends new (...args: unknown[]) => InstanceType<T>
+	T extends new (...args: unknown[]) => InstanceType<T>,
 >(Container: T): InstanceType<T> {
 	if (Model.isPrototypeOf(Container)) {
 		return (Container as unknown as typeof Model).create() as InstanceType<T>;

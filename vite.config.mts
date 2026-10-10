@@ -23,7 +23,7 @@ export default defineConfig({
 				return format === "es" ? `${entryName}.js` : `${entryName}.cjs`;
 			},
 		},
-		rollupOptions: {
+		rolldownOptions: {
 			external: [
 				"@preact/signals-core",
 				"@preact/signals-react/runtime",
