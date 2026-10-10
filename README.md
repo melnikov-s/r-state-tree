@@ -262,7 +262,6 @@ class EditorStore extends Store {
 
 const saved = {
 	state: { draft: "Recovered", scrollTop: 120 },
-	children: {},
 };
 
 const editor = mount(createStore(EditorStore), { snapshot: saved });
@@ -279,16 +278,25 @@ observe the change.
 
 ```ts
 type StoreSnapshot = {
-	state: Record<string, unknown>;
-	children: Record<string, StoreChildSnapshot | StoreChildSnapshot[] | null>;
+	state?: Record<string, unknown>;
+	children?: Record<string, StoreChildSnapshot | (StoreChildSnapshot | null)[] | null>;
 };
 ```
 
+Empty `state` and `children` sections are omitted. Stores without persisted state
+or persisted descendants are excluded, even if they have a key. If the whole tree
+has no persisted data, `toSnapshot(store)` returns `undefined`; `onSnapshot` may
+also receive `undefined`. Explicitly persisted values such as `{}` and `[]` are
+preserved. Older snapshots containing empty sections still hydrate normally.
+
 Reactive child snapshots are matched within their parent child property by
-stable `key`. Pending snapshots are retained while a child property remains lazy
-and are applied before matching children mount. Once the property is realized,
+stable `key`. Pending snapshots are retained unchanged while a child property
+remains lazy and are applied before matching children mount. After hydration,
+the next save uses the compact format automatically. Once the property is realized,
 unmatched snapshots are discarded. Use stable keys for snapshotted child arrays;
-unkeyed children are matched positionally.
+unkeyed children are matched positionally. Empty unkeyed stores use explicit
+`null` entries to preserve positions, including at the end of an array. Empty
+keyed stores are omitted, as are arrays with no persisted child data.
 
 ### Child stores
 

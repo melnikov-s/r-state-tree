@@ -154,7 +154,6 @@ test("static types config works for Store snapshot fields", () => {
 	const store = mount(createStore(S));
 	expect(toSnapshot(store)).toEqual({
 		state: { count: 1 },
-		children: {},
 	});
 });
 

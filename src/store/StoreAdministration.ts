@@ -242,12 +242,9 @@ export class StoreAdministration<
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
 	private reactiveRegistrations = new Set<ReactiveRegistration>();
 	private configurationGetter?: () => StoreConfiguration<StoreType>;
-	private computedSnapshot?: ComputedNode<StoreSnapshot>;
+	private computedSnapshot?: ComputedNode<StoreSnapshot | undefined>;
 	private snapshotStructureAtom: AtomNode = createAtom();
-	private pendingChildSnapshots: Record<
-		string,
-		StoreChildSnapshot | StoreChildSnapshot[] | null
-	> = {};
+	private pendingChildSnapshots: NonNullable<StoreSnapshot["children"]> = {};
 
 	get signal(): AbortSignal {
 		return this.abortController.signal;
@@ -266,7 +263,7 @@ export class StoreAdministration<
 	private findPendingChildSnapshot(
 		name: PropertyKey,
 		key: string | number | undefined
-	): { snapshot: StoreChildSnapshot; commit: () => void } | undefined {
+	): { snapshot: StoreChildSnapshot | null; commit: () => void } | undefined {
 		const propertyName = String(name);
 		if (
 			!Object.prototype.hasOwnProperty.call(
@@ -279,12 +276,14 @@ export class StoreAdministration<
 		const pending = this.pendingChildSnapshots[propertyName];
 		if (!pending) return undefined;
 
-		let snapshot: StoreChildSnapshot | undefined;
+		let snapshot: StoreChildSnapshot | null | undefined;
 		if (Array.isArray(pending)) {
 			const matchIndex =
 				key !== undefined
-					? pending.findIndex((item) => item.key === key)
-					: pending.findIndex((item) => item.key === undefined);
+					? pending.findIndex((item) => item?.key === key)
+					: pending.findIndex(
+							(item) => item === null || item.key === undefined
+					  );
 			if (matchIndex >= 0) snapshot = pending[matchIndex];
 		} else if (
 			pending &&
@@ -293,7 +292,7 @@ export class StoreAdministration<
 			snapshot = pending;
 		}
 
-		if (!snapshot) return undefined;
+		if (snapshot === undefined) return undefined;
 
 		return {
 			snapshot,
@@ -321,7 +320,7 @@ export class StoreAdministration<
 	): void {
 		const pending = this.findPendingChildSnapshot(name, store.key);
 		if (!pending) return;
-		getStoreAdm(store).loadSnapshot(pending.snapshot);
+		if (pending.snapshot) getStoreAdm(store).loadSnapshot(pending.snapshot);
 		pending.commit();
 	}
 
@@ -574,7 +573,8 @@ export class StoreAdministration<
 		}
 	}
 
-	loadSnapshot(snapshot: StoreSnapshot): void {
+	loadSnapshot(snapshot: StoreSnapshot | undefined): void {
+		if (snapshot === undefined) return;
 		if (!snapshot || typeof snapshot !== "object") {
 			throw new Error("r-state-tree: invalid Store snapshot");
 		}
@@ -619,46 +619,70 @@ export class StoreAdministration<
 		});
 	}
 
-	private snapshotChild(store: Store): StoreChildSnapshot {
+	private snapshotChild(store: Store): StoreChildSnapshot | undefined {
 		const snapshot = getStoreAdm(store).getSnapshot();
+		if (!snapshot) return undefined;
 		return store.key === undefined ? snapshot : { key: store.key, ...snapshot };
 	}
 
-	private toJSON(): StoreSnapshot {
+	private toJSON(): StoreSnapshot | undefined {
 		this.snapshotStructureAtom.reportObserved();
-		const state: Record<string, unknown> = {};
-		const children: StoreSnapshot["children"] = {};
+		let state: StoreSnapshot["state"];
+		let children: StoreSnapshot["children"];
 
 		Object.keys(this.configuration).forEach((key) => {
 			if (getConfigType(this.configuration[key]) === StoreCfgTypes.snapshot) {
-				state[key] = clone((this.proxy as any)[key], key);
+				(state ??= {})[key] = clone((this.proxy as any)[key], key);
 			}
 		});
 
-		Object.entries(this.pendingChildSnapshots).forEach(([key, value]) => {
-			children[key] = clone(value, `children.${key}`);
-		});
-
+		const realizedNames = new Set<string>();
 		this.childStoreDataMap.forEach(({ value }, name) => {
 			const stores = value.get();
 			const key = String(name);
+			realizedNames.add(key);
+			const pending = Object.prototype.hasOwnProperty.call(
+				this.pendingChildSnapshots,
+				key
+			)
+				? this.pendingChildSnapshots[key]
+				: undefined;
+			let snapshot:
+				| StoreChildSnapshot
+				| (StoreChildSnapshot | null)[]
+				| undefined;
 			if (Array.isArray(stores)) {
-				const realized = stores.map((store) => this.snapshotChild(store));
-				const pending = this.pendingChildSnapshots[key];
-				children[key] = Array.isArray(pending)
-					? [...realized, ...clone(pending, `children.${key}`)]
-					: realized;
+				const snapshots: (StoreChildSnapshot | null)[] = [];
+				for (const store of stores) {
+					const child = this.snapshotChild(store);
+					if (child || store.key === undefined) snapshots.push(child ?? null);
+				}
+				if (Array.isArray(pending)) {
+					snapshots.push(...clone(pending, `children.${key}`));
+				}
+				if (snapshots.some((child) => child !== null)) snapshot = snapshots;
 			} else if (stores) {
-				children[key] = this.snapshotChild(stores);
-			} else if (!Object.prototype.hasOwnProperty.call(children, key)) {
-				children[key] = null;
+				snapshot = this.snapshotChild(stores);
+			} else if (pending) {
+				snapshot = clone(pending, `children.${key}`);
+			}
+			if (snapshot) (children ??= {})[key] = snapshot;
+		});
+
+		Object.entries(this.pendingChildSnapshots).forEach(([key, value]) => {
+			if (!realizedNames.has(key) && value) {
+				(children ??= {})[key] = clone(value, `children.${key}`);
 			}
 		});
 
-		return { state, children };
+		if (!state && !children) return undefined;
+		const snapshot: StoreSnapshot = {};
+		if (state) snapshot.state = state;
+		if (children) snapshot.children = children;
+		return snapshot;
 	}
 
-	getSnapshot(): StoreSnapshot {
+	getSnapshot(): StoreSnapshot | undefined {
 		if (!this.computedSnapshot) {
 			this.computedSnapshot = createComputed(() => this.toJSON());
 		}

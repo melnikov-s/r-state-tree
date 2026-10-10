@@ -128,9 +128,13 @@ export type SnapshotChange<T extends Model = Model> = (
 	model: T
 ) => void;
 
+/** Empty sections are omitted; a Store with no persisted data snapshots as undefined. */
 export type StoreSnapshot = {
-	state: Record<string, unknown>;
-	children: Record<string, StoreChildSnapshot | StoreChildSnapshot[] | null>;
+	state?: Record<string, unknown>;
+	children?: Record<
+		string,
+		StoreChildSnapshot | (StoreChildSnapshot | null)[] | null
+	>;
 };
 
 export type StoreChildSnapshot = StoreSnapshot & {
@@ -138,7 +142,7 @@ export type StoreChildSnapshot = StoreSnapshot & {
 };
 
 export type StoreSnapshotChange<T extends Store = Store> = (
-	snapshot: StoreSnapshot,
+	snapshot: StoreSnapshot | undefined,
 	store: T
 ) => void;
 

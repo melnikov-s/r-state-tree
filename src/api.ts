@@ -48,8 +48,12 @@ export function mount<T extends Store>(
 }
 
 export function toSnapshot<T extends Model>(value: T): Snapshot<T>;
-export function toSnapshot<T extends Store>(value: T): StoreSnapshot;
-export function toSnapshot(value: Model | Store): Snapshot | StoreSnapshot {
+export function toSnapshot<T extends Store>(
+	value: T
+): StoreSnapshot | undefined;
+export function toSnapshot(
+	value: Model | Store
+): Snapshot | StoreSnapshot | undefined {
 	return value instanceof Store
 		? getStoreAdm(value).getSnapshot()
 		: getModelAdm(value).getSnapshot();
@@ -61,7 +65,7 @@ export function onSnapshot<T extends Model>(
 ): () => void;
 export function onSnapshot<T extends Store>(
 	value: T,
-	callback: (snapshot: StoreSnapshot, store: T) => void
+	callback: (snapshot: StoreSnapshot | undefined, store: T) => void
 ): () => void;
 export function onSnapshot(
 	value: Model | Store,
@@ -95,17 +99,17 @@ export function applySnapshot<T extends Model>(
 ): T;
 export function applySnapshot<T extends Store>(
 	store: T,
-	snapshot: StoreSnapshot
+	snapshot: StoreSnapshot | undefined
 ): T;
 export function applySnapshot(
 	value: Model | Store,
-	snapshot: Snapshot | StoreSnapshot
+	snapshot: Snapshot | StoreSnapshot | undefined
 ): Model | Store {
 	if (value instanceof Store) {
 		// Store instance: applies in place. Unmounted stores are quiescent
 		// (effects/reactions start only at mount), and mounted stores reconcile
 		// through the same machinery as any reactive child/props update.
-		getStoreAdm(value).loadSnapshot(snapshot as StoreSnapshot);
+		getStoreAdm(value).loadSnapshot(snapshot as StoreSnapshot | undefined);
 		return value;
 	}
 
@@ -120,7 +124,7 @@ export function applySnapshot(
 	const adm = getModelAdm(value);
 	const previousSnapshot = adm.getSnapshotForRollback();
 	try {
-		adm.loadSnapshot(snapshot);
+		adm.loadSnapshot(snapshot as Snapshot);
 	} catch (error) {
 		adm.loadSnapshot(previousSnapshot);
 		throw error;
