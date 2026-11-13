@@ -11,6 +11,7 @@
 			"import": "./dist/r-state-tree.js",
 			"require": "./dist/r-state-tree.cjs"
 		},
+		"./lint": "./lint/index.mjs",
 		"./react": {
 			"types": "./dist/react.d.ts",
 			"import": "./dist/react.js",
@@ -20,6 +21,7 @@
 	"files": [
 		"dist/*",
 		"skills",
+		"lint",
 		"README.md",
 		"LICENSE"
 	],

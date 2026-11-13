@@ -1452,6 +1452,10 @@ When child stores are created during mount with props that point back into the p
 - Lifecycle: Store-owned `reaction`/`effect`, reactive `Model.parent`, and `Symbol.dispose`
 - Best practices: domain in Models; delegate from Stores; stable keys for `@child`; return cleanup from store effects; don’t shadow `props`.
 
+## Lint rules
+
+Opt-in first-party rules are available at `r-state-tree/lint` for computed/getter purity, supported Store/Model factories, and collection reactivity mistakes. They run as an Oxlint JavaScript plugin without importing the application runtime. See [installation, rule boundaries, and explicit adoption](lint/README.md). Nothing enables them automatically.
+
 ## Testing
 
 The repository ships with Vitest suites covering stores, models, containers, and observable primitives.
