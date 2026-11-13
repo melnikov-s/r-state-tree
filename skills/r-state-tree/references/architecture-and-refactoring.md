@@ -187,6 +187,8 @@ Prefer:
 
 Use one dependency source end-to-end. Do not consume Context in an intermediary merely to spread the same values into a generic prop bag.
 
+**HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Shared derived structures and child descriptors should not precompute unrelated error/loading/presentation values for consumers that need only identity, membership, or availability. Pass Models/references or lazy getters/callbacks and keep presentation helper calls inside the deferred path. Trace transitive helper reads and intermediate spreads/destructuring: a helper or Store boundary does not isolate dependencies. Preserve eager reads required by semantics; memoize expensive work separately rather than treating late reads as a replacement for computed caching. See the [before/after example](../SKILL.md#read-reactive-state-at-the-consumer).
+
 ## Extraction recipe
 
 1. Name one coherent subsystem.
@@ -209,6 +211,8 @@ Use one dependency source end-to-end. Do not consume Context in an intermediary 
 - Observable collections are initialized as observable before in-place mutation.
 - Reactions coordinate independent sources rather than hide an existing event boundary.
 - Lazy child getters are not startup calls.
+- Reactive reads are placed at the narrowest actual consumer: trace consumer → shared getter/child descriptor → transitive helpers; reject unrelated eager error/loading/presentation reads, including those hidden by spreads, destructuring, or callback setup.
+- Error/loading-only changes leave identity-, membership-, and availability-only consumers unaffected unless semantics require otherwise; presentation readers still update. Necessary eager dependencies and expensive-work caching remain intact.
 - Async commands declare concurrency and late-commit policy.
 - Persistence waits for hydration.
 - Parent APIs add semantics or orchestration instead of mechanically forwarding children.

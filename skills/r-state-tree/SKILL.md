@@ -19,11 +19,12 @@ Use the public API documented by the installed package or repository version. Wh
    - which Store owns each async operation, reaction, timer, or subscription;
    - which method or external callback is the authoritative event boundary;
    - whether a child Store represents a real subsystem rather than a forwarding layer.
-4. Implement using public APIs. Do not invent lifecycle hooks, Store constructors, model injection decorators, or framework integration helpers.
+4. Trace reactive reads, including transitive helper calls, to their actual consumers before implementing. Use public APIs; do not invent lifecycle hooks, Store constructors, model injection decorators, or framework integration helpers.
 5. Verify focused behavior, type declarations, and lifecycle cleanup. For React changes, also verify Strict Mode and SSR when relevant.
 
 ## Core rules
 
+- **HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Shared derived structures and child descriptors must not eagerly read presentation-only, error, or loading fields that identity-, membership-, or availability-only consumers do not need. Pass Models/references or lazy getters/callbacks; read the field where its value is actually consumed. Trace helper calls too: moving a read into an eagerly called helper does not defer it. Keep eager reads required for membership, identity, availability, invariants, or other semantics. This is dependency placement, not blanket laziness or a ban on computed caching.
 - Create root Stores with `mount(createStore(StoreType, props))`; never instantiate a Store with `new`.
 - Define child Stores with `@child` getters that return `createStore(...)` descriptors. Give Store arrays stable, unique keys.
 - Create Models with `ModelType.create(snapshot?)`; never instantiate a Model with `new`.
@@ -42,6 +43,42 @@ Use the public API documented by the installed package or repository version. Wh
 - Keep observable collections observable and mutate them in place. Once a field holds an `observable()` array, object, `Map`, or `Set`, do not replace it with a copied container such as `{ ...field }`, `[...field]`, `field.slice()`, `field.filter(...)`, or `field.map(...)`; mutate the existing observable container instead. Copy only when producing a plain derived value or crossing a snapshot, persistence, or transport boundary. `observable()` is shallow unless nested values are wrapped explicitly or initialized with `toObservableTree()`.
 - Every Store/Model field is observable at the assignment level only. A field declared or assigned a plain array or object (for example `ids: string[] = []`) is an inert value: in-place `push`/`splice`/index/property writes on it notify no one. Initialize collections with `observable()` and mutate them in place, or reassign the whole field (`this.ids = [...this.ids, id]`). Never call `push` or `splice` on a collection that was not wrapped with `observable()`.
 - Dispose terminal Store and Model roots with `[Symbol.dispose]()` when their owner ends.
+
+## Read reactive state at the consumer
+
+A shared `runs` getter should derive the structure and semantic fields its consumers need, not precompute every presentation field. Assume `RunModel` exposes `id`, `available`, `observationError`, and `loaded`, and the two text constants are nonreactive.
+
+Before: `runs` calls this helper, so even a consumer checking only availability depends on error/loading state:
+
+```ts
+function describeRun(model: RunModel) {
+	return {
+		id: model.id,
+		available: model.available,
+		error: model.observationError ?? (model.loaded ? unavailableText : loadingText),
+	};
+}
+```
+
+After: keep semantic reads eager; defer only the presentation reads:
+
+```ts
+function describeRun(model: RunModel) {
+	return {
+		id: model.id,
+		available: model.available,
+		get error() {
+			return model.observationError ?? (model.loaded ? unavailableText : loadingText);
+		},
+	};
+}
+```
+
+Trace the full chain: `canMessage → hasAvailableRun(this.runs) → runs → describeRun(model)`. If `hasAvailableRun` only checks `run.available`, it must not acquire `observationError` or `loaded` dependencies. An error-rendering consumer reads `run.error` in its own tracked context; that getter reads `loaded` only when `observationError` is nullish. Keep helper calls inside the getter/callback when they perform those reads. Do not capture an eagerly read error in a closure, or eagerly destructure/spread the returned object at an intermediate boundary: that invokes the getter and widens dependencies again.
+
+The motivating Cake report for commit `3e8f0822e` described an eager `run.error` read via `model.loaded` making every `runs` consumer, including `canMessage` consumers ignoring error, depend on `loaded`; `loaded = false` then fanned out into repeated full transcript parses. This is a reported case, not independently verified here. The lazy error getter confines that dependency to actual error readers. Separately memoize repeated expensive parsing against its real inputs; late reads do not replace computed caching.
+
+Apply the same rule to child descriptor props: pass the Model or a callback that reads current state in the child consumer, rather than evaluating presentation helpers while constructing the descriptor. See [references/core-api.md](references/core-api.md#child-stores).
 
 ## React rules
 
@@ -64,6 +101,8 @@ Read [references/react.md](references/react.md) for React implementation and mig
 
 ## Completion check
 
+- **Audit late reads:** trace each changed consumer through shared getters, child descriptor construction, and transitive helpers. List the reactive fields actually needed for identity, membership, availability, and presentation; move unrelated error/loading/presentation reads to the narrowest tracked consumer using Models/references or lazy getters/callbacks. Check that no intermediate helper, spread, destructuring, or callback setup eagerly evaluates them.
+- Verify an error/loading-only change does not invalidate identity-, membership-, or availability-only consumers unless their semantics require it, while actual presentation readers still update. Preserve eager semantic dependencies and validate expensive-work memoization separately.
 - Confirm Models contain persisted domain state and Stores contain session/orchestration state.
 - Confirm each named workflow or product surface has a cohesive Store owner, and that no root or shell Store has absorbed unrelated surfaces merely because they share its lifetime.
 - Confirm Store/Model creation uses the supported factories.

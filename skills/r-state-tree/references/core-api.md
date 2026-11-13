@@ -64,6 +64,8 @@ Use stable unique keys in child arrays. Child getters are lazy behavioral bounda
 
 Pass Models and other dependencies as ordinary typed Store props unless a narrowly scoped Store Context is more appropriate. The current public API has no `@model` injection decorator and no special `models` prop bag.
 
+**HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Child descriptor construction should read only what its identity, membership, availability, or other semantics require. Do not eagerly evaluate unrelated error/loading/presentation fields or helpers there. Pass a Model for the child to read, or a callback such as `getError: () => describeError(model)`, not `error: describeError(model)`. Invoke that callback only where the value is consumed in a tracked context; merely hiding an eager helper call behind a prop does not narrow dependencies. Store prop updates copy values, so a getter on the descriptor's props object is not a substitute for a callback. Keep necessary semantic dependencies eager and use computed caching for repeated expensive derivations. See the [before/after example](../SKILL.md#read-reactive-state-at-the-consumer).
+
 ## Store Context
 
 Store Context passes ambient dependencies through the Store ownership tree:

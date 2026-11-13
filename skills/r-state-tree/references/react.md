@@ -71,6 +71,8 @@ Tracking follows reactive reads, not component or Store boundaries:
 - **Lazy children during render.** Materializing a lazy `@child` getter inside an observed render is safe and supported. The first read constructs (or reconciles) the child and the render's reads of its state are tracked like any other.
 - **Keyed reconciliation.** Calling `createStore(ChildStore, { key })` repeatedly with the same key returns the same realized child instance; it is a lookup, not a new instance. Child getters that map over observable arrays and call `createStore` per item are tracked through the array read.
 
+**HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Let an observed error/loading view read its own presentation fields rather than having a parent, shared getter, or child descriptor evaluate them for every consumer. Pass a Model/reference or lazy getter/callback when appropriate, then read/invoke it in the actual observed render. Trace transitive helper calls; eagerly constructing, spreading, or destructuring a presentation object in the parent still widens the parent's dependencies. Retain eager reads that genuinely determine identity, membership, availability, or other semantics; computed caching is still appropriate. See the [before/after example](../SKILL.md#read-reactive-state-at-the-consumer).
+
 If a consumer still sees stale UI, suspect an untracked read (an inert plain collection or a value captured outside the render) before suspecting these boundaries.
 
 ## Lookup semantics
