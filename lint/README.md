@@ -23,7 +23,8 @@ Use a release of `r-state-tree` containing the `./lint` export. For an isolated 
 		"r-state-tree/no-computed-mutation": "error",
 		"r-state-tree/no-direct-construction": "error",
 		"r-state-tree/no-plain-collection-mutation": "warn",
-		"r-state-tree/no-observable-collection-replacement": "warn"
+		"r-state-tree/no-observable-collection-replacement": "warn",
+		"r-state-tree/no-discarded-child-read": "warn"
 	}
 }
 ```
@@ -34,7 +35,7 @@ pnpm exec oxlint --config r-state-tree.oxlint.json --deny-warnings src
 
 This isolated example disables default built-in rules; it does not replace your normal lint invocation. Alternatively, add `jsPlugins` and the selected `rules` entries to your existing Oxlint configuration to keep your existing rules. `--type-aware` may still be used for built-in rules; these plugin rules need no type services or tsconfig changes.
 
-For a checkout before publication, replace the plugin specifier with the **absolute path** to `lint/index.mjs`. A relative plugin path is resolved from the configuration file. Run only selected files during adoption. Rule severities support `off`, `warn`, and `error`; all four rules accept **no options**. Use ordinary `oxlint-disable-next-line r-state-tree/no-computed-mutation` suppression comments for reviewed exceptions, explaining the reason.
+For a checkout before publication, replace the plugin specifier with the **absolute path** to `lint/index.mjs`. A relative plugin path is resolved from the configuration file. Run only selected files during adoption. Rule severities support `off`, `warn`, and `error`; all five rules accept **no options**. Use ordinary `oxlint-disable-next-line r-state-tree/no-computed-mutation` suppression comments for reviewed exceptions, explaining the reason.
 
 ## no-computed-mutation
 
@@ -107,6 +108,42 @@ Detect assignments replacing a field initialized with imported `observable()` / 
 
 Both field rules are declaration-based, not instance-state dataflow: only inline initializers and literal decorator/static configuration are classified. They do not infer constructor-only initialization, later wrapping, runtime configuration, cross-file bases, or reassignment through mutable aliases. If a field intentionally changes between wrapped/unwrapped identities, review it manually or suppress the specific rule. They do not enforce arbitrary read placement: read reactive data at the intended tracking boundary, but a blanket “late reads” lint would be too noisy.
 
+## no-discarded-child-read
+
+An opt-in **suggestion**, normally adopted at `warn`: report a standalone `this.worker;` or `void this.worker;` when `worker` is a locally known lazy **Store** child getter. Reading a Store child can initialize/mount it even when the value is discarded. This is not necessarily a bug: intentional startup warmup is valid. There is no autofix or automatic initialization rewrite.
+
+```ts
+class Workspace extends Store {
+	@child get worker() {
+		return createStore(Worker);
+	}
+
+	inspect() {
+		this.worker; // Warning: may materialize the lazy child solely for effects.
+	}
+
+	start() {
+		// oxlint-disable-next-line r-state-tree/no-discarded-child-read -- Intentional startup warmup.
+		void this.worker;
+	}
+
+	get currentWorker() {
+		return this.worker;
+	} // Consumed read: not reported.
+}
+```
+
+The recognized subset is deliberately small:
+
+- Exact public imports, aliases, namespaces, and locally resolved Store inheritance use the shared scope-aware analysis. Model-owned `@child` values are **not** lazy Store children and are excluded, as are unrelated/shadowed imports and unknown cross-file bases.
+- Getter configuration must be recognizable as `@child`, `@child(Type)`, or a literal `static types = { worker: child }` / `{ worker: child(Type) }`. Locally inherited getters/configuration and known overrides are resolved. An effective non-getter or non-child configuration is excluded.
+- Direct `this` member reads only, including fixed string/number keys (`this["worker"]`) and TypeScript wrappers. Dynamic keys and template-literal keys are skipped, not guessed. Immutable `this` aliases and destructured reads are outside this rule.
+- Only whole expression statements are checked, optionally wrapped in `void`. Return values, assignments, call arguments, conditions, sequences, nested property reads, and child method calls are not reported. This is **not** unused-value dataflow or a general child-read ban.
+- Method/getter bodies and their lexical arrows are checked, including deferred arrows: the diagnostic describes the read **if executed**, not whether it runs now. Ordinary nested functions have their own `this`. Static contexts, constructors, and instance-field initializers (including arrows capturing their raw `this`) are excluded.
+- Ambiguous configurations are skipped conservatively: nonliteral/static-accessor `types`, spreads/accessors/methods/unknown keys in literal maps, static blocks, dynamic class member names, class decorators, and unknown/multiple decorators on the target. Runtime configuration changes, monkey-patching, arbitrary decorator effects, and manually invoking methods with a different receiver are not modeled.
+
+The real monitoring pattern `disk.jobs.jobs` consumes its intermediate child and needs ownership/intent knowledge. This rule intentionally does **not** flag it. See [review and runtime-test guidance](review-guidance.md) for that case and all seven reviewed candidates, including why no post-`await` commit warning ships.
+
 ## Repository verification
 
 ```sh
@@ -118,4 +155,4 @@ pnpm exec oxlint --type-aware lint tests/lint.test.ts
 pnpm exec oxfmt --check lint tests/lint.test.ts
 ```
 
-The regression fixtures live in `tests/lint.test.ts`. They invoke the **actual Oxlint CLI** against temporary TypeScript fixtures and temporary isolated configurations, checking diagnostic counts/rules/ranges. An all-rule invocation asserts four diagnostics and exit code 1 for invalid code, and no diagnostics with exit code 0 for valid code. No project/editor/tsconfig settings are changed.
+The regression fixtures live in `tests/lint.test.ts`. They invoke the **actual Oxlint CLI** against temporary TypeScript fixtures and temporary isolated configurations, checking diagnostic counts/rules/ranges. An all-rule invocation asserts five diagnostics and exit code 1 for invalid code, and no diagnostics with exit code 0 for valid code. Reviewed warmup suppressions and meaningful consumed reads remain unflagged. Async-policy scope fixtures include both deliberately unsafe and legitimate continuations; they assert that no speculative async diagnostic is shipped, **not** that those continuations are safe. No project/editor/tsconfig settings are changed.

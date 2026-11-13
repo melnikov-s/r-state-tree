@@ -1,5 +1,6 @@
 import { analysis, unwrap, key, mutators } from "./analysis.mjs";
 import { checkPurity } from "./purity.mjs";
+import { checkDiscardedChildReads } from "./child-reads.mjs";
 
 const messages = {
 	"no-computed-mutation":
@@ -10,12 +11,14 @@ const messages = {
 		"Field '{{field}}' is initialized with a plain collection. In-place mutation is not reactive; wrap it with observable() or reassign the whole field.",
 	"no-observable-collection-replacement":
 		"Field '{{field}}' is initialized with an observable collection. Preserve its identity and mutate it in place outside computed derivations.",
+	"no-discarded-child-read":
+		"Reading lazy Store child '{{field}}' without using its value may initialize it. If this is intentional warmup, document and suppress this warning; otherwise consume the child where needed.",
 };
 
 function rule(id, run) {
 	return {
 		meta: {
-			type: "problem",
+			type: id === "no-discarded-child-read" ? "suggestion" : "problem",
 			docs: {
 				description: messages[id],
 				url: `https://github.com/melnikov-s/r-state-tree/blob/main/lint/README.md#${id}`,
@@ -141,6 +144,10 @@ export const rules = {
 					report(node, { field: target.field });
 			});
 		}
+	),
+	"no-discarded-child-read": rule(
+		"no-discarded-child-read",
+		checkDiscardedChildReads
 	),
 };
 

@@ -14,6 +14,117 @@ const getter = (
 	fields = "rows = observable([]); count = 0; data = observable({});"
 ) => `class S extends Store { ${fields} get derived() { ${body} } }`;
 
+const childStore = (
+	body: string,
+	declaration = "@child get worker() { return createStore(Worker) }"
+) =>
+	`class Worker extends Store {} class S extends Store { ${declaration} run() { ${body} } }`;
+
+// No async-commit diagnostic is shipped. These scope fixtures deliberately include
+// unsafe and valid policies; zero reports is NOT evidence of lifetime safety.
+const asyncReviewCases: Case[] = [
+	[
+		"advisory: unguarded late success",
+		"class S extends Store { value = 0; async run() { await work(); this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: unguarded late error",
+		"class S extends Store { error = null; async run() { try { await work() } catch (error) { this.error = error } } }",
+		0,
+	],
+	[
+		"advisory: explicit lifetime guard",
+		"class S extends Store { value = 0; async run() { await work(); if (this.signal.aborted) return; this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: operation signal",
+		"class S extends Store { value = 0; async run(signal: AbortSignal) { await work(signal); if (signal.aborted) return; this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: controller and revision guard",
+		"class S extends Store { value = 0; revision = 0; async run() { const revision = ++this.revision; const operation = new AbortController(); await work(operation.signal); if (operation.signal.aborted || revision !== this.revision) return; this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: helper lifetime check",
+		"class S extends Store { value = 0; async run() { await work(); assertLive(this); this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: guard before await is insufficient",
+		"class S extends Store { value = 0; async run() { if (this.signal.aborted) return; await work(); this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: later await invalidates guard",
+		"class S extends Store { value = 0; async run() { await work(); if (this.signal.aborted) return; await work(); this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: revalidate after every await",
+		"class S extends Store { value = 0; async run() { await work(); if (this.signal.aborted) return; await work(); if (this.signal.aborted) return; this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: branch does not protect other path",
+		"class S extends Store { value = 0; async run(flag: boolean) { await work(); if (flag) { if (this.signal.aborted) return } this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: loop guard before suspension",
+		"class S extends Store { value = 0; async run() { while (!this.signal.aborted) { await work(); this.value++ } } }",
+		0,
+	],
+	[
+		"advisory: loop revalidation",
+		"class S extends Store { value = 0; async run() { for (const item of items) { await work(item); if (this.signal.aborted) return; this.value++ } } }",
+		0,
+	],
+	[
+		"advisory: finally cleanup remains legitimate",
+		"class S extends Store { pending = null; async run() { try { await work() } finally { this.pending = null; releaseResource() } } }",
+		0,
+	],
+	[
+		"advisory: independent additive concurrency",
+		"class M extends Model { count = 0 } class S extends Store { async add(model: M) { await work(); model.count++ } }",
+		0,
+	],
+	[
+		"advisory: held Model state",
+		"class M extends Model { value = 0 } class S extends Store { model = M.create(); async run() { const model = this.model; await work(); model.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: aliases",
+		"import { Store as Base } from 'r-state-tree'; class S extends Base { value = 0; async run() { const self = this; const signal = this.signal; await work(); if (signal.aborted) return; self.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: shadowed Store",
+		"function make(Store: any) { class S extends Store { async run() { await work(); this.value = 1 } } }",
+		0,
+	],
+	[
+		"advisory: unrelated async class",
+		"class S { async run() { await work(); this.value = 1 } }",
+		0,
+	],
+	[
+		"advisory: nested deferred continuation",
+		"class S extends Store { value = 0; async run() { await work(); return async () => { await work(); this.value = 1 } } }",
+		0,
+	],
+	[
+		"advisory: nested function owns this",
+		"class S extends Store { async run() { await work(); return async function() { await work(); this.value = 1 } } }",
+		0,
+	],
+];
+
 const cases: Record<string, Case[]> = {
 	"no-computed-mutation": [
 		["ordinary Store getter assignment", getter("this.count = 1; return 0"), 1],
@@ -1122,6 +1233,303 @@ const cases: Record<string, Case[]> = {
 			0,
 		],
 	],
+	"no-discarded-child-read": [
+		["discarded decorated child", childStore("this.worker;"), 1],
+		["void decorated child", childStore("void this.worker;"), 1],
+		["two discarded reads", childStore("this.worker; void this.worker;"), 2],
+		["literal computed read", childStore("this['worker'];"), 1],
+		[
+			"literal computed declaration",
+			childStore("this.worker;", "@child get ['worker']() { return null }"),
+			1,
+		],
+		[
+			"TypeScript wrappers",
+			childStore(
+				"void (this.worker! as Worker); (this.worker satisfies Worker);"
+			),
+			2,
+		],
+		["optional this read", childStore("this?.worker;"), 1],
+		[
+			"getter and setter pair",
+			childStore(
+				"this.worker;",
+				"set worker(value) {} @child get worker() { return null }"
+			),
+			1,
+		],
+		[
+			"derived setter masks inherited getter",
+			"class Base extends Store { @child get worker() { return null } } class S extends Base { set worker(value) {} run() { this.worker; } }",
+			0,
+		],
+		[
+			"numeric literal key",
+			childStore(
+				"this[1];",
+				"static types = { 1: child }; get [1]() { return null }"
+			),
+			1,
+		],
+		[
+			"static literal types",
+			childStore(
+				"this.worker;",
+				"static types = { worker: child }; get worker() { return null }"
+			),
+			1,
+		],
+		[
+			"static child factory config",
+			childStore(
+				"void this.worker;",
+				"static types = { worker: child(Worker) }; get worker() { return null }"
+			),
+			1,
+		],
+		[
+			"decorator factory",
+			childStore("this.worker;", "@child(Worker) get worker() { return null }"),
+			1,
+		],
+		[
+			"aliased imports",
+			"import { Store as Base, child as lazy } from 'r-state-tree'; class S extends Base { @lazy get worker() { return null } run() { this.worker; } }",
+			1,
+		],
+		[
+			"namespace imports",
+			"import * as rst from 'r-state-tree'; class S extends rst.Store { @rst.child get worker() { return null } run() { void this.worker; } }",
+			1,
+		],
+		[
+			"immutable API aliases",
+			"const Base = Store; const lazy = child; const S = class extends Base { @lazy get worker() { return null } run() { this.worker; } }",
+			1,
+		],
+		[
+			"inherited decorated getter",
+			"class Base extends Store { @child get worker() { return null } } class S extends Base { run() { this.worker; } }",
+			1,
+		],
+		[
+			"inherited static configuration",
+			"class Base extends Store { static types = { worker: child }; get worker() { return null } } class S extends Base { run() { this.worker; } }",
+			1,
+		],
+		[
+			"derived static configuration of inherited getter",
+			"class Base extends Store { get worker() { return null } } class S extends Base { static types = { worker: child }; run() { this.worker; } }",
+			1,
+		],
+		[
+			"configuration remains on overriding getter",
+			"class Base extends Store { @child get worker() { return null } } class S extends Base { get worker() { return null } run() { this.worker; } }",
+			1,
+		],
+		[
+			"arrow retains method this",
+			childStore("schedule(() => { this.worker; });"),
+			1,
+		],
+		[
+			"nested regular function has own this",
+			childStore("function later() { this.worker; }"),
+			0,
+		],
+		[
+			"nested unrelated class",
+			childStore("class Other { run() { this.worker; } }"),
+			0,
+		],
+		[
+			"Model owned child is not lazy Store child",
+			"class M extends Model { @child(Model) worker = null; run() { this.worker; void this.worker; } }",
+			0,
+		],
+		[
+			"Model static types ownership",
+			"class M extends Model { static types = { worker: child(Model) }; worker = null; run() { this.worker; } }",
+			0,
+		],
+		[
+			"unrelated class decorator",
+			"class S { @child get worker() { return null } run() { this.worker; } }",
+			0,
+		],
+		[
+			"shadowed Store import",
+			"function make(Store: any) { class S extends Store { @child get worker() { return null } run() { this.worker; } } }",
+			0,
+		],
+		[
+			"shadowed child import",
+			"function make(child: any) { class S extends Store { @child get worker() { return null } run() { this.worker; } } }",
+			0,
+		],
+		[
+			"unrelated decorator import",
+			"import { child as lazy } from 'other'; class S extends Store { @lazy get worker() { return null } run() { this.worker; } }",
+			0,
+		],
+		[
+			"unknown cross-file superclass",
+			"import { Base } from './base'; class S extends Base { @child get worker() { return null } run() { this.worker; } }",
+			0,
+		],
+		["dynamic read key", childStore("this[key]; this[`worker`];"), 0],
+		[
+			"dynamic declaration key",
+			childStore("this.worker;", "@child get [key]() { return null }"),
+			0,
+		],
+		[
+			"dynamic static configuration key",
+			childStore(
+				"this.worker;",
+				"static types = { [key]: child }; get worker() { return null }"
+			),
+			0,
+		],
+		["consumed return", childStore("return this.worker;"), 0],
+		[
+			"consumed variable",
+			childStore("const worker = this.worker; consume(worker);"),
+			0,
+		],
+		["consumed argument", childStore("consume(this.worker);"), 0],
+		[
+			"consumed member and method",
+			childStore("this.worker.value; this.worker.start();"),
+			0,
+		],
+		[
+			"consumed conditional and logical read",
+			childStore("if (this.worker) consume(); this.worker && consume();"),
+			0,
+		],
+		[
+			"consumed assignment and await",
+			childStore(
+				"target.worker = this.worker; void Promise.resolve(this.worker);"
+			),
+			0,
+		],
+		[
+			"explicit warmup suppression",
+			childStore(
+				"// oxlint-disable-next-line r-state-tree/no-discarded-child-read -- Intentional startup warmup\nvoid this.worker;"
+			),
+			0,
+		],
+		[
+			"explicit warmup helper is outside scope",
+			childStore("warmup(this.worker);"),
+			0,
+		],
+		[
+			"computed non-child getter",
+			childStore("this.worker;", "@computed get worker() { return null }"),
+			0,
+		],
+		[
+			"static override to computed",
+			"class Base extends Store { @child get worker() { return null } } class S extends Base { static types = { worker: computed }; run() { this.worker; } }",
+			0,
+		],
+		[
+			"derived decorator override",
+			"class Base extends Store { @child get worker() { return null } } class S extends Base { @computed get worker() { return null } run() { this.worker; } }",
+			0,
+		],
+		[
+			"static types overrides decorator",
+			childStore(
+				"this.worker;",
+				"static types = { worker: computed }; @child get worker() { return null }"
+			),
+			0,
+		],
+		[
+			"inherited getter replaced by field",
+			"class Base extends Store { @child get worker() { return null } } class S extends Base { worker = null; run() { this.worker; } }",
+			0,
+		],
+		[
+			"inherited getter replaced by method",
+			"class Base extends Store { @child get worker() { return null } } class S extends Base { worker() {} run() { this.worker; } }",
+			0,
+		],
+		[
+			"static contexts",
+			"class S extends Store { @child get worker() { return null } static run() { this.worker; } static later = () => { this.worker; }; static { this.worker; } }",
+			0,
+		],
+		[
+			"raw constructor and field this",
+			"class S extends Store { @child get worker() { return null } constructor() { super(); this.worker; } later = () => { this.worker; }; value = (() => { this.worker; })(); }",
+			0,
+		],
+		[
+			"immutable this alias deliberately outside scope",
+			childStore("const self = this; self.worker;"),
+			0,
+		],
+		[
+			"getter required for Store child",
+			childStore("this.worker;", "@child worker = null;"),
+			0,
+		],
+		[
+			"unknown static config",
+			childStore(
+				"this.worker;",
+				"static types = configuration; @child get worker() { return null }"
+			),
+			0,
+		],
+		[
+			"spread config uncertainty",
+			childStore(
+				"this.worker;",
+				"static types = { worker: child, ...other }; get worker() { return null }"
+			),
+			0,
+		],
+		[
+			"static accessor uncertainty",
+			childStore(
+				"this.worker;",
+				"static get types() { return config } @child get worker() { return null }"
+			),
+			0,
+		],
+		[
+			"unknown decorator uncertainty",
+			childStore("this.worker;", "@other @child get worker() { return null }"),
+			0,
+		],
+		[
+			"unknown class decorator uncertainty",
+			"@other class S extends Store { @child get worker() { return null } run() { this.worker; } }",
+			0,
+		],
+		[
+			"unrelated static decorator is not instance config",
+			childStore(
+				"this.worker;",
+				"@child static get worker() { return null } get worker() { return null }"
+			),
+			0,
+		],
+		[
+			"sequence expression outside scope",
+			childStore("this.worker, consume();"),
+			0,
+		],
+		...asyncReviewCases,
+	],
 };
 
 type Diagnostic = {
@@ -1231,7 +1639,11 @@ test("oxlint CLI all-rule adoption emits diagnostics and exits cleanly for valid
 		get derived() { this.count++; return 0 }
 		edit() { this.rows.push(1); this.tracked = [] }
 	}
-	new Invalid();`
+	new Invalid();
+	class Lazy extends Store {
+		@child get worker() { return createStore(Lazy) }
+		run() { void this.worker; }
+	}`
 	);
 	const invoke = (path: string) =>
 		spawnSync(
@@ -1256,9 +1668,67 @@ test("oxlint CLI all-rule adoption emits diagnostics and exits cleanly for valid
 	const diagnostics = (
 		JSON.parse(dirty.stdout) as { diagnostics: Diagnostic[] }
 	).diagnostics;
-	expect(diagnostics).toHaveLength(4);
+	expect(diagnostics).toHaveLength(5);
 	for (const rule of Object.keys(cases))
 		expect(diagnostics.some((d) => d.code.includes(rule))).toBe(true);
+});
+
+test("discarded-child warning is advisory with no automatic fix", () => {
+	const run = spawnSync(
+		process.execPath,
+		[
+			"--input-type=module",
+			"-e",
+			`
+		import plugin from 'r-state-tree/lint';
+		const meta = plugin.rules['no-discarded-child-read'].meta;
+		console.log(JSON.stringify({ type: meta.type, fixable: !!meta.fixable, suggestions: !!meta.hasSuggestions }));
+	`,
+		],
+		{ encoding: "utf8" }
+	);
+	expect(run.status, run.stderr).toBe(0);
+	expect(JSON.parse(run.stdout)).toEqual({
+		type: "suggestion",
+		fixable: false,
+		suggestions: false,
+	});
+});
+
+test("all rules leave async policies to review, including deliberately unsafe scope fixtures", () => {
+	const folder = join(directory, "async-policy");
+	mkdirSync(folder);
+	const config = join(folder, "rules.json");
+	writeFileSync(
+		config,
+		JSON.stringify({
+			plugins: [],
+			categories: { correctness: "off" },
+			jsPlugins: [{ name: "r-state-tree", specifier: plugin }],
+			rules: Object.fromEntries(
+				Object.keys(cases).map((rule) => [`r-state-tree/${rule}`, "warn"])
+			),
+		})
+	);
+	for (const [index, [, code]] of asyncReviewCases.entries())
+		writeFileSync(join(folder, `${index}.ts`), header + code);
+	const run = spawnSync(
+		process.execPath,
+		[
+			cli,
+			"--config",
+			config,
+			"--disable-nested-config",
+			"--no-ignore",
+			"--deny-warnings",
+			"--format",
+			"json",
+			folder,
+		],
+		{ encoding: "utf8" }
+	);
+	expect(run.status, run.stdout + run.stderr).toBe(0);
+	expect(JSON.parse(run.stdout).diagnostics).toEqual([]);
 });
 
 for (const [rule, fixtures] of Object.entries(cases)) {
@@ -1269,6 +1739,8 @@ for (const [rule, fixtures] of Object.entries(cases)) {
 				expect(diagnostics, JSON.stringify(diagnostics)).toHaveLength(count);
 				for (const d of diagnostics) {
 					expect(d.message).not.toContain("{{");
+					if (rule === "no-discarded-child-read")
+						expect(d.message).toContain("may initialize");
 					expect(d.labels[0].span.offset).toBeGreaterThanOrEqual(header.length);
 					expect(
 						d.labels[0].span.offset + d.labels[0].span.length
