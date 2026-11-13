@@ -24,7 +24,7 @@ Use a release of `r-state-tree` containing the `./lint` export. For an isolated 
 		"r-state-tree/no-direct-construction": "error",
 		"r-state-tree/no-plain-collection-mutation": "warn",
 		"r-state-tree/no-observable-collection-replacement": "warn",
-		"r-state-tree/no-discarded-child-read": "warn"
+		"r-state-tree/no-discarded-child-read": "error"
 	}
 }
 ```
@@ -110,7 +110,7 @@ Both field rules are declaration-based, not instance-state dataflow: only inline
 
 ## no-discarded-child-read
 
-An opt-in **suggestion**, normally adopted at `warn`: report a standalone `this.worker;` or `void this.worker;` when `worker` is a locally known lazy **Store** child getter. Reading a Store child can initialize/mount it even when the value is discarded. This is not necessarily a bug: intentional startup warmup is valid. There is no autofix or automatic initialization rewrite.
+An opt-in **problem** rule, recommended at `error`: report a standalone `this.worker;` or `void this.worker;` when `worker` is a locally known lazy **Store** child getter. Reading a Store child can initialize/mount it even when the value is discarded. Eager initialization solely for effects is a design error, including intentional startup warmup. Remove the discarded read and let an actual consumer initialize the child when it needs the value. If startup requires this read, revisit ownership and lifecycle design rather than suppressing the diagnostic. There is no autofix or automatic initialization rewrite.
 
 ```ts
 class Workspace extends Store {
@@ -119,12 +119,15 @@ class Workspace extends Store {
 	}
 
 	inspect() {
-		this.worker; // Warning: may materialize the lazy child solely for effects.
+		this.worker; // Invalid: reads the lazy child solely for effects.
 	}
 
 	start() {
-		// oxlint-disable-next-line r-state-tree/no-discarded-child-read -- Intentional startup warmup.
-		void this.worker;
+		void this.worker; // Also invalid: intentional warmup is not an exception.
+	}
+
+	runJob() {
+		this.worker.runJob(); // Actual consumer: initialize when work is needed.
 	}
 
 	get currentWorker() {
@@ -155,4 +158,4 @@ pnpm exec oxlint --type-aware lint tests/lint.test.ts
 pnpm exec oxfmt --check lint tests/lint.test.ts
 ```
 
-The regression fixtures live in `tests/lint.test.ts`. They invoke the **actual Oxlint CLI** against temporary TypeScript fixtures and temporary isolated configurations, checking diagnostic counts/rules/ranges. An all-rule invocation asserts five diagnostics and exit code 1 for invalid code, and no diagnostics with exit code 0 for valid code. Reviewed warmup suppressions and meaningful consumed reads remain unflagged. Async-policy scope fixtures include both deliberately unsafe and legitimate continuations; they assert that no speculative async diagnostic is shipped, **not** that those continuations are safe. No project/editor/tsconfig settings are changed.
+The regression fixtures live in `tests/lint.test.ts`. They invoke the **actual Oxlint CLI** against temporary TypeScript fixtures and temporary isolated configurations, checking diagnostic counts/rules/ranges. An all-rule invocation asserts five diagnostics and exit code 1 for invalid code, and no diagnostics with exit code 0 for valid code. Intentional warmup via a discarded read is reported too; meaningful consumed reads remain unflagged. A helper call or unused local can conceal eager initialization from this narrow check; absence of a diagnostic does not endorse that design. Async-policy scope fixtures include both deliberately unsafe and legitimate continuations; they assert that no speculative async diagnostic is shipped, **not** that those continuations are safe. No project/editor/tsconfig settings are changed.

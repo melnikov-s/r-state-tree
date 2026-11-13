@@ -12,13 +12,13 @@ const messages = {
 	"no-observable-collection-replacement":
 		"Field '{{field}}' is initialized with an observable collection. Preserve its identity and mutate it in place outside computed derivations.",
 	"no-discarded-child-read":
-		"Reading lazy Store child '{{field}}' without using its value may initialize it. If this is intentional warmup, document and suppress this warning; otherwise consume the child where needed.",
+		"Do not eagerly initialize lazy Store child '{{field}}' with a discarded read. Remove this read and access the child only where its value is needed.",
 };
 
 function rule(id, run) {
 	return {
 		meta: {
-			type: id === "no-discarded-child-read" ? "suggestion" : "problem",
+			type: "problem",
 			docs: {
 				description: messages[id],
 				url: `https://github.com/melnikov-s/r-state-tree/blob/main/lint/README.md#${id}`,

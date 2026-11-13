@@ -1417,14 +1417,14 @@ const cases: Record<string, Case[]> = {
 			0,
 		],
 		[
-			"explicit warmup suppression",
+			"intentional warmup is still rejected",
 			childStore(
-				"// oxlint-disable-next-line r-state-tree/no-discarded-child-read -- Intentional startup warmup\nvoid this.worker;"
+				"// Intentional startup warmup is not an exception.\nvoid this.worker;"
 			),
-			0,
+			1,
 		],
 		[
-			"explicit warmup helper is outside scope",
+			"eager-init helper is outside detection, not endorsed",
 			childStore("warmup(this.worker);"),
 			0,
 		],
@@ -1673,7 +1673,7 @@ test("oxlint CLI all-rule adoption emits diagnostics and exits cleanly for valid
 		expect(diagnostics.some((d) => d.code.includes(rule))).toBe(true);
 });
 
-test("discarded-child warning is advisory with no automatic fix", () => {
+test("discarded-child initialization is a problem with no automatic fix", () => {
 	const run = spawnSync(
 		process.execPath,
 		[
@@ -1689,7 +1689,7 @@ test("discarded-child warning is advisory with no automatic fix", () => {
 	);
 	expect(run.status, run.stderr).toBe(0);
 	expect(JSON.parse(run.stdout)).toEqual({
-		type: "suggestion",
+		type: "problem",
 		fixable: false,
 		suggestions: false,
 	});
@@ -1739,8 +1739,10 @@ for (const [rule, fixtures] of Object.entries(cases)) {
 				expect(diagnostics, JSON.stringify(diagnostics)).toHaveLength(count);
 				for (const d of diagnostics) {
 					expect(d.message).not.toContain("{{");
-					if (rule === "no-discarded-child-read")
-						expect(d.message).toContain("may initialize");
+					if (rule === "no-discarded-child-read") {
+						expect(d.message).toContain("Do not eagerly initialize");
+						expect(d.message).not.toMatch(/suppress|warmup/i);
+					}
 					expect(d.labels[0].span.offset).toBeGreaterThanOrEqual(header.length);
 					expect(
 						d.labels[0].span.offset + d.labels[0].span.length
