@@ -1,6 +1,6 @@
 ---
 name: r-state-tree
-description: Build, review, debug, or refactor applications that use r-state-tree Stores, Models, observables, snapshots, child trees, lifecycle reactions/effects, Store Context, or the first-party React adapter. Use for state-placement decisions, Store/Model design, async ownership, persistence, reactive collection bugs, React observer/StoreProvider wiring, migrations from local adapters, and architecture reviews of r-state-tree code.
+description: Build, review, debug, or refactor applications that use r-state-tree Stores, Models, observables, snapshots, child trees, lifecycle reactions/effects, Store Context, or the first-party React adapter. Use for state-placement decisions, Store/Model design, async ownership, persistence, reactive collection bugs, React observer/StoreProvider wiring, migrations from local adapters, architecture reviews of r-state-tree code, and live observability/inspector/MCP setup in Vite or Electron renderers.
 ---
 
 # r-state-tree
@@ -93,6 +93,8 @@ Apply the same rule to child descriptor props: pass the Model or a callback that
 Read [references/react.md](references/react.md) for React implementation and migration work.
 
 ## Select references
+
+- Read [references/inspection.md](references/inspection.md) for live observability, the inspector panel, MCP agent configuration, Vite/Electron renderer setup, or optional field writes and method calls.
 
 - Read [references/core-api.md](references/core-api.md) when creating Stores, Models, child trees, Context, snapshots, or observables.
 - Read [references/lifecycle-and-async.md](references/lifecycle-and-async.md) for effects, reactions, disposal, polling, async commands, hydration, or external resources.

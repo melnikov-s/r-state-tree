@@ -17,6 +17,7 @@ import type {
 	AtomNode,
 } from "../observables";
 import { allowNewStore } from "./Store";
+import { debugWrite, debugEnabled } from "../observables/internal/debug";
 import type Store from "./Store";
 import type {
 	StoreConfiguration,
@@ -147,6 +148,7 @@ function validateStoreChildValue(
 }
 
 type ChildStoreData = {
+	initialized?: boolean;
 	value: SignalNode<Store | null | Store[]>;
 	computed: ComputedNode<StoreElement | null | StoreElement[]>;
 	listener: ListenerNode;
@@ -258,6 +260,33 @@ export class StoreAdministration<
 
 	private get configuration(): StoreConfiguration<StoreType> {
 		return this.configurationGetter?.() ?? {};
+	}
+
+	/** Retained metadata only: does not evaluate child getters. */
+	getInspectionMetadata() {
+		return {
+			fields: Reflect.ownKeys(this.configuration).map((key) => ({
+				key,
+				type: getConfigType(this.configuration[key as string]),
+			})),
+			parent: this.parent?.proxy ?? null,
+			status: this.signal.aborted
+				? "disposed"
+				: this.isMounted
+					? "mounted"
+					: "unmounted",
+		} as const;
+	}
+
+	/** Read realized storage, deliberately bypassing the public reconciling getter. */
+	peekInspectionChild(name: PropertyKey): {
+		initialized: boolean;
+		value?: Store | Store[] | null;
+	} {
+		const data = this.childStoreDataMap.get(name);
+		return data?.initialized
+			? { initialized: true, value: untracked(() => data.value.get()) }
+			: { initialized: false };
 	}
 
 	private findPendingChildSnapshot(
@@ -514,14 +543,29 @@ export class StoreAdministration<
 		}
 	}
 
-	private updateStore(name: PropertyKey): void {
-		const childStoreData = this.childStoreDataMap.get(name)!;
-		const storeElement = childStoreData.computed.get();
+	private reconcileStore(
+		name: PropertyKey,
+		storeElement: StoreElement | null | StoreElement[]
+	): void {
+		const before = debugEnabled
+			? this.peekInspectionChild(name).value
+			: undefined;
 		this.validateStoreChildValue(storeElement, name);
 		Array.isArray(storeElement)
 			? this.setStoreList(name, storeElement)
 			: this.setSingleStore(name, storeElement as StoreElement | null);
 		this.finishPendingChildSnapshots(name);
+		this.childStoreDataMap.get(name)!.initialized = true;
+		if (debugEnabled) {
+			const after = this.peekInspectionChild(name).value;
+			if (before !== after)
+				debugWrite(this.source, name, "child", before, after);
+		}
+	}
+
+	private updateStore(name: PropertyKey): void {
+		const childStoreData = this.childStoreDataMap.get(name)!;
+		this.reconcileStore(name, childStoreData.computed.get());
 	}
 
 	private getComputedGetter(
@@ -547,11 +591,7 @@ export class StoreAdministration<
 		const storeElement = childStoreData.listener.track(() =>
 			childStoreData.computed.get()
 		);
-		this.validateStoreChildValue(storeElement, name);
-		Array.isArray(storeElement)
-			? this.setStoreList(name, storeElement)
-			: this.setSingleStore(name, storeElement as StoreElement | null);
-		this.finishPendingChildSnapshots(name);
+		this.reconcileStore(name, storeElement);
 		this.snapshotStructureAtom.reportChanged();
 		return childStoreData.value.get() as Store | null;
 	}
@@ -564,11 +604,7 @@ export class StoreAdministration<
 			return this.childStoreDataMap.get(name)!.value.get() as Store | null;
 		} else {
 			const storeElement = untracked(() => childStoreData.computed.get());
-			this.validateStoreChildValue(storeElement, name);
-			Array.isArray(storeElement)
-				? this.setStoreList(name, storeElement)
-				: this.setSingleStore(name, storeElement as StoreElement | null);
-			this.finishPendingChildSnapshots(name);
+			this.reconcileStore(name, storeElement);
 			return childStoreData.value.get() as Store | null;
 		}
 	}

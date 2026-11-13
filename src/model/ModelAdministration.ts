@@ -10,6 +10,7 @@ import {
 	reaction,
 } from "../observables";
 import type { ComputedNode, AtomNode } from "../observables";
+import { debugWrite, debugEnabled } from "../observables/internal/debug";
 import Model from "../model/Model";
 import type {
 	ModelConfiguration,
@@ -209,7 +210,20 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					}
 				}
 
-				return Reflect.defineProperty(target, name, desc);
+				const recording = debugEnabled && !adm.writeInProgress.has(name);
+				const before = recording
+					? Object.getOwnPropertyDescriptor(target, name)?.value
+					: undefined;
+				const result = Reflect.defineProperty(target, name, desc);
+				if (recording && result)
+					debugWrite(
+						target,
+						name,
+						"define",
+						before,
+						"value" in desc ? desc.value : undefined
+					);
+				return result;
 			},
 		} as ProxyHandler<object>
 	);
@@ -254,6 +268,18 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		return this.configurationGetter?.() ?? {};
 	}
 
+	/** Retained runtime metadata; snapshots intentionally have different semantics. */
+	getInspectionMetadata() {
+		return {
+			fields: Reflect.ownKeys(this.configuration).map((key) => ({
+				key,
+				type: getConfigType(this.configuration[key as string]),
+			})),
+			parent: this.parent?.proxy ?? null,
+			status: this.disposed ? "disposed" : "active",
+		} as const;
+	}
+
 	private getReferencedAtom(name: PropertyKey): AtomNode {
 		let a = this.referencedAtoms?.get(name);
 		if (!a) {
@@ -263,6 +289,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		}
 
 		return a!;
+	}
+
+	private writeReference(name: PropertyKey, value: unknown): void {
+		const before = debugEnabled ? this.source[name] : undefined;
+		this.source[name] = value;
+		if (debugEnabled && before !== value)
+			debugWrite(this.source, name, "set", before, value);
+		this.referencedAtoms?.get(name)?.reportChanged();
 	}
 
 	private setId(name: string, v: IdType): void {
@@ -281,6 +315,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		if (v !== undefined) {
 			setIdentifier(this.proxy, v);
 			this.source[name] = v;
+			if (debugEnabled) debugWrite(this.source, name, "set", id, v);
 		}
 	}
 
@@ -449,9 +484,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			}
 		}
 
-		this.source[name] = id;
-
-		this.referencedAtoms?.get(name)?.reportChanged();
+		this.writeReference(name, id);
 	}
 
 	private setModelRefs(name: PropertyKey, modelValue: Model[]): void {
@@ -467,9 +500,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			return id;
 		});
 
-		this.source[name] = ids;
-
-		this.referencedAtoms?.get(name)?.reportChanged();
+		this.writeReference(name, ids);
 	}
 
 	private getRequiredModelRefType(name: PropertyKey): typeof Model {
@@ -700,20 +731,20 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 								if ((value as unknown[])?.[0] instanceof Model) {
 									this.proxy[key] = value;
 								} else {
-									this.source[key] = value.map((snapshot: RefSnapshot) =>
-										getSnapshotRefId(snapshot)
+									this.writeReference(
+										key,
+										value.map((snapshot: RefSnapshot) =>
+											getSnapshotRefId(snapshot)
+										)
 									);
-									this.referencedAtoms?.get(key)?.reportChanged();
 								}
 								break;
 							} else if (value instanceof Model) {
 								this.proxy[key] = value;
 							} else if (value == null) {
-								this.source[key] = undefined;
-								this.referencedAtoms?.get(key)?.reportChanged();
+								this.writeReference(key, undefined);
 							} else {
-								this.source[key] = getSnapshotRefId(value);
-								this.referencedAtoms?.get(key)?.reportChanged();
+								this.writeReference(key, getSnapshotRefId(value));
 							}
 							break;
 						case ModelCfgTypes.id:

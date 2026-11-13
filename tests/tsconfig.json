@@ -7,6 +7,15 @@
 		"noUnusedLocals": false,
 		"noEmit": true
 	},
-	"include": ["../src/**/*", "*", "../vite.config.mts", "../vitest.config.mts"],
+	"include": [
+		"../src/**/*",
+		"*",
+		"browser/*",
+		"fixtures/live-inspector/*",
+		"../benchmarks/**/*.ts",
+		"../playwright.inspector.config.mts",
+		"../vite.config.mts",
+		"../vitest.config.mts"
+	],
 	"exclude": ["node_modules"]
 }

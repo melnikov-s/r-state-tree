@@ -15,6 +15,7 @@ import {
 import type { PropertyType } from "./internal/utils";
 import { Administration } from "./internal/Administration";
 import { AtomMap, SignalMap } from "./internal/NodeMap";
+import { debugWrite, debugEnabled } from "./internal/debug";
 
 export class ObjectAdministration<T extends object> extends Administration<T> {
 	keysAtom: AtomNode;
@@ -94,7 +95,18 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				return Reflect.defineProperty(adm.source, name, descriptor);
 			}
 
+			const previous = debugEnabled
+				? Object.getOwnPropertyDescriptor(adm.source, name)?.value
+				: undefined;
 			const result = Reflect.defineProperty(adm.source, name, descriptor);
+			if (result && debugEnabled)
+				debugWrite(
+					adm.source,
+					name,
+					"define",
+					previous,
+					"value" in descriptor ? descriptor.value : undefined
+				);
 
 			if (result) {
 				// We must trigger reactivity for the property update.
@@ -270,12 +282,20 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		const type = this.getType(key);
 
 		if (type === null) {
-			return Reflect.set(this.source, key, newValue, this.proxy);
+			const result = Reflect.set(this.source, key, newValue, this.proxy);
+			if (result && debugEnabled)
+				debugWrite(this.source, key, "setter", undefined, newValue);
+			return result;
 		}
 
 		// if this property is a setter
 		if (type === "computed") {
-			return batch(() => this.set(key, newValue));
+			return batch(() => {
+				const result = this.set(key, newValue);
+				if (result && debugEnabled)
+					debugWrite(this.source, key, "setter", undefined, newValue);
+				return result;
+			});
 		}
 
 		const had = key in this.source;
@@ -315,6 +335,8 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				this.isWriting = false;
 			}
 
+			if (debugEnabled)
+				debugWrite(this.source, key, had ? "set" : "add", oldValue, newValue);
 			batch(() => {
 				this.flushChange();
 				if (!had) {
@@ -342,8 +364,13 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	remove(key: keyof T): boolean {
 		if (!(key in this.source)) return true;
 
+		const previous = debugEnabled
+			? Object.getOwnPropertyDescriptor(this.source, key)?.value
+			: undefined;
 		const result = Reflect.deleteProperty(this.source, key);
 		if (result) {
+			if (debugEnabled)
+				debugWrite(this.source, key, "delete", previous, undefined);
 			batch(() => {
 				this.flushChange();
 				this.valuesMap.reportChanged(key, undefined);

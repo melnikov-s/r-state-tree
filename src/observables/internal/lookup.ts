@@ -3,7 +3,8 @@ import { PreactObjectAdministration } from "../preact";
 import { ArrayAdministration } from "../array";
 import { DateAdministration } from "../date";
 import type { Administration } from "./Administration";
-import { batch } from "@preact/signals-core";
+import { batch } from "../preact";
+import { debugCall, debugBatch, debugEnabled } from "./debug";
 import { isPlainObject } from "./utils";
 
 const administrationMap: WeakMap<object, Administration> = new WeakMap();
@@ -41,7 +42,13 @@ export function getAction<T extends Function>(fn: T): T {
 				return new (fn as any)(...args);
 			}
 
-			return batch(() => fn.apply(this, args));
+			return debugEnabled
+				? debugBatch(() =>
+						batch(() =>
+							debugCall(this as object, fn, () => fn.apply(this, args))
+						)
+					)
+				: batch(() => fn.apply(this, args));
 		};
 
 		actionsMap.set(fn, action);

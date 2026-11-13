@@ -1731,6 +1731,49 @@ test("all rules leave async policies to review, including deliberately unsafe sc
 	expect(JSON.parse(run.stdout).diagnostics).toEqual([]);
 });
 
+test("fixture adoption checks source imports with all rules and reports original paths", () => {
+	const fixtures = join(directory, "fixture-adoption");
+	mkdirSync(fixtures);
+	const example = join(fixtures, "fixture.ts");
+	const invoke = () =>
+		spawnSync(process.execPath, ["scripts/lint-fixtures.mjs", fixtures], {
+			encoding: "utf8",
+		});
+	writeFileSync(
+		example,
+		`import { Model, Store, child, createStore, observable } from "../../src/index";
+class Invalid extends Model {
+	rows = []; tracked = observable([]); count = 0;
+	get derived() { this.count++; return 0 }
+	edit() { this.rows.push(1); this.tracked = [] }
+}
+new Invalid();
+class Lazy extends Store {
+	@child get worker() { return createStore(Lazy) }
+	run() { void this.worker; }
+}`
+	);
+	const dirty = invoke();
+	expect(dirty.status, dirty.stdout + dirty.stderr).toBe(1);
+	for (const rule of Object.keys(cases)) expect(dirty.stdout).toContain(rule);
+	expect(dirty.stdout).toContain(`${example}:4:`);
+	writeFileSync(
+		example,
+		`import { Model, observable } from "../../src/index";
+class Valid extends Model {
+	rows = observable([]);
+	get derived() { return this.rows.length }
+	edit() { this.rows.push(1) }
+}
+Valid.create();`
+	);
+	const clean = invoke();
+	expect(clean.status, clean.stdout + clean.stderr).toBe(0);
+	expect(clean.stdout).toContain(
+		`Checked all ${Object.keys(cases).length} RStateTree rules in 1 fixture files.`
+	);
+});
+
 for (const [rule, fixtures] of Object.entries(cases)) {
 	describe(rule, () => {
 		for (const [index, [title, code, count]] of fixtures.entries()) {

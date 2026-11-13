@@ -7,6 +7,7 @@ export {
 	createObservableWithCustomAdministration,
 	Observable,
 } from "./internal/lookup";
+export { batch } from "./internal/debug";
 export { ArrayAdministration } from "./array";
 export { CollectionAdministration } from "./collection";
 export { DateAdministration } from "./date";
@@ -16,7 +17,6 @@ export {
 	reaction,
 	type SignalNode,
 	createAtom,
-	batch,
 	createComputed,
 	createSignal,
 	untracked,

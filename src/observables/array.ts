@@ -4,6 +4,7 @@ import { getAdministration, getSource, isObservable } from "./internal/lookup";
 import { Administration } from "./internal/Administration";
 import { SignalMap } from "./internal/NodeMap";
 import { resolveNode } from "./internal/utils";
+import { debugWrite, debugEnabled } from "./internal/debug";
 
 /**
  * Check if a property key is a valid array index per ECMAScript spec.
@@ -107,7 +108,18 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		defineProperty(target, name, descriptor) {
 			const adm = getAdministration(target) as ArrayAdministration<any>;
+			const before = debugEnabled
+				? Object.getOwnPropertyDescriptor(adm.source, name)?.value
+				: undefined;
 			const result = Reflect.defineProperty(adm.source, name, descriptor);
+			if (result && debugEnabled)
+				debugWrite(
+					adm.source,
+					name,
+					"define",
+					before,
+					"value" in descriptor ? descriptor.value : undefined
+				);
 
 			if (result) {
 				// Arrays are complex because modifying length or indices affects many things.
@@ -136,7 +148,12 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 			const isIndex = isArrayIndexKey(name);
 
 			const had = name in adm.source;
+			const before = debugEnabled
+				? Object.getOwnPropertyDescriptor(adm.source, name)?.value
+				: undefined;
 			const result = Reflect.deleteProperty(adm.source, name);
+			if (result && had && debugEnabled)
+				debugWrite(adm.source, name, "delete", before, undefined);
 			if (result && had && isIndex) {
 				const index = Number(name);
 				// Pass true for lengthChanged to trigger keysAtom (a hole was created)
@@ -198,6 +215,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 						: Math.min(end, length);
 
 			if (from < to) {
+				if (debugEnabled)
+					debugWrite(adm.source, "$items", "fill", undefined, undefined);
 				adm.onArrayChanged(false, from, to - from);
 			}
 
@@ -249,6 +268,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 			const adm = getAdministration(this);
 			// Parent-based ownership: no index tracking needed on reorder
 			adm.source.reverse();
+			if (debugEnabled)
+				debugWrite(adm.source, "$items", "reverse", undefined, undefined);
 			adm.onArrayChanged(false, 0, adm.source.length);
 			return this;
 		},
@@ -276,6 +297,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 				adm.source[i] = pairs[i].stored;
 			}
 
+			if (debugEnabled)
+				debugWrite(adm.source, "$items", "sort", undefined, undefined);
 			adm.onArrayChanged(false, 0, adm.source.length);
 			return this;
 		},
@@ -297,6 +320,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 			const adm = getAdministration(this);
 			// Parent-based ownership: no index tracking needed on reorder
 			adm.source.copyWithin(target, start, end);
+			if (debugEnabled)
+				debugWrite(adm.source, "$items", "copyWithin", undefined, undefined);
 			adm.onArrayChanged(false, 0, adm.source.length);
 			return this;
 		},
@@ -375,12 +400,17 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		if (!changed) return true;
 
+		const before = debugEnabled
+			? Object.getOwnPropertyDescriptor(values, index)?.value
+			: undefined;
 		const result = Reflect.set(values, index, targetValue);
 		if (!result) return false;
 
 		const newLength = values.length;
 		const lengthChanged = newLength !== oldLength;
 
+		if (debugEnabled)
+			debugWrite(this.source, String(index), "set", before, newValue);
 		this.onArrayChanged(lengthChanged, index, 1);
 
 		return true;
@@ -407,6 +437,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 		const result = Reflect.set(this.source, "length", newLength);
 		if (!result) return false;
 
+		if (debugEnabled)
+			debugWrite(this.source, "length", "set", currentLength, newLength);
 		// Parent-based ownership: no index cleanup needed on truncation
 		if (newLength < currentLength) {
 			this.onArrayChanged(true, newLength, currentLength - newLength);
@@ -446,6 +478,14 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 		this.spliceItemsIntoValues(index, deleteCount, newTargetItems);
 
 		if (deleteCount !== 0 || newTargetItems.length !== 0) {
+			if (debugEnabled)
+				debugWrite(
+					this.source,
+					"$items",
+					"splice",
+					removedItems.length,
+					newTargetItems.length
+				);
 			const shift = (newItems?.length ?? 0) - deleteCount;
 			const reindexing = shift !== 0 && index + deleteCount < length;
 			const count = reindexing

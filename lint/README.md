@@ -2,7 +2,7 @@
 
 Opt-in, syntax-only rules shipped at `r-state-tree/lint`. The plugin is plain ESM JavaScript, imports no application/runtime code, and adds no dependencies. It runs in Oxlint's JavaScript-plugin host (verified with Oxlint **1.87.0**, Node **24.9.0**). Oxlint's JS-plugin API is still alpha; pin/test runner upgrades. The rules use ESLint-compatible `create(context)` / `context.sourceCode` APIs, but ESLint is not required or independently tested here.
 
-Nothing enables these rules in the repository or in an application automatically. There are no autofixes: wrapping state, changing factories, or moving a mutation can change behavior.
+Nothing enables these rules in a consuming application automatically. This repository explicitly applies all five rules to its test fixtures with `pnpm lint:fixtures`, also included in `pnpm lint`. There are no autofixes: wrapping state, changing factories, or moving a mutation can change behavior.
 
 ## Install and adopt explicitly
 
@@ -146,6 +146,12 @@ The recognized subset is deliberately small:
 - Ambiguous configurations are skipped conservatively: nonliteral/static-accessor `types`, spreads/accessors/methods/unknown keys in literal maps, static blocks, dynamic class member names, class decorators, and unknown/multiple decorators on the target. Runtime configuration changes, monkey-patching, arbitrary decorator effects, and manually invoking methods with a different receiver are not modeled.
 
 The real monitoring pattern `disk.jobs.jobs` consumes its intermediate child and needs ownership/intent knowledge. This rule intentionally does **not** flag it. See [review and runtime-test guidance](review-guidance.md) for that case and all seven reviewed candidates, including why no post-`await` commit warning ships.
+
+## Repository fixture adoption
+
+`pnpm lint:fixtures` checks every TypeScript/JavaScript source in `tests/fixtures/` with all five rules at error severity, without suppressions. It is also part of `pnpm lint`.
+
+The test fixtures import this checkout's `src/index` rather than a built package. Since the plugin intentionally recognizes only public `r-state-tree` imports, `scripts/lint-fixtures.mjs` checks a temporary source mirror with just those module specifiers normalized. No runtime code or project settings change; diagnostics retain original file paths and line numbers. The runner deletes the mirror afterward. A CLI regression checks that relative-source imports produce diagnostics for all five rules, preventing a silently ineffective check.
 
 ## Repository verification
 

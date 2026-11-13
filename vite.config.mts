@@ -12,6 +12,9 @@ export default defineConfig({
 			entry: {
 				index: resolve(rootDir, "src/index.ts"),
 				react: resolve(rootDir, "src/react.ts"),
+				devtools: resolve(rootDir, "src/devtools.ts"),
+				"devtools-vite": resolve(rootDir, "src/devtools-vite.ts"),
+				"devtools-mcp": resolve(rootDir, "src/devtools-mcp.ts"),
 			},
 			name: "RStateTree",
 			formats: ["es", "cjs"],
@@ -28,6 +31,10 @@ export default defineConfig({
 				"@preact/signals-core",
 				"@preact/signals-react/runtime",
 				"react",
+				"ws",
+				"vite",
+				/^node:/,
+				/^@modelcontextprotocol\/sdk\//,
 			],
 			output: {
 				exports: "named",

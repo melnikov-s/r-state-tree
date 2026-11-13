@@ -28,6 +28,14 @@ This library strongly recommends using decorators.
 
 The library includes a decorator metadata polyfill for runtimes that don't yet natively support `Symbol.metadata`.
 
+## Live inspection (opt-in)
+
+A lightweight in-page inspector and local Vite → stdio MCP bridge are available for development. They inspect live Store/Model state, evaluate ordinary computeds, and explicitly initialize selected lazy children. Separately opt into `controls: true` to edit writable fields and invoke application methods from the panel or an agent—without a browser extension or arbitrary JavaScript evaluation.
+
+Enable `activity: true` separately to record observable method calls and writes, grouped by synchronous batch, without wrapping application methods. Recording is development-only, off by default, and has overhead; keep setup behind `import.meta.hot` and dispose it on teardown.
+
+See [setup, usage, and security](docs/inspection.md) for Vite/Electron renderer integration and MCP configuration.
+
 ## React integration
 
 Install the optional React peers when using the `r-state-tree/react` entry point:

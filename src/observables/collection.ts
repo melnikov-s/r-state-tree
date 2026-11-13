@@ -4,6 +4,11 @@ import { getSource, getAdministration, isObservable } from "./internal/lookup";
 import { Administration } from "./internal/Administration";
 import { AtomMap, SignalMap } from "./internal/NodeMap";
 import { resolveNode, isNonPrimitive } from "./internal/utils";
+import {
+	debugWrite,
+	debugEnabled,
+	batch as mutationBatch,
+} from "./internal/debug";
 
 type Collection<K, V> = Set<K> | Map<K, V>;
 
@@ -159,7 +164,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 	}
 
 	clear(): void {
-		batch(() => {
+		mutationBatch(() => {
 			this.source.forEach((_, key) => this.delete(key));
 		});
 	}
@@ -196,6 +201,8 @@ export class CollectionAdministration<K, V = K> extends Administration<
 
 		if (!this.hasEntry(value)) {
 			(this.source as Set<K>).add(target);
+			if (debugEnabled)
+				debugWrite(this.source, target, "add", undefined, value);
 			this.onCollectionChange(target);
 		}
 
@@ -206,6 +213,11 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		const existingKey = this.getExistingKey(value);
 		if (existingKey === undefined) return false;
 
+		const before = debugEnabled
+			? this.isMap
+				? (this.source as Map<K, V>).get(existingKey)
+				: existingKey
+			: undefined;
 		const target = getSource(value);
 		this.untrackExplicitObservable(target);
 		this.untrackExplicitObservable(value);
@@ -219,6 +231,8 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		this.source.delete(value);
 		if (proxy !== undefined) this.source.delete(proxy);
 
+		if (debugEnabled)
+			debugWrite(this.source, target, "delete", before, undefined);
 		this.onCollectionChange(target as K);
 		return true;
 	}
@@ -363,6 +377,8 @@ export class CollectionAdministration<K, V = K> extends Administration<
 				} else {
 					sourceMap.set(targetKey as K, targetValue);
 				}
+				if (debugEnabled)
+					debugWrite(this.source, targetKey, "set", oldValue, value);
 				this.valuesMap!.reportChanged(targetKey, value);
 				if (key !== targetKey) {
 					this.valuesMap!.reportChanged(key, value);
