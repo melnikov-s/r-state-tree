@@ -11,6 +11,7 @@ import {
 const external = (kind = null) => ({ origin: "external", kind });
 const unknown = { origin: "unknown" };
 const scalar = { origin: "scalar" };
+const undefinedValue = { origin: "undefined" };
 const fresh = (kind, props = new Map(), item = null) => ({
 	origin: "fresh",
 	kind,
@@ -54,8 +55,23 @@ export function checkPurity(root, cls, a, report) {
 		if (base.origin === "external")
 			return external(base.self ? fields.get(prop)?.kind : null);
 		if (base.origin === "fresh")
-			return base.props.get(prop) ?? base.item ?? unknown;
+			return base.props.get(prop) ?? base.item ?? undefinedValue;
 		return unknown;
+	}
+	// Unknown keys may overwrite earlier named properties. Apply known keys last
+	// so a source's explicit override (e.g. { ...state, item: {} }) remains fresh.
+	function copyProperties(target, source) {
+		const wildcard =
+			source.origin === "external"
+				? external()
+				: source.origin === "unknown"
+					? unknown
+					: source.item;
+		if (wildcard)
+			for (const [k, v] of target.props) target.props.set(k, join(v, wildcard));
+		if (source.origin === "fresh")
+			for (const [k, v] of source.props) target.props.set(k, v);
+		target.item = join(target.item, wildcard);
 	}
 	function bind(pattern, value, declare = false) {
 		value ??= unknown;
@@ -83,7 +99,18 @@ export function checkPurity(root, cls, a, report) {
 				if (p) bind(p, readProperty(value, index), declare);
 			});
 		} else if (pattern.type === "AssignmentPattern") {
-			bind(pattern.left, join(value, evaluate(pattern.right)), declare);
+			// Defaults run only for undefined. Unknown/external values can be
+			// undefined, so conservatively include both paths and their effects.
+			const resolved =
+				value.origin === "undefined"
+					? evaluate(pattern.right)
+					: ["unknown", "external"].includes(value.origin)
+						? branches(
+								() => value,
+								() => evaluate(pattern.right)
+							)
+						: value;
+			bind(pattern.left, resolved, declare);
 		} else if (pattern.type === "RestElement") {
 			bind(pattern.argument, fresh("array", new Map(), value), declare);
 		} else if (pattern.type === "MemberExpression") {
@@ -114,9 +141,14 @@ export function checkPurity(root, cls, a, report) {
 		// Save bindings owned by this invocation, but keep writes to captured locals.
 		const saved = new Map(env);
 		for (let i = 0; i < fn.params.length; i++)
-			bind(fn.params[i], args[i] ?? external(a.annotation(fn.params[i])), true);
-		const result =
-			fn.body.type === "BlockStatement" ? execute(fn.body) : evaluate(fn.body);
+			bind(fn.params[i], args[i] ?? undefinedValue, true);
+		// Generator calls initialize parameters but defer the body. Effects of
+		// iteration/next() are intentionally outside this analysis.
+		const result = fn.generator
+			? unknown
+			: fn.body.type === "BlockStatement"
+				? execute(fn.body)
+				: evaluate(fn.body);
 		for (const [v] of env) {
 			if (
 				typeof v !== "string" &&
@@ -154,6 +186,7 @@ export function checkPurity(root, cls, a, report) {
 			case "Identifier": {
 				const v = a.variable(node);
 				if (env.has(v)) return env.get(v) ?? unknown;
+				if (node.name === "undefined" && !v?.defs.length) return undefinedValue;
 				// A local binding lost across an escaping closure is unknown, not external.
 				if (local(node)) return unknown;
 				const def = v?.defs[0];
@@ -170,29 +203,25 @@ export function checkPurity(root, cls, a, report) {
 				return value;
 			}
 			case "ObjectExpression": {
-				const props = new Map();
-				let item = null;
+				const result = fresh("object");
 				for (const p of node.properties) {
 					if (p.type === "SpreadElement") {
-						const spread = evaluate(p.argument);
-						if (spread.origin === "fresh")
-							for (const [k, v] of spread.props) props.set(k, v);
-						item = join(
-							item,
-							spread.origin === "external" ? external() : spread.item
-						);
+						copyProperties(result, evaluate(p.argument));
 					} else {
 						if (p.computed) evaluate(p.key);
-						props.set(name(p), evaluate(p.value));
+						result.props.set(name(p), evaluate(p.value));
 					}
 				}
-				return fresh("object", props, item);
+				return result;
 			}
 			case "ArrayExpression": {
 				const props = new Map();
 				let item = null;
 				node.elements.forEach((e, i) => {
-					if (!e) return;
+					if (!e) {
+						props.set(i, undefinedValue);
+						return;
+					}
 					const value = evaluate(e.type === "SpreadElement" ? e.argument : e);
 					const entry =
 						e.type === "SpreadElement"
@@ -232,7 +261,7 @@ export function checkPurity(root, cls, a, report) {
 			case "UnaryExpression":
 				if (node.operator === "delete") bind(node.argument, unknown);
 				else evaluate(node.argument);
-				return scalar;
+				return node.operator === "void" ? undefinedValue : scalar;
 			case "ConditionalExpression":
 				evaluate(node.test);
 				return branches(
@@ -308,15 +337,25 @@ export function checkPurity(root, cls, a, report) {
 				result = invoke(functionValue(node.arguments[0]), params);
 			}
 			if (base.kind === "array" && copies.has(method)) {
-				return fresh(
-					"array",
-					new Map(),
+				let item =
 					method === "map" || method === "flatMap"
 						? result
 						: base.origin === "external"
 							? external()
-							: base.item
-				);
+							: base.item;
+				if (method === "concat")
+					for (const arg of args) {
+						// Arrays contribute their elements; ordinary objects contribute
+						// themselves. concat is shallow in both cases.
+						const entry =
+							arg.kind === "array"
+								? arg.origin === "external"
+									? external()
+									: arg.item
+								: arg;
+						item = join(item, entry);
+					}
+				return fresh("array", new Map(), item);
 			}
 			if (base.kind === "map" && method === "get")
 				return base.origin === "external" ? external() : (base.item ?? unknown);
@@ -335,14 +374,7 @@ export function checkPurity(root, cls, a, report) {
 			const target = args[0];
 			if (target?.origin === "external") report(node);
 			if (target?.origin === "fresh" && method === "assign") {
-				for (const source of args.slice(1)) {
-					if (source.origin === "fresh")
-						for (const [k, v] of source.props) target.props.set(k, v);
-					target.item = join(
-						target.item,
-						source.origin === "external" ? external() : source.item
-					);
-				}
+				for (const source of args.slice(1)) copyProperties(target, source);
 			}
 			return target ?? unknown;
 		}
@@ -350,7 +382,15 @@ export function checkPurity(root, cls, a, report) {
 		if (["batch", "untracked"].includes(a.api(callee)))
 			return invoke(functionValue(node.arguments[0]), []);
 		const fn = functionValue(callee);
-		if (fn) return invoke(fn, args);
+		if (fn) {
+			const spread = node.arguments.findIndex(
+				(arg) => arg.type === "SpreadElement"
+			);
+			if (spread !== -1)
+				for (let i = spread; i < Math.max(args.length, fn.params.length); i++)
+					args[i] = unknown;
+			return invoke(fn, args);
+		}
 		// Unknown helper calls are NOT assumed pure, but cannot justify a mutation diagnostic.
 		return unknown;
 	}
@@ -366,7 +406,8 @@ export function checkPurity(root, cls, a, report) {
 				return result;
 			}
 			case "VariableDeclaration":
-				for (const d of node.declarations) bind(d.id, evaluate(d.init), true);
+				for (const d of node.declarations)
+					bind(d.id, d.init ? evaluate(d.init) : undefinedValue, true);
 				return null;
 			case "FunctionDeclaration":
 			case "ClassDeclaration":
@@ -427,5 +468,10 @@ export function checkPurity(root, cls, a, report) {
 				return unknown;
 		}
 	}
-	invoke(root, []);
+	// A derivation's own parameters are externally supplied, unlike omitted
+	// arguments to a direct local helper call.
+	invoke(
+		root,
+		root.params.map((param) => external(a.annotation(param)))
+	);
 }
