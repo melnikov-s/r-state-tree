@@ -128,7 +128,7 @@ export function clone<T>(val: T, path: string = ""): T {
 	for (let i = 0; i < keys.length; i++) {
 		const key = keys[i];
 		const keyPath = path ? `${path}.${key}` : key;
-		cloned[key] = clone((val as any)[key], keyPath);
+		defineOwnDataProperty(cloned, key, clone((val as any)[key], keyPath));
 	}
 
 	return cloned;
@@ -200,14 +200,21 @@ export function hydrateSnapshotValue(
 		const snapshotRecord = snapshotValue as Record<string, unknown>;
 
 		Object.keys(snapshotRecord).forEach((key) => {
-			if (!Object.prototype.hasOwnProperty.call(currentRecord, key)) {
-				changeTracker.changed = true;
-			}
-			currentRecord[key] = hydrateSnapshotValue(
-				currentRecord[key],
+			const hasOwnKey = Object.prototype.hasOwnProperty.call(
+				currentRecord,
+				key
+			);
+			const hydratedValue = hydrateSnapshotValue(
+				hasOwnKey ? currentRecord[key] : undefined,
 				snapshotRecord[key],
 				changeTracker
 			);
+			if (hasOwnKey) {
+				currentRecord[key] = hydratedValue;
+			} else {
+				changeTracker.changed = true;
+				defineOwnDataProperty(currentRecord, key, hydratedValue);
+			}
 		});
 
 		Object.keys(currentRecord).forEach((key) => {
@@ -245,8 +252,10 @@ function cloneHydrationTarget(value: unknown): unknown {
 			unknown
 		>;
 		Object.keys(sourceValue).forEach((key) => {
-			clone[key] = cloneHydrationTarget(
-				(sourceValue as Record<string, unknown>)[key]
+			defineOwnDataProperty(
+				clone,
+				key,
+				cloneHydrationTarget((sourceValue as Record<string, unknown>)[key])
 			);
 		});
 		clonedValue = clone;
@@ -255,6 +264,20 @@ function cloneHydrationTarget(value: unknown): unknown {
 	}
 
 	return shouldRemainObservable ? getObservable(clonedValue) : clonedValue;
+}
+
+// Define dictionary entries without invoking inherited setters such as __proto__.
+function defineOwnDataProperty(
+	target: object,
+	key: string,
+	value: unknown
+): void {
+	Object.defineProperty(target, key, {
+		value,
+		writable: true,
+		enumerable: true,
+		configurable: true,
+	});
 }
 
 /**
