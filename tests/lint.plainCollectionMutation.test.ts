@@ -1,4 +1,4 @@
-import { runLintCases, getter } from "./helpers/lint";
+import { runLintCases } from "./helpers/lint";
 import type { Case } from "./helpers/lint";
 
 const cases: Record<string, Case[]> = {
@@ -7,6 +7,16 @@ const cases: Record<string, Case[]> = {
 			"plain array push",
 			"class S extends Store { rows = []; add() { this.rows.push(1) } }",
 			1,
+		],
+		[
+			"mutable audio buffer needs wrapping, not copy-and-reassign",
+			"class S extends Store { preroll: Float32Array[] = []; append(samples: Float32Array) { this.preroll.push(samples); this.preroll.shift() } }",
+			2,
+		],
+		[
+			"wrapped audio buffer retains push and shift",
+			"class S extends Store { preroll: Float32Array[] = observable([]); append(samples: Float32Array) { this.preroll.push(samples); this.preroll.shift() } }",
+			0,
 		],
 		[
 			"plain Map and Set",
@@ -59,8 +69,23 @@ const cases: Record<string, Case[]> = {
 			0,
 		],
 		[
-			"plain replacement",
+			"plain whole-field replacement remains outside rule scope",
 			"class S extends Store { rows = []; edit() { this.rows = [...this.rows, 1] } }",
+			0,
+		],
+		[
+			"intentional immutable array replacement",
+			"class M extends Model { rows: readonly number[] = []; replace(rows: readonly number[]) { this.rows = [...rows] } }",
+			0,
+		],
+		[
+			"intentional immutable object replacement",
+			"class M extends Model { data: Readonly<{ x: number }> = { x: 0 }; replace(x: number) { this.data = { x } } }",
+			0,
+		],
+		[
+			"plain read-only field and derived local result",
+			"class S extends Store { rows: readonly number[] = [2, 1]; get sorted() { const result = this.rows.slice(); result.sort(); return result } }",
 			0,
 		],
 		[

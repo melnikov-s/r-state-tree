@@ -100,7 +100,11 @@ Require `createStore(Type, props)` and `ModelType.create(snapshot)` instead of `
 
 Detect in-place mutation of known **unwrapped** Store/Model collection fields initialized with array/object literals or global `new Array/Map/Set`. Includes native mutator calls on the field and index/property assignments, updates, or deletion under it. Direct `const` aliases, simple object destructuring, `this` aliases, and locally inherited fields are recognized; ordinary nested functions with their own `this` and static methods are excluded.
 
-Use `observable()` / `toObservableTree()` and mutate the container, or keep it plain and replace the whole field. `@child` / literal `static types` children and `@modelRef` arrays are excluded because their administrations handle them specially. Unknown initializers are skipped. Wrapping is shallow; this rule does not claim that items inside an observable container are observable.
+For mutable Store/Model arrays, objects, Maps, and Sets, initialize with `observable()` (or `toObservableTree()` for initial nested wrapping) and retain direct in-place mutations in authoritative methods/callbacks, **not in getters/computeds**. Do not rewrite `push`, `shift`, `splice`, index writes, or property writes into spread/`slice()` copy-and-reassign updates merely to pass lint. No autofix is offered: changing mutation semantics is not a safe lint repair.
+
+Whole-field replacement remains legitimate for intentionally immutable value models; this rule does not report it. Plain derived/read-only collections need not be observable, and copies are appropriate at genuine ownership, snapshot, or transport boundaries. These are separate design choices, not interchangeable fixes for mutable state. Getters/computeds must remain pure; constructing fresh local results does not permit mutating shared elements.
+
+`@child` / literal `static types` children and `@modelRef` arrays are excluded because their administrations handle them specially. Unknown initializers are skipped. Wrapping is shallow; this rule does not claim that items inside an observable container are observable.
 
 ## no-observable-collection-replacement
 

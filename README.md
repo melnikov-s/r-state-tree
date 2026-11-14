@@ -139,10 +139,15 @@ for lifetime gating and request-root cleanup, and the
 4. [Reactivity and mutability](docs/reference.md#mutability-rules): shallow tracking, observable containers, and signals.
 5. [API surface](docs/reference.md#api-surface): exported helpers and advanced snapshot diffs.
 
-Store and Model fields track assignment, not arbitrary nested mutation. For
-in-place array/object edits, use `observable()` containers; otherwise reassign the
-field. For Model children hydrated from snapshots, supply a runtime constructor
-such as `@child(User)` or `static types = { users: child(User) }`.
+Store and Model fields track assignment, not arbitrary nested mutation. Mutable
+arrays, objects, Maps, and Sets must use `observable()` containers and be mutated
+directly in place outside getters/computeds. Do not rewrite mutations as
+copy-and-reassign merely to satisfy lint. Whole-field replacement is valid for
+intentionally immutable value models; copies also belong at genuine ownership,
+snapshot, or transport boundaries. Plain derived/read-only collections need not
+be observable. Getters/computeds must not mutate existing state or shared elements
+of copies. For Model children hydrated from snapshots, supply a runtime
+constructor such as `@child(User)` or `static types = { users: child(User) }`.
 
 ## Development tools
 

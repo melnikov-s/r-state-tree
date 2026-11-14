@@ -494,10 +494,11 @@ During normal application updates, the snapshot cache is invalidated by:
 1. **Reassigning** the Model snapshot field itself.
 2. **Mutating observable containers** (`observable()`) or **signals** (`signal()`) stored in the field.
 
-**Rule for application code:** Treat raw Model snapshot values (plain objects/arrays)
-as immutable. If you mutate them in place without reassignment, the snapshot
-cache goes stale—`onSnapshot` won't fire and `toSnapshot` returns the old cached
-value.
+**Rule for mutable application state:** Initialize Model arrays/objects/collections
+with `observable()` and mutate them directly in place. Plain field values are not
+auto-wrapped: mutating them in place leaves the snapshot cache stale—`onSnapshot`
+won't fire and `toSnapshot` returns the old cached value. Fix the initialization,
+not the mutation semantics; do not introduce copy-and-reassign merely to pass lint.
 
 ```ts
 class M extends Model {
@@ -507,26 +508,36 @@ class M extends Model {
 	addTagBroken(tag: string) {
 		this.tags.push(tag);
 	}
+}
 
-	// ✅ Reassign — invalidates cache, onSnapshot fires
-	addTagReassign(tag: string) {
-		this.tags = [...this.tags, tag];
+class MutableTags extends Model {
+	// ✅ Wrap the mutable container; preserve push and its identity.
+	tags: string[] = observable([]);
+
+	addTag(tag: string) {
+		this.tags.push(tag); // onSnapshot fires
 	}
 }
 ```
 
-If you need in-place mutations **and** snapshot updates, wrap the value in `observable()` or use `signal()`:
+Whole-field replacement is still valid for intentionally immutable value models.
+Such plain values must not be mutated in place; this is a data-model choice, not an
+alternative lint repair for mutable state. Copies are also appropriate at genuine
+ownership, snapshot, or transport boundaries.
 
 ```ts
-class M extends Model {
-	// ✅ observable() container — in-place mutations invalidate cache
-	items: { id: number }[] = observable([]);
+class ImmutableTags extends Model {
+	tags: readonly string[] = [];
 
-	addItem(id: number) {
-		this.items.push({ id }); // onSnapshot fires
+	replaceTags(tags: readonly string[]) {
+		this.tags = [...tags]; // Own a copy of the incoming immutable value.
 	}
 }
+```
 
+Signals also invalidate snapshot caches when their `.value` changes:
+
+```ts
 class Counter extends Model {
 	// ✅ signal() — .value updates invalidate cache
 	count = signal(0);
@@ -736,8 +747,9 @@ class ContainerModel extends Model {
 
 ## Mutability rules
 
-- Models: ordinary fields are shallow-reactive snapshot fields by default, but values are not auto-wrapped. For raw arrays/objects, prefer **reassignment** (immutability) so snapshots stay up to date. If you want in-place mutation (`push`, `splice`, `set`, etc.) to trigger updates and snapshot invalidation, store an `observable()` container (or `signal()`) in the field.
-- Stores: store fields are shallow-reactive. Use `observable()` containers (or `signal()`) when you want in-place mutations of nested values/collections to trigger updates.
+- Ordinary Store/Model fields track assignment, but do not auto-wrap values. Mutable arrays, objects, Maps, and Sets must be initialized with `observable()` and mutated directly in place (`push`, `shift`, `splice`, index/property writes, `set`, etc.). Wrap nested mutable values explicitly or initialize with `toObservableTree()`. Observable mutations also invalidate Model snapshot caches.
+- Do not rewrite mutable operations into spread/`slice()` copy-and-reassign updates merely to satisfy lint. Whole-field replacement remains valid for intentionally immutable value models; copies are also appropriate at genuine ownership, snapshot, or transport boundaries.
+- Plain derived/read-only collections need not be observable. Keep getters/computeds pure: never mutate observable or other existing/external state, including shared elements in shallow copies. Constructing and mutating fresh local results is valid.
 
 ### `Observable` base class
 
@@ -1202,7 +1214,7 @@ applySnapshot(todo, history[history.length - 1].redo);
 
 - Forgetting stable keys for `@child` arrays causes identity churn.
 - Assuming **deep** reactivity: nested plain objects/arrays are not reactive unless you explicitly wrap them (or use `toObservableTree` for initial hydration).
-- Mutating raw Model snapshot arrays/objects in place (`push`, `obj.x = 1`) and expecting snapshots to update. Snapshots are memoized; use reassignment or store `observable()` containers / `signal()` values in the field.
+- Mutating plain arrays/objects held in Model fields (`push`, `obj.x = 1`) and expecting snapshots to update. Snapshots are memoized; initialize mutable fields with `observable()` and keep the in-place operations. Do not switch to copy-and-reassign merely to pass lint; reserve whole-field replacement for intentionally immutable values or genuine ownership/snapshot/transport boundaries.
 - Passing observables to third‑party APIs that expect cloneable/serializable values (e.g. `structuredClone`). Use `source(value)` to get the backing value. It will be observable-free for values written via r-state-tree’s observable APIs (unwrap-on-write), but `source(...)` is **not** guaranteed observable-free if you manually seed observables into backing sources.
 - Creating child stores in constructors: `@child` must be on getters so identity and lifecycle can be managed by the framework.
 - Passing props back into child stores during mount can create a recursive mount loop. Break the ownership cycle rather than wiring parent dependencies back through a child during mount.

@@ -208,7 +208,7 @@ Keep shared structures focused on semantic inputs and defer presentation reads t
 - Root and shell Stores remain composition, lifecycle, event-routing, and genuine cross-workflow coordination boundaries rather than collections of unrelated feature state.
 - New state was placed by behavioral cohesion, not by choosing whichever existing Store was closest or largest.
 - Local UI state is genuinely local.
-- Observable collections are initialized as observable before in-place mutation.
+- Mutable Store/Model collections are initialized with `observable()` and mutated directly in place outside getters/computeds; mutations are not rewritten as copy-and-reassign merely to pass lint. Whole-field replacement is reserved for intentional immutable value models or genuine ownership/snapshot/transport boundaries; plain derived/read-only collections need not be observable.
 - Reactions coordinate independent sources rather than hide an existing event boundary.
 - Lazy child getters are not startup calls.
 - Reactive reads are placed at the narrowest actual consumer: trace consumer → shared getter/child descriptor → transitive helpers; reject unrelated eager error/loading/presentation reads, including those hidden by spreads, destructuring, or callback setup.

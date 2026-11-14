@@ -152,9 +152,11 @@ notifies observers. ES `#private` fields are not independently tracked.
 Assignment never converts the assigned value. This is deliberately different from
 MobX's default deep conversion: a plain array or object stored in a field — whether
 assigned later or initialized inline — is an **inert** value. Mutating it in place
-(`push`, `splice`, index/key writes, property writes) notifies no one. Wrap a value
-with `observable()` (or `toObservableTree()`, or declare it `@child`) if you need
-structural tracking; otherwise reassign the whole field.
+(`push`, `splice`, index/key writes, property writes) notifies no one. Mutable
+Store/Model arrays, objects, Maps, and Sets must be initialized with `observable()`
+and mutated directly in place. Use `toObservableTree()` for initial nested wrapping;
+Model `@child` collections have their own reactive administration. Do not turn
+mutations into copy-and-reassign updates merely to pass lint.
 
 ```ts
 import { observable, Store } from "r-state-tree";
@@ -163,21 +165,20 @@ class SessionsStore extends Store {
 	// Observable container; push/splice/index writes are tracked.
 	ids: string[] = observable([]);
 
-	// Also right: keep the plain array but always reassign the field.
-	trustedPaths: string[] = [];
+	trustedPaths: string[] = observable([]);
 
 	trust(path: string) {
-		// Wrong: this.trustedPaths.push(path);
-		this.trustedPaths = [...this.trustedPaths, path];
+		this.trustedPaths.push(path);
 	}
 }
 ```
 
-When reviewing or writing code, treat any `push`/`splice`/index write on a collection
-that was not initialized with `observable()` (or produced by an observable container)
-as a reactivity bug.
-
-For standalone data structures use `observable()`.
+When reviewing mutable Store/Model fields, fix plain collection mutations by
+wrapping their initialization, not by replacing the mutation with spread/`slice()`
+assignment. Whole-field replacement is legitimate for intentionally immutable value
+models; copies are also appropriate at genuine ownership, snapshot, or transport
+boundaries. Plain derived/read-only collections need not be observable. Standalone
+mutable data structures that need reactive tracking use `observable()`.
 
 `observable()` is shallow:
 
@@ -193,7 +194,7 @@ plain objects tracks the array's structure (length, index, iteration) but not th
 objects' fields. Wrap an item with `observable()` (or `toObservableTree()`) before
 inserting it if its fields will be mutated in place.
 
-Mutate observable arrays, maps, sets, and objects in place. Copy-on-write is not required for reactivity. Derived collection methods such as `slice()` and `filter()` return plain containers while preserving element identity; the derivation itself is tracked, but the returned copy is not a live container.
+Mutate observable arrays, maps, sets, and objects in place in authoritative methods/callbacks, never in getters/computeds. Keep derivations pure: they may construct and mutate fresh local results, but must not change existing/external state, including shared elements of shallow copies. Derived collection methods such as `slice()` and `filter()` return plain containers while preserving element identity; the derivation itself is tracked, but the returned copy is not a live container.
 
 Use `toObservableTree()` for a one-time recursive wrap of existing nested plain objects and arrays. Later assignments remain shallow and are not auto-wrapped.
 

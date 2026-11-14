@@ -100,6 +100,10 @@ Pass a Model/reference or a callback when it narrows those dependencies.
 
 Keep eager reads that determine identity, membership, availability, or invariants.
 Use computed caching for repeated expensive derivation; deferring reads does not
-replace caching. Observable containers support in-place mutation; replacing one
-is also valid when replacing its identity is intentional. Do not replace it with
-a plain copy and then expect later in-place edits to remain reactive.
+replace caching. Mutable Store/Model collections must use `observable()` and direct
+in-place mutation in authoritative methods/callbacks, not getters/computeds. Do not
+rewrite mutations into copy-and-reassign updates merely to satisfy lint. Whole-field
+replacement remains valid for intentionally immutable value models; copies are also
+appropriate at genuine ownership, snapshot, or transport boundaries. Plain derived/
+read-only collections need not be observable. Keep getters/computeds pure: building
+a fresh result must not mutate existing state or shared elements of shallow copies.

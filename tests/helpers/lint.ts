@@ -208,6 +208,12 @@ export function runLintCases(cases: Record<string, Case[]>) {
 					expect(diagnostics, JSON.stringify(diagnostics)).toHaveLength(count);
 					for (const d of diagnostics) {
 						expect(d.message).not.toContain("{{");
+						if (rule === "no-plain-collection-mutation") {
+							expect(d.message).toContain(
+								"In-place mutation is not reactive; initialize it with observable() and mutate it in place outside getters/computeds. Do not replace mutations with copy-and-reassign merely to satisfy this rule."
+							);
+							expect(d.message).not.toMatch(/or reassign|or replace/i);
+						}
 						if (rule === "no-discarded-child-read") {
 							expect(d.message).toContain("Do not eagerly initialize");
 							expect(d.message).not.toMatch(/suppress|warmup/i);

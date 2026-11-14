@@ -56,6 +56,12 @@ test("oxlint CLI all-rule adoption emits diagnostics and exits cleanly for valid
 		@child get item() { return createStore(Valid, { onClick: () => this.rows.push(1) }) }
 		edit() { this.rows.push(1) }
 	}
+	class Immutable extends Model {
+		rows: readonly number[] = [];
+		data: Readonly<{ x: number }> = { x: 0 };
+		replace(rows: readonly number[], x: number) { this.rows = [...rows]; this.data = { x } }
+		get sorted() { const result = this.rows.slice(); result.sort(); return result }
+	}
 	const root = createStore(Valid);`
 	);
 	const invalid = join(directory, "invalid.ts");
@@ -101,27 +107,30 @@ test("oxlint CLI all-rule adoption emits diagnostics and exits cleanly for valid
 		expect(diagnostics.some((d) => d.code.includes(rule))).toBe(true);
 });
 
-test("discarded-child initialization is a problem with no automatic fix", () => {
-	const run = spawnSync(
-		process.execPath,
-		[
-			"--input-type=module",
-			"-e",
-			`
+test.each(["no-discarded-child-read", "no-plain-collection-mutation"])(
+	"%s is a problem with no automatic fix",
+	(rule) => {
+		const run = spawnSync(
+			process.execPath,
+			[
+				"--input-type=module",
+				"-e",
+				`
 		import plugin from 'r-state-tree/lint';
-		const meta = plugin.rules['no-discarded-child-read'].meta;
+		const meta = plugin.rules[${JSON.stringify(rule)}].meta;
 		console.log(JSON.stringify({ type: meta.type, fixable: !!meta.fixable, suggestions: !!meta.hasSuggestions }));
 	`,
-		],
-		{ encoding: "utf8" }
-	);
-	expect(run.status, run.stderr).toBe(0);
-	expect(JSON.parse(run.stdout)).toEqual({
-		type: "problem",
-		fixable: false,
-		suggestions: false,
-	});
-});
+			],
+			{ encoding: "utf8" }
+		);
+		expect(run.status, run.stderr).toBe(0);
+		expect(JSON.parse(run.stdout)).toEqual({
+			type: "problem",
+			fixable: false,
+			suggestions: false,
+		});
+	}
+);
 
 test("all rules leave async policies to review, including deliberately unsafe scope fixtures", () => {
 	const folder = join(directory, "async-policy");
