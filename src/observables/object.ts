@@ -149,8 +149,8 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	constructor(source: T = {} as T) {
 		super(source);
 		this.keysAtom = createAtom();
-		this.hasMap = new AtomMap(this.atom);
-		this.valuesMap = new SignalMap(this.atom);
+		this.hasMap = new AtomMap();
+		this.valuesMap = new SignalMap();
 		this.types = new Map();
 	}
 

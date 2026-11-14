@@ -78,8 +78,8 @@ export class CollectionAdministration<K, V = K> extends Administration<
 
 	constructor(source: Collection<K, V>) {
 		super(source);
-		this.hasMap = new AtomMap(this.atom);
-		this.valuesMap = new SignalMap(this.atom);
+		this.hasMap = new AtomMap();
+		this.valuesMap = new SignalMap();
 		this.keysAtom = createAtom();
 		this.isMap =
 			typeof (source as Map<K, V>).set === "function" &&
@@ -251,10 +251,8 @@ export class CollectionAdministration<K, V = K> extends Administration<
 
 	has(value: K): boolean {
 		this.atom.reportObserved();
-		// Always do per-key tracking. We need this for computed signals that read from
-		// collections outside of effects - they still track dependencies for caching,
-		// even though `atom.observing` is false. Memory is managed by AtomMap's cleanup
-		// mechanism which clears per-key atoms when the collection becomes unobserved.
+		// Lazy computeds track dependencies even without live subscribers. NodeMap
+		// bounds inactive entries and invalidates their dependencies before eviction.
 		const target = getSource(value);
 		this.hasMap.reportObserved(target);
 

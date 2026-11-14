@@ -351,7 +351,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 	constructor(source: T[] = []) {
 		super(source);
-		this.valuesMap = new SignalMap(this.atom);
+		this.valuesMap = new SignalMap();
 		this.keysAtom = createAtom();
 	}
 
