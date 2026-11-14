@@ -60,7 +60,7 @@ Several unrelated registrations are evidence that the Store owns several behavio
 
 ## Reuse through composition
 
-Think of a Store class like a stateful component definition. The class describes one behavioral unit; each `createStore()` call creates an independent instance with its own state, identity, child tree, effects, and lifetime. Reuse the same Store class anywhere that behavior is needed, including multiple times beneath one parent.
+Think of a Store class like a stateful component definition. The class describes one behavioral unit; each `createStore()` call returns a fresh descriptor. `mount()` realizes a root, while `@child` reconciliation realizes or reuses children. Separate realized instances have their own state, child trees, effects, and lifetimes; matching keyed descriptors within one child property can reuse an existing instance. Reuse the same Store class anywhere that behavior is needed, including multiple times beneath one parent.
 
 ```ts
 class SelectionStore extends Store<{items: Item[]}> {
@@ -171,7 +171,7 @@ const importClient: ImportClient = {
 
 This is more than renaming `request()` to `client`: the port must remove transport-only choices from the Store and expose stable application semantics. Keep protocol schemas and validation at the process or network boundary. Translate transport errors and events into application-owned results before they reach ordinary workflow Stores.
 
-Pass a port used by one owner through typed Store props. If multiple descendants need the same ambient capability, provide one narrowly named Store Context at their common Store ancestor and consume it directly; do not alternate between props and Context for the same dependency. A Store whose explicit behavioral purpose is transport integration may own raw protocol details, but application workflow Stores should not.
+Pass a port used by one owner through typed Store props. If multiple descendants need the same ambient capability, consider a narrowly named Store Context at their common ancestor. Explicit props remain valid, especially for reusable Stores. Avoid competing implicit sources for the same dependency. A Store whose explicit behavioral purpose is transport integration may own raw protocol details, but application workflow Stores should not.
 
 ## Cross-Store coordination
 
@@ -185,9 +185,9 @@ Prefer:
 - intent-level callbacks for later cross-boundary events;
 - moving always-on work to the parent that actually owns it.
 
-Use one dependency source end-to-end. Do not consume Context in an intermediary merely to spread the same values into a generic prop bag.
+Prefer one clear dependency source. Avoid consuming Context in an intermediary merely to spread values into a generic prop bag, but allow explicit bridges between scopes when they clarify ownership.
 
-**HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Shared derived structures and child descriptors should not precompute unrelated error/loading/presentation values for consumers that need only identity, membership, or availability. Pass Models/references or lazy getters/callbacks and keep presentation helper calls inside the deferred path. Trace transitive helper reads and intermediate spreads/destructuring: a helper or Store boundary does not isolate dependencies. Preserve eager reads required by semantics; memoize expensive work separately rather than treating late reads as a replacement for computed caching. See the [before/after example](../SKILL.md#read-reactive-state-at-the-consumer).
+Keep shared structures focused on semantic inputs and defer presentation reads to their consumers. Trace helpers and intermediate spreads as well as direct reads; see [reactive dependency placement](../SKILL.md#read-reactive-state-at-the-consumer).
 
 ## Extraction recipe
 

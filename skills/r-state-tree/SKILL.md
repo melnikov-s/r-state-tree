@@ -5,7 +5,7 @@ description: Build, review, debug, or refactor applications that use r-state-tre
 
 # r-state-tree
 
-Use the public API documented by the installed package or repository version. When working in the r-state-tree repository, treat `README.md`, `src/`, and tests as authoritative if this skill and the code disagree.
+Use the public API documented by the installed package or repository version. When working in the r-state-tree repository, treat `README.md`, `docs/`, `src/`, and tests as authoritative if this skill and the code disagree.
 
 ## Workflow
 
@@ -24,7 +24,7 @@ Use the public API documented by the installed package or repository version. Wh
 
 ## Core rules
 
-- **HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Shared derived structures and child descriptors must not eagerly read presentation-only, error, or loading fields that identity-, membership-, or availability-only consumers do not need. Pass Models/references or lazy getters/callbacks; read the field where its value is actually consumed. Trace helper calls too: moving a read into an eagerly called helper does not defer it. Keep eager reads required for membership, identity, availability, invariants, or other semantics. This is dependency placement, not blanket laziness or a ban on computed caching.
+- **Read reactive state at its actual consumer.** Shared derived structures and child descriptors must not eagerly read presentation-only, error, or loading fields that identity-, membership-, or availability-only consumers do not need. Pass Models/references or lazy getters/callbacks; read the field where its value is actually consumed. Trace helper calls too: moving a read into an eagerly called helper does not defer it. Keep eager reads required for membership, identity, availability, invariants, or other semantics. This is dependency placement, not blanket laziness or a ban on computed caching.
 - Create root Stores with `mount(createStore(StoreType, props))`; never instantiate a Store with `new`.
 - Define child Stores with `@child` getters that return `createStore(...)` descriptors. Give Store arrays stable, unique keys.
 - Create Models with `ModelType.create(snapshot?)`; never instantiate a Model with `new`.
@@ -40,8 +40,8 @@ Use the public API documented by the installed package or repository version. Wh
 - Place new state in the nearest cohesive owner, not merely the nearest existing Store. Existing concentration of unrelated state is a refactoring signal, not precedent for adding another field, effect, or command there.
 - Keep command preconditions with the Store that owns the command. Across Store boundaries, call an intent method such as `tryExitFocusMode()` instead of reading `isFocusMode` and then calling `exitFocusMode()` yourself.
 - Do not read lazy child getters only to start their effects. Move always-on work to the parent owner or let a real consumer materialize the child.
-- Keep observable collections observable and mutate them in place. Once a field holds an `observable()` array, object, `Map`, or `Set`, do not replace it with a copied container such as `{ ...field }`, `[...field]`, `field.slice()`, `field.filter(...)`, or `field.map(...)`; mutate the existing observable container instead. Copy only when producing a plain derived value or crossing a snapshot, persistence, or transport boundary. `observable()` is shallow unless nested values are wrapped explicitly or initialized with `toObservableTree()`.
-- Every Store/Model field is observable at the assignment level only. A field declared or assigned a plain array or object (for example `ids: string[] = []`) is an inert value: in-place `push`/`splice`/index/property writes on it notify no one. Initialize collections with `observable()` and mutate them in place, or reassign the whole field (`this.ids = [...this.ids, id]`). Never call `push` or `splice` on a collection that was not wrapped with `observable()`.
+- Prefer in-place mutation of observable collections when consumers retain their identity. Replacing a field is also reactive and valid when identity replacement is intentional; wrap the replacement with `observable()` if later in-place edits must notify. A plain spread, `slice()`, `filter()`, or `map()` result is not an observable container. `observable()` is shallow unless nested values are wrapped explicitly or initialized with `toObservableTree()`.
+- Ordinary public Store/Model fields are observable at the assignment level only; ES `#private` fields are not independently tracked. A field declared or assigned a plain array or object (for example `ids: string[] = []`) is an inert value: in-place `push`/`splice`/index/property writes on it notify no one. Initialize collections with `observable()` and mutate them in place, or reassign the whole field (`this.ids = [...this.ids, id]`). Never call `push` or `splice` on a collection that was not wrapped with `observable()`.
 - Dispose terminal Store and Model roots with `[Symbol.dispose]()` when their owner ends.
 
 ## Read reactive state at the consumer
@@ -76,7 +76,7 @@ function describeRun(model: RunModel) {
 
 Trace the full chain: `canMessage → hasAvailableRun(this.runs) → runs → describeRun(model)`. If `hasAvailableRun` only checks `run.available`, it must not acquire `observationError` or `loaded` dependencies. An error-rendering consumer reads `run.error` in its own tracked context; that getter reads `loaded` only when `observationError` is nullish. Keep helper calls inside the getter/callback when they perform those reads. Do not capture an eagerly read error in a closure, or eagerly destructure/spread the returned object at an intermediate boundary: that invokes the getter and widens dependencies again.
 
-The motivating Cake report for commit `3e8f0822e` described an eager `run.error` read via `model.loaded` making every `runs` consumer, including `canMessage` consumers ignoring error, depend on `loaded`; `loaded = false` then fanned out into repeated full transcript parses. This is a reported case, not independently verified here. The lazy error getter confines that dependency to actual error readers. Separately memoize repeated expensive parsing against its real inputs; late reads do not replace computed caching.
+Memoize repeated expensive work against its real inputs; late reads do not replace computed caching.
 
 Apply the same rule to child descriptor props: pass the Model or a callback that reads current state in the child consumer, rather than evaluating presentation helpers while constructing the descriptor. See [references/core-api.md](references/core-api.md#child-stores).
 
@@ -87,7 +87,8 @@ Apply the same rule to child descriptor props: pass the Model or a callback that
 - Establish every React lookup scope explicitly with `<StoreProvider store={store}>`.
 - `useStore(StoreType)` performs exact-class lookup and throws when missing. `useOptionalStore(StoreType)` returns `null` when missing.
 - React provider ancestry never changes r-state-tree Store ownership.
-- Tracking follows reactive reads across boundaries: reading one Store's state through another Store's props subscribes the observer to the held Store, materializing a lazy `@child` getter during a render is safe, and `createStore` with the same key reconciles to the existing child instance.
+- Tracking follows reactive reads across boundaries: reading one Store's state through another Store's props subscribes the observer to the held Store. Lazy `@child` getters can materialize during rendering and start mounted effects before React commits, including during SSR; activation follows Store ownership and is not rolled back for abandoned renders. Every `createStore()` call returns a fresh descriptor; the `@child` wrapper preserves matching keyed instances with compatible types within that parent's child property, not globally.
+- Components may read multiple Stores. Use a coordinator Store for real orchestration, not merely to enforce one Store per component. Choose typed props versus Store Context by explicit inputs versus ambient subtree dependencies.
 - Preact may use the React adapter through `preact/compat`; native Preact integration is a separate design concern.
 
 Read [references/react.md](references/react.md) for React implementation and migration work.
@@ -111,7 +112,7 @@ Read [references/react.md](references/react.md) for React implementation and mig
 - Confirm lazy children are not eagerly materialized as hidden startup services.
 - Confirm async work has both a Store-lifetime policy and an operation concurrency policy.
 - Confirm workflow Stores call intent-level external-system ports and do not construct transport envelopes, command discriminants, or correlation DTOs.
-- Confirm every observable collection retains its identity: reject assignments that replace an observable-backed field with a spread, `slice`, `filter`, `map`, or another newly allocated container. Require in-place mutation through the observable wrapper; allow copies only as outbound plain values.
+- Confirm collection identity changes are intentional, and replacement containers remain observable if later in-place edits must notify.
 - Confirm no in-place mutation (`push`, `splice`, index write, property write) targets a plain array or object held in a Store/Model field; such values are inert and must either be wrapped with `observable()` or reassigned wholesale.
 - Confirm persistence cannot overwrite hydrated state with constructor defaults.
 - Confirm React lookup scopes are explicit and provider unmount does not dispose Stores.

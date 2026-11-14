@@ -68,10 +68,10 @@ Prefer splitting a boundary wrapper and observed content when that makes one loo
 Tracking follows reactive reads, not component or Store boundaries:
 
 - **Store-to-Store props.** Store `props` are observable. When a Store holds another Store as a prop, reads through that prop (for example `this.props.catalog.projectSessions(path)`) subscribe the rendering observer to the held Store's state. Mutations in the held Store re-render observers that read through the chain.
-- **Lazy children during render.** Materializing a lazy `@child` getter inside an observed render is safe and supported. The first read constructs (or reconciles) the child and the render's reads of its state are tracked like any other.
-- **Keyed reconciliation.** Calling `createStore(ChildStore, { key })` repeatedly with the same key returns the same realized child instance; it is a lookup, not a new instance. Child getters that map over observable arrays and call `createStore` per item are tracked through the array read.
+- **Lazy children during render.** The first read constructs (or reconciles) the child and tracks reads of its state. On a mounted parent this also mounts the child and starts its effects, even before React commits or during SSR. Activation is not rolled back when rendering throws, suspends, or is abandoned; accept this only when Store-tree lifetime is appropriate, or gate resource startup explicitly.
+- **Descriptors and keyed reconciliation.** Every `createStore(ChildStore, { key })` call returns a fresh descriptor, even though its public TypeScript return type is the Store class. It is not a lookup or a usable instance. The `@child` wrapper reconciles descriptors into realized children, preserving matching keys and compatible Store types within that parent's child property. A key does not share instances across parents or properties; removing a child disposes it, so re-adding its key creates a new instance. Child getters that map over observable arrays are tracked through the array read.
 
-**HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Let an observed error/loading view read its own presentation fields rather than having a parent, shared getter, or child descriptor evaluate them for every consumer. Pass a Model/reference or lazy getter/callback when appropriate, then read/invoke it in the actual observed render. Trace transitive helper calls; eagerly constructing, spreading, or destructuring a presentation object in the parent still widens the parent's dependencies. Retain eager reads that genuinely determine identity, membership, availability, or other semantics; computed caching is still appropriate. See the [before/after example](../SKILL.md#read-reactive-state-at-the-consumer).
+Keep presentation reads in their actual observed consumer; shared getters and child descriptors should not eagerly read unrelated loading/error fields. Preserve eager semantic dependencies and computed caching. See [reactive dependency placement](../SKILL.md#read-reactive-state-at-the-consumer) for helper, spread, and callback pitfalls.
 
 If a consumer still sees stale UI, suspect an untracked read (an inert plain collection or a value captured outside the render) before suspecting these boundaries.
 
@@ -90,7 +90,7 @@ React Context ancestry is a view lookup mechanism. r-state-tree ownership comes 
 
 Use framework-local state and effects for local view concerns such as focus, measurement, browser event listeners, animation, or isolated drafts. Move shared session state, business orchestration, persistence, and cross-component workflows into Stores.
 
-Do not pass both a Store and a large set of values mechanically derived from that Store merely to avoid `useStore()`. Establish an explicit provider at the feature boundary, then let descendants read their owning Store. Continue passing ordinary presentation props when they make a component reusable or independent from application state.
+Use explicit providers when descendants need class-based lookup, or pass Stores and presentation values as ordinary props. A component may read several Stores; do not add a forwarding Store just to combine reads. Store ownership need not mirror the component tree.
 
 `observer()` supports function components. Keep reactive reads inside the observed render path. Do not rely on module-global flags to identify observed rendering.
 
@@ -109,7 +109,7 @@ Do not preserve automatic provisioning in a compatibility wrapper unless the app
 
 ## SSR, Strict Mode, and multiple instances
 
-The adapter delegates tracking to `@preact/signals-react/runtime`. SSR renders without browser globals and does not retain live subscriptions. Test server rendering with `react-dom/server`.
+The adapter delegates tracking to `@preact/signals-react/runtime`. SSR tracking works without browser globals, but lazy child reads can still activate Store-owned effects and I/O. Create a separate root per request and dispose it in `finally`, including failed renders. For streaming SSR, retain the root until completion, error, or cancellation. Use server-safe dependencies or explicit startup gating when effects must not run on the server. Test server rendering with `react-dom/server`.
 
 Under Strict Mode, assert observable behavior and cleanup rather than exact development render counts. Verify provider unmount leaves the Store alive unless its external owner disposes it.
 

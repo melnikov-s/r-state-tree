@@ -60,11 +60,13 @@ class ListStore extends Store<{ ids: string[] }> {
 }
 ```
 
+Every `createStore()` call returns a fresh descriptor, despite its Store-shaped TypeScript return type. The `@child` wrapper reconciles descriptors into realized instances; matching keys and compatible Store types preserve identity only within that parent's child property. `mount()` realizes roots. Do not read state or call methods on descriptors.
+
 Use stable unique keys in child arrays. Child getters are lazy behavioral boundaries; never read one only to force construction or activate effects.
 
 Pass Models and other dependencies as ordinary typed Store props unless a narrowly scoped Store Context is more appropriate. The current public API has no `@model` injection decorator and no special `models` prop bag.
 
-**HARD RULE: Read reactive state as late as possible, at the narrowest actual consumer.** Child descriptor construction should read only what its identity, membership, availability, or other semantics require. Do not eagerly evaluate unrelated error/loading/presentation fields or helpers there. Pass a Model for the child to read, or a callback such as `getError: () => describeError(model)`, not `error: describeError(model)`. Invoke that callback only where the value is consumed in a tracked context; merely hiding an eager helper call behind a prop does not narrow dependencies. Store prop updates copy values, so a getter on the descriptor's props object is not a substitute for a callback. Keep necessary semantic dependencies eager and use computed caching for repeated expensive derivations. See the [before/after example](../SKILL.md#read-reactive-state-at-the-consumer).
+Place presentation reads in the actual consumer, not in shared child descriptors. Pass a Model or a callback when it narrows dependencies; descriptor prop getters are copied as values, not retained as lazy getters. See [reactive dependency placement](../SKILL.md#read-reactive-state-at-the-consumer).
 
 ## Store Context
 
@@ -93,7 +95,7 @@ class FeatureStore extends Store {
 }
 ```
 
-Use one source for a dependency. Do not alternate between an explicit prop and ambient Context for the same value. Store Context cannot be consumed by Models or arbitrary objects.
+Prefer typed props for local or reusable inputs; use Context for ambient subtree dependencies and scoped overrides. Neither is required merely because several Stores need a value. Avoid competing implicit sources for the same dependency. Store Context cannot be consumed by Models or arbitrary objects.
 
 ## Models and snapshots
 
@@ -121,12 +123,14 @@ const list = TodoListModel.create({
 });
 ```
 
+Model children loaded from snapshots require a runtime constructor: `@child(TodoModel)` or `child(TodoModel)` in `static types`. Bare `@child` can attach already-created Models, but type annotations do not supply constructors.
+
 Use named factories for normalization, identifier generation, migrations, or external formats; have them produce the canonical snapshot accepted by `create()`.
 
 Use:
 
 - `toSnapshot(model)` to serialize;
-- `applySnapshot(model, snapshot)` to hydrate atomically;
+- `applySnapshot(model, snapshot)` to hydrate with batched notifications and rollback on load failure (not an identity-preserving transaction);
 - `onSnapshot(model, callback)` to observe snapshots;
 - `onSnapshotDiff(model, callback)` for undo/redo diffs;
 - `findModelById(root, ModelType, id)` for typed identifier lookup;
@@ -141,9 +145,9 @@ reactive update).
 
 ## Observable behavior
 
-Every Store and Model field is individually observable at the assignment level, like
-fields of a MobX observable class: reading a field in a tracked context subscribes to
-it, and assigning the field notifies observers.
+Ordinary public Store and Model fields are observable at the assignment level:
+reading a field in a tracked context subscribes to it, and assigning the field
+notifies observers. ES `#private` fields are not independently tracked.
 
 Assignment never converts the assigned value. This is deliberately different from
 MobX's default deep conversion: a plain array or object stored in a field — whether
@@ -153,11 +157,10 @@ with `observable()` (or `toObservableTree()`, or declare it `@child`) if you nee
 structural tracking; otherwise reassign the whole field.
 
 ```ts
-class SessionsStore extends Store {
-	// Wrong: inert plain array. `this.ids.push(id)` updates nothing in the UI.
-	ids: string[] = [];
+import { observable, Store } from "r-state-tree";
 
-	// Right: observable container; push/splice/index writes are tracked.
+class SessionsStore extends Store {
+	// Observable container; push/splice/index writes are tracked.
 	ids: string[] = observable([]);
 
 	// Also right: keep the plain array but always reassign the field.
