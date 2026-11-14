@@ -370,7 +370,12 @@ store[Symbol.dispose]();
 Every realized Store exposes a readonly `AbortSignal` for its terminal lifetime. It
 is active while the Store is alive and aborts when disposal begins, before child
 disposal and effect cleanup. This is a standard `AbortSignal`, not a reactive
-signal. Pass it to APIs that support cancellation:
+signal. Disposal attempts every child and owned cleanup even if one throws,
+finalizes lifecycle state, then throws an `AggregateError` containing the failures.
+Repeated or reentrant disposal is a no-op. Child getters throw once disposal
+begins, rather than creating or reconciling children on a disposed Store.
+
+Pass the lifetime signal to APIs that support cancellation:
 
 ```ts
 class LibraryStore extends Store {

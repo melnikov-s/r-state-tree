@@ -240,6 +240,7 @@ export class StoreAdministration<
 	parent: StoreAdministration | null = null;
 	private readonly abortController = new AbortController();
 	private mounted = false;
+	private disposalState: "active" | "disposing" | "disposed" = "active";
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
 	private contextParentAtom: AtomNode = createAtom();
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
@@ -520,23 +521,25 @@ export class StoreAdministration<
 		const { key, Type, props } = element || {};
 
 		if (!element) {
-			oldStore && getStoreAdm(oldStore).dispose(true);
 			batch(() => childStoreData.value.set(null));
+			oldStore && getStoreAdm(oldStore).dispose(true);
 			return null;
 		} else if (
 			!oldStore ||
 			oldStore.props.key !== key ||
 			!(oldStore instanceof Type!)
 		) {
-			if (oldStore) {
-				getStoreAdm(oldStore).dispose(true);
-			}
-
+			// Construction must succeed before retiring the currently valid child.
 			const childStore = this.createChildStore(element, name);
-			batch(() => childStoreData.value.set(childStore));
-			if (this.isMounted) {
-				getStoreAdm(childStore).mount(this, name);
-			}
+			batch(() => {
+				childStoreData.value.set(childStore);
+				try {
+					if (oldStore) getStoreAdm(oldStore).dispose(true);
+				} finally {
+					// The replacement is now owned, even if the old cleanup fails.
+					if (this.isMounted) getStoreAdm(childStore).mount(this, name);
+				}
+			});
 			return childStore;
 		} else {
 			batch(() => updateProps(oldStore.props, props!));
@@ -565,6 +568,8 @@ export class StoreAdministration<
 	}
 
 	private updateStore(name: PropertyKey): void {
+		// Abort handlers and child cleanups can mutate dependencies before listeners stop.
+		if (this.disposalState !== "active") return;
 		const childStoreData = this.childStoreDataMap.get(name)!;
 		this.reconcileStore(name, childStoreData.computed.get());
 	}
@@ -598,6 +603,11 @@ export class StoreAdministration<
 	}
 
 	private getStore(name: PropertyKey): Store | null {
+		if (this.disposalState !== "active") {
+			throw new Error(
+				"r-state-tree: cannot read child stores on a disposed store"
+			);
+		}
 		const childStoreData = this.childStoreDataMap.get(name);
 
 		if (!childStoreData) {
@@ -813,8 +823,9 @@ export class StoreAdministration<
 			if (registration.disposed) return;
 			registration.disposed = true;
 			this.reactiveRegistrations.delete(registration);
-			registration.stop?.();
+			const stop = registration.stop;
 			registration.stop = undefined;
+			stop?.();
 		};
 	}
 
@@ -895,39 +906,62 @@ export class StoreAdministration<
 	}
 
 	dispose(internal = false): void {
-		if (this.signal.aborted) return;
+		if (this.disposalState !== "active") return;
 		if (!internal && !this.isRoot()) {
 			throw new Error("r-state-tree: can only dispose root stores");
 		}
-		this.abortController.abort();
-		batch(() => {
-			this.childStoreDataMap.forEach((data) => {
-				const { value, computed, listener } = data;
-
-				const stores = value.get();
-
-				if (Array.isArray(stores)) {
-					stores?.forEach((s) => getStoreAdm(s)?.dispose(true));
-				} else if (stores) {
-					getStoreAdm(stores)?.dispose(true);
-				}
-				computed.clear();
-				listener.dispose();
-			});
+		this.disposalState = "disposing";
+		const errors: unknown[] = [];
+		const attempt = (cleanup: () => void): void => {
+			try {
+				cleanup();
+			} catch (error) {
+				errors.push(error);
+			}
+		};
+		try {
+			attempt(() => this.abortController.abort());
+			// Also capture errors from reactions flushed at the end of the batch.
+			attempt(() =>
+				batch(() => {
+					this.childStoreDataMap.forEach(({ value, computed, listener }) => {
+						attempt(() => listener.dispose());
+						attempt(() => {
+							const stores = value.get();
+							if (Array.isArray(stores)) {
+								stores.forEach((store) =>
+									attempt(() => getStoreAdm(store).dispose(true))
+								);
+							} else if (stores) {
+								attempt(() => getStoreAdm(stores).dispose(true));
+							}
+						});
+						attempt(() => computed.clear());
+					});
+					this.contextCache.forEach((computed) =>
+						attempt(() => computed.clear())
+					);
+					attempt(() => this.computedSnapshot?.clear());
+					this.reactiveRegistrations.forEach((registration) => {
+						registration.disposed = true;
+						const stop = registration.stop;
+						registration.stop = undefined;
+						if (stop) attempt(stop);
+					});
+				})
+			);
+		} finally {
 			this.childStoreDataMap.clear();
-			this.contextCache.forEach((computed) => computed.clear());
 			this.contextCache.clear();
-			this.computedSnapshot?.clear();
 			this.computedSnapshot = undefined;
 			this.pendingChildSnapshots = {};
+			this.reactiveRegistrations.clear();
 			this.parent = null;
-		});
-		this.reactiveRegistrations.forEach((registration) => {
-			registration.disposed = true;
-			registration.stop?.();
-			registration.stop = undefined;
-		});
-		this.reactiveRegistrations.clear();
-		this.mounted = false;
+			this.mounted = false;
+			this.disposalState = "disposed";
+		}
+		if (errors.length) {
+			throw new AggregateError(errors, "r-state-tree: store disposal failed");
+		}
 	}
 }
