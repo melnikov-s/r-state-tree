@@ -181,8 +181,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							}
 						}
 						case ModelCfgTypes.id: {
-							adm.setId(name as string, value as IdType);
-							break;
+							return adm.setId(name as string, value as IdType);
 						}
 					}
 
@@ -299,12 +298,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		this.referencedAtoms?.get(name)?.reportChanged();
 	}
 
-	private setId(name: string, v: IdType): void {
+	private setId(name: string, v: IdType): boolean {
 		const id = getIdentifier(this.proxy);
-
-		if (id === v) {
-			return;
-		}
 
 		if (id != null && v == null) {
 			throw new Error(
@@ -312,11 +307,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			);
 		}
 
-		if (v !== undefined) {
-			setIdentifier(this.proxy, v);
-			this.source[name] = v;
-			if (debugEnabled) debugWrite(this.source, name, "set", id, v);
-		}
+		return batch(() => {
+			if (v !== undefined) {
+				setIdentifier(this.proxy, v);
+			}
+			// Publish the field through the observable write path, in the same
+			// batch as the index update so observers only see a consistent identity.
+			return this.write(name, v);
+		});
 	}
 
 	private setModel(name: PropertyKey, newModel: Model | null): void {
@@ -748,7 +746,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							}
 							break;
 						case ModelCfgTypes.id:
-							this.setId(key, value as IdType);
+							this.proxy[key] = value;
 							break;
 						case CommonCfgTypes.child:
 							if (value == null) {

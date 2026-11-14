@@ -773,12 +773,106 @@ describe("model identifiers", () => {
 		}
 
 		const mp = MP.create();
+		const before = toSnapshot(mp);
+		const childBefore = toSnapshot(mp.m);
 		mp.m.setId();
+		expect(toSnapshot(mp)).not.toBe(before);
+		expect(toSnapshot(mp.m)).not.toBe(childBefore);
+		expect(before.m!.myId).toBe(1);
+		expect(childBefore.myId).toBe(1);
 		expect(toSnapshot(mp)).toStrictEqual({
 			m: { myId: 2, test: "me" },
 			mr: { myId: 1 },
 		});
 	});
+
+	test.each(["assignment", "snapshot"] as const)(
+		"identifier %s updates effects, indexes and warmed snapshots atomically",
+		(mode) => {
+			class Item extends Model {
+				@id id = 1;
+			}
+			class Root extends Model {
+				@child(Item) item = Item.create();
+				@modelRef(Item) ref: Item = this.item;
+			}
+
+			const root = Root.create();
+			const item = root.item;
+			const before = toSnapshot(root);
+			const childBefore = toSnapshot(item);
+			const ids: number[] = [];
+			const states: unknown[] = [];
+			const childSnapshots: unknown[] = [];
+			const rootSnapshots: unknown[] = [];
+			const stopId = effect(() => {
+				ids.push(item.id);
+			});
+			const stopState = effect(() => {
+				states.push({
+					id: item.id,
+					oldLookup: findModelById(root, Item, 1),
+					newLookup: findModelById(root, Item, 2),
+					ref: root.ref,
+					snapshotId: toSnapshot(root).item!.id,
+				});
+			});
+			const stopChild = onSnapshot(item, (snapshot) =>
+				childSnapshots.push(snapshot)
+			);
+			const stopRoot = onSnapshot(root, (snapshot) =>
+				rootSnapshots.push(snapshot)
+			);
+			const changeId = (id: number) => {
+				if (mode === "assignment") item.id = id;
+				else applySnapshot(item, { id });
+			};
+
+			try {
+				changeId(2);
+				expect(ids).toEqual([1, 2]);
+				expect(states).toEqual([
+					{
+						id: 1,
+						oldLookup: item,
+						newLookup: undefined,
+						ref: item,
+						snapshotId: 1,
+					},
+					{
+						id: 2,
+						oldLookup: undefined,
+						newLookup: item,
+						ref: undefined,
+						snapshotId: 2,
+					},
+				]);
+				expect(toSnapshot(item)).toEqual({ id: 2 });
+				expect(toSnapshot(root)).toEqual({ item: { id: 2 }, ref: { id: 1 } });
+				expect(toSnapshot(item)).not.toBe(childBefore);
+				expect(toSnapshot(root)).not.toBe(before);
+				expect(childBefore).toEqual({ id: 1 });
+				expect(before).toEqual({ item: { id: 1 }, ref: { id: 1 } });
+				expect(childSnapshots).toEqual([toSnapshot(item)]);
+				expect(rootSnapshots).toEqual([toSnapshot(root)]);
+
+				const after = toSnapshot(root);
+				const childAfter = toSnapshot(item);
+				changeId(2);
+				expect(toSnapshot(root)).toBe(after);
+				expect(toSnapshot(item)).toBe(childAfter);
+				expect(ids).toEqual([1, 2]);
+				expect(states).toHaveLength(2);
+				expect(childSnapshots).toHaveLength(1);
+				expect(rootSnapshots).toHaveLength(1);
+			} finally {
+				stopId();
+				stopState();
+				stopChild();
+				stopRoot();
+			}
+		}
+	);
 
 	test("identifiers can be assigned by a named factory", () => {
 		class M extends Model {
