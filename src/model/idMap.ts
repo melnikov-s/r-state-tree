@@ -1,4 +1,4 @@
-import { observable } from "../observables";
+import { observable, untracked } from "../observables";
 import type { IdType } from "../types";
 import type Model from "./Model";
 
@@ -87,7 +87,9 @@ export function getModelById<T extends Model>(
 	Type: ModelConstructor<T>,
 	id: IdType
 ): T | undefined {
-	return attachedIdMap.get(root)?.get(Type)?.get(id) as T | undefined;
+	// Materialize a stable bucket on a miss, without observing its initialization.
+	const ids = untracked(() => bucket(root, Type));
+	return ids.get(id) as T | undefined;
 }
 
 export function onModelAttached(model: Model): void {

@@ -1358,6 +1358,140 @@ describe("model references", () => {
 		expect(findModelById(root, User, 2)).toBe(undefined);
 	});
 
+	test.each(["array", "scalar", "identifier"] as const)(
+		"findModelById observes the first identifier via %s",
+		(attachment) => {
+			class Item extends Model {
+				@id id!: number;
+			}
+			class List extends Model {
+				@child(Item) items: Item[] = [];
+				@child(Item) item: Item | null = null;
+			}
+
+			const list = List.create();
+			const item = Item.create();
+			if (attachment === "identifier") list.items.push(item);
+			const seen: boolean[] = [];
+			const stop = effect(() => {
+				seen.push(Boolean(findModelById(list, Item, 1)));
+			});
+			try {
+				item.id = 1;
+				if (attachment === "array") list.items.push(item);
+				if (attachment === "scalar") list.item = item;
+
+				expect(findModelById(list, Item, 1)).toBe(item);
+				expect(seen).toEqual([false, true]);
+			} finally {
+				stop();
+			}
+		}
+	);
+
+	test("typed references observe the first identified child attachment", () => {
+		class Item extends Model {
+			@id id = 1;
+		}
+		class List extends Model {
+			@child(Item) items: Item[] = [];
+			@modelRef(Item) selected?: Item;
+			@modelRef(Item) selections: Item[] = [];
+		}
+
+		const list = List.create({
+			selected: { id: 1 },
+			selections: [{ id: 1 }],
+		});
+		const seen: boolean[] = [];
+		const lengths: number[] = [];
+		const stopScalar = effect(() => {
+			seen.push(Boolean(list.selected));
+		});
+		const stopArray = effect(() => {
+			lengths.push(list.selections.length);
+		});
+		try {
+			const item = Item.create();
+			list.items.push(item);
+			expect(seen).toEqual([false, true]);
+			expect(lengths).toEqual([0, 1]);
+			expect(list.selected).toBe(item);
+			expect(list.selections).toEqual([item]);
+
+			list.items.pop();
+			expect(seen).toEqual([false, true, false]);
+			expect(lengths).toEqual([0, 1, 0]);
+			list.items.push(item);
+			expect(seen).toEqual([false, true, false, true]);
+			expect(lengths).toEqual([0, 1, 0, 1]);
+		} finally {
+			stopScalar();
+			stopArray();
+		}
+	});
+
+	test.each(["direct", "effect"] as const)(
+		"findModelById follows nested descendant ancestry in %s lookups",
+		(mode) => {
+			class Item extends Model {
+				@id id = 1;
+			}
+			class Leaf extends Model {}
+			class Branch extends Model {
+				@child(Leaf) leaf = Leaf.create();
+			}
+			class Root extends Model {
+				@child(Item) item = Item.create();
+				@child(Branch) branch: Branch | null = null;
+			}
+
+			const first = Root.create();
+			const second = Root.create();
+			const branch = Branch.create();
+			const leaf = branch.leaf;
+			let resolved: Item | undefined;
+			const lookup = () => findModelById(leaf, Item, 1);
+			const stop =
+				mode === "effect"
+					? effect(() => {
+							resolved = lookup();
+						})
+					: () => {};
+			const read = mode === "effect" ? () => resolved : lookup;
+			try {
+				expect(read()).toBe(undefined);
+				first.branch = branch;
+				expect(read()).toBe(first.item);
+				first.branch = null;
+				expect(read()).toBe(undefined);
+				second.branch = branch;
+				expect(read()).toBe(second.item);
+				second.branch = null;
+				expect(read()).toBe(undefined);
+			} finally {
+				stop();
+			}
+		}
+	);
+
+	test("findModelById excludes the tree root but includes an attached supplied model", () => {
+		class Item extends Model {
+			@id id = 1;
+		}
+		class Root extends Model {
+			@id id = 1;
+			@child(Item) item = Item.create();
+		}
+
+		const detached = Item.create();
+		expect(findModelById(detached, Item, 1)).toBe(undefined);
+		const root = Root.create();
+		expect(findModelById(root, Root, 1)).toBe(undefined);
+		expect(findModelById(root.item, Root, 1)).toBe(undefined);
+		expect(findModelById(root.item, Item, 1)).toBe(root.item);
+	});
+
 	test("findModelById tracks id mutation and detachment reactively", () => {
 		class User extends Model {
 			@id id = 1;

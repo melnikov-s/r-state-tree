@@ -233,7 +233,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
-	root: ModelAdministration = this;
 	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
 	private writeInProgress: Set<PropertyKey> = new Set();
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
@@ -444,7 +443,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 		a.reportObserved();
 		const Type = this.getRequiredModelRefType(name);
-		const root = this.getReactiveRoot().proxy;
+		const root = this.root.proxy;
 		return this.source[name] != null
 			? getModelById(root, Type, this.source[name] as IdType)
 			: undefined;
@@ -460,7 +459,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			c = createComputed(() => {
 				a.reportObserved();
 				const Type = this.getRequiredModelRefType(name);
-				const root = this.getReactiveRoot().proxy;
+				const root = this.root.proxy;
 				const models = (this.source[name] || [])
 					.map((id: IdType) => getModelById(root, Type, id))
 					.filter((m: Model | undefined) => !!m);
@@ -539,23 +538,21 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		batch(() => {
 			if (parent) {
 				this.parent = parent;
-				this.root = parent.root;
 				this.parentName = parentName;
 			}
 			try {
 				onModelAttached(this.proxy);
 			} catch (error) {
 				this.parent = null;
-				this.root = this;
 				this.parentName = null;
 				throw error;
 			}
 		});
 	}
 
-	private getReactiveRoot(): ModelAdministration {
+	get root(): ModelAdministration {
 		const parent = this.parent;
-		return parent ? parent.getReactiveRoot() : this;
+		return parent ? parent.root : this;
 	}
 
 	private detach(): void {
@@ -563,7 +560,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			onModelDetached(this.proxy);
 			this.parent = null;
 			this.parentName = null;
-			this.root = this;
 		});
 	}
 
@@ -586,7 +582,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			if (this.parent) onModelDetached(this.proxy);
 			this.parent = null;
 			this.parentName = null;
-			this.root = this;
 		});
 		this.disposed = true;
 		this.modelsTraceUnsub.forEach((dispose) => dispose());

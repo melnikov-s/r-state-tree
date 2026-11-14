@@ -1304,7 +1304,7 @@ Use `findModelById` for an optional, typed lookup within a model tree:
 const user = findModelById(root, User, 1); // User | undefined
 ```
 
-The lookup is reactive inside an effect or computed value. It returns `undefined` when the matching model changes its id, detaches, or is disposed.
+The lookup searches descendants of the current tree root, excluding the tree root itself. You can pass any model in the tree; passing an attached descendant still searches the entire tree, including that descendant. The lookup is reactive inside an effect or computed value, including the first identified child attachment and changes to the supplied model's ancestry. It returns `undefined` when the matching model changes its id, detaches, or is disposed.
 
 ### Snapshot diffs
 
