@@ -8,36 +8,36 @@ import {
 	createComputed,
 	createAtom,
 	reaction,
-} from "../observables";
-import type { ComputedNode, AtomNode } from "../observables";
-import { debugWrite, debugEnabled } from "../observables/internal/debug";
-import Model from "../model/Model";
+} from "../observables/index.js";
+import type { ComputedNode, AtomNode } from "../observables/index.js";
+import { debugWrite, debugEnabled } from "../observables/internal/debug.js";
+import Model from "../model/Model.js";
 import type {
 	ModelConfiguration,
 	IdType,
 	Snapshot,
 	SnapshotChange,
 	RefSnapshot,
-} from "../types";
-import { ModelCfgTypes, CommonCfgTypes } from "../types";
+} from "../types.js";
+import { ModelCfgTypes, CommonCfgTypes } from "../types.js";
 import {
 	getIdentifier,
 	getModelById,
 	onModelAttached,
 	onModelDetached,
 	setIdentifier,
-} from "./idMap";
-import { clone, hydrateSnapshotValue } from "../utils";
+} from "./idMap.js";
+import { clone, hydrateSnapshotValue } from "../utils.js";
 import {
 	getConfigChildType,
 	getConfigType,
 	getConfigurationForCtor,
-} from "../configuration";
+} from "../configuration.js";
 import {
 	ChildModelsAdministration,
 	observe,
-} from "./ChildModelsAdministration";
-import type { MutationEvent } from "./ChildModelsAdministration";
+} from "./ChildModelsAdministration.js";
+import type { MutationEvent } from "./ChildModelsAdministration.js";
 
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();

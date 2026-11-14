@@ -17,6 +17,14 @@ The quick start uses `static types` and needs no decorator transform. If you pre
 `experimentalDecorators`. See [tested toolchains and configuration](docs/toolchains.md);
 a TypeScript target setting alone does not configure every bundler's decorator pipeline.
 
+TypeScript consumers need TypeScript 5.2+ and `ESNext.Disposable` in
+`compilerOptions.lib` because Store/Model expose `Disposable` and `Symbol.dispose`,
+even without decorators. Include `DOM` for `AbortSignal` (or equivalent host types).
+
+Runtimes need ES2022, `AbortController`, and `Symbol.dispose`; provide a disposal
+polyfill if your runtime lacks it. The library includes a `Symbol.metadata`
+polyfill, not a disposal polyfill. Core does not require React.
+
 ## Quick start
 
 Create a Model for domain state and a Store for view behavior. This example is
@@ -155,8 +163,29 @@ pnpm build
 ```
 
 `pnpm test` runs Vitest and type checks. `pnpm lint` checks Oxlint rules, lint
-fixtures, and formatting; `pnpm format` applies formatting. Builds emit CommonJS,
-ESM, and declarations under `dist/`.
+fixtures, and formatting; `pnpm format` applies formatting.
+
+The package uses `"type": "module"`: ESM bundles and shared chunks use `.js`,
+while CommonJS bundles and shared chunks use `.cjs`. Builds emit both formats
+and declarations under `dist/`. Package exports select the appropriate format.
+Declarations use explicit `.js` import paths for Node-style TypeScript resolution
+and retain public API comments.
+
+```bash
+pnpm test:package
+```
+
+This is a clean-package smoke test using the current Node process and the
+repository's installed TypeScript and React versions. It packs the library,
+installs the tarball outside the checkout, and checks CJS/ESM imports, strict
+declarations, core without optional peers, and React SSR. No alternate runtimes
+or compilers are downloaded.
+
+Registry access is required for the clean consumer installs. Temporary consumers
+are removed; set `KEEP_PACKAGE_CONSUMERS=1` to retain them for debugging.
+`prepublishOnly` runs the unit/type tests and this smoke test before publishing.
+The declaration build uses `moduleDetection: legacy` so the virtual inspector
+module declaration remains an ambient declaration rather than an augmentation.
 
 ## License
 

@@ -1,5 +1,5 @@
-import { ArrayAdministration, getSource, batch } from "../observables";
-import { getAdministration } from "../observables/internal/lookup";
+import { ArrayAdministration, getSource, batch } from "../observables/index.js";
+import { getAdministration } from "../observables/internal/lookup.js";
 
 const listenerMap: WeakMap<object, ObservableListener<unknown>> = new WeakMap();
 

@@ -1,6 +1,6 @@
-import type { InspectionValue } from "./runtime";
-import { isRecord } from "./protocol";
-import type { DiagramData, DiagramNode, DiagramEdge } from "./diagram";
+import type { InspectionValue } from "./runtime.js";
+import { isRecord } from "./protocol.js";
+import type { DiagramData, DiagramNode, DiagramEdge } from "./diagram.js";
 
 export type GraphAddress = { rootId: string; name: string; path: string[] };
 export type GraphRoot = { rootId: string; name: string; kind: string };

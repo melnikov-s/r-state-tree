@@ -1,14 +1,18 @@
-import { createAtom, batch, reportObserved } from "./preact";
-import type { AtomNode } from "./preact";
-import { getSource, getAdministration, isObservable } from "./internal/lookup";
-import { Administration } from "./internal/Administration";
-import { AtomMap, SignalMap } from "./internal/NodeMap";
-import { resolveNode, isNonPrimitive } from "./internal/utils";
+import { createAtom, batch, reportObserved } from "./preact.js";
+import type { AtomNode } from "./preact.js";
+import {
+	getSource,
+	getAdministration,
+	isObservable,
+} from "./internal/lookup.js";
+import { Administration } from "./internal/Administration.js";
+import { AtomMap, SignalMap } from "./internal/NodeMap.js";
+import { resolveNode, isNonPrimitive } from "./internal/utils.js";
 import {
 	debugWrite,
 	debugEnabled,
 	batch as mutationBatch,
-} from "./internal/debug";
+} from "./internal/debug.js";
 
 type Collection<K, V> = Set<K> | Map<K, V>;
 

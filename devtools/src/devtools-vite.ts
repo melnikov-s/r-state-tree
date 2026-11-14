@@ -3,10 +3,10 @@ import { resolve, relative, isAbsolute, dirname, basename } from "node:path";
 import { realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { writeFile, rename, readFile, unlink } from "node:fs/promises";
-import { createInspectionRelay, type BrowserPeer } from "./inspection/relay";
-import { CHANNEL } from "./inspection/protocol";
-import { transformInspectionSignatures } from "./inspection/signature-transform";
-import { transformInspectionContexts } from "./inspection/context-transform";
+import { createInspectionRelay, type BrowserPeer } from "./inspection/relay.js";
+import { CHANNEL } from "./inspection/protocol.js";
+import { transformInspectionSignatures } from "./inspection/signature-transform.js";
+import { transformInspectionContexts } from "./inspection/context-transform.js";
 
 export const DEFAULT_RELAY_FILE = ".r-state-tree-inspector.json";
 function physicalFile(file: string): string {

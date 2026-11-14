@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createInspectorMcpServer, readRelayRecord } from "./inspection/mcp";
+import { createInspectorMcpServer, readRelayRecord } from "./inspection/mcp.js";
 
 const file = resolve(
 	process.env.RST_INSPECTOR_RELAY_FILE ?? ".r-state-tree-inspector.json"

@@ -1,7 +1,7 @@
-import { getModelAdm, ModelAdministration } from "./ModelAdministration";
-import type { Configuration, ModelConfiguration, Snapshot } from "../types";
-import { createObservableWithCustomAdministration } from "../observables";
-import { getConfigurationForCtor } from "../configuration";
+import { getModelAdm, ModelAdministration } from "./ModelAdministration.js";
+import type { Configuration, ModelConfiguration, Snapshot } from "../types.js";
+import { createObservableWithCustomAdministration } from "../observables/index.js";
+import { getConfigurationForCtor } from "../configuration.js";
 
 let initEnabled = false;
 

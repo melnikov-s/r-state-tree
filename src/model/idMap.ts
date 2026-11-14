@@ -1,6 +1,6 @@
-import { observable, untracked } from "../observables";
-import type { IdType } from "../types";
-import type Model from "./Model";
+import { observable, untracked } from "../observables/index.js";
+import type { IdType } from "../types.js";
+import type Model from "./Model.js";
 
 export type ModelConstructor<T extends Model = Model> = new (
 	...args: any[]

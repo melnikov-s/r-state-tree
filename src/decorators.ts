@@ -5,7 +5,7 @@ import {
 	idType,
 	transientType,
 	snapshotType,
-} from "./types";
+} from "./types.js";
 
 function makeDecorator(type: unknown): any {
 	return function <T>(value: T, context: DecoratorContext): T {

@@ -3,17 +3,17 @@ import type {
 	StoreProps,
 	StoreConfiguration,
 	Configuration,
-} from "../types";
+} from "../types.js";
 import {
 	getStoreAdm,
 	StoreAdministration,
 	updateProps,
-} from "./StoreAdministration";
+} from "./StoreAdministration.js";
 import {
 	createObservableWithCustomAdministration,
 	getObservable,
-} from "../observables";
-import { getConfigurationForCtor } from "../configuration";
+} from "../observables/index.js";
+import { getConfigurationForCtor } from "../configuration.js";
 
 let initEnabled = false;
 export function allowNewStore<T>(fn: () => T): T {

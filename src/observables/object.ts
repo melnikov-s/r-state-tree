@@ -1,22 +1,22 @@
-import { batch, createAtom, createComputed } from "./preact";
-import type { AtomNode, ComputedNode } from "./preact";
+import { batch, createAtom, createComputed } from "./preact.js";
+import type { AtomNode, ComputedNode } from "./preact.js";
 import {
 	getSource,
 	getAction,
 	getAdministration,
 	isObservable,
-} from "./internal/lookup";
+} from "./internal/lookup.js";
 import {
 	isPropertyKey,
 	getPropertyDescriptor,
 	getPropertyType,
 	resolveNode,
-} from "./internal/utils";
-import type { PropertyType } from "./internal/utils";
-import { Administration } from "./internal/Administration";
-import { AtomMap, SignalMap } from "./internal/NodeMap";
-import { debugWrite, debugEnabled } from "./internal/debug";
-import { retainedChildRead } from "./internal/retainedRead";
+} from "./internal/utils.js";
+import type { PropertyType } from "./internal/utils.js";
+import { Administration } from "./internal/Administration.js";
+import { AtomMap, SignalMap } from "./internal/NodeMap.js";
+import { debugWrite, debugEnabled } from "./internal/debug.js";
+import { retainedChildRead } from "./internal/retainedRead.js";
 
 export class ObjectAdministration<T extends object> extends Administration<T> {
 	keysAtom: AtomNode;

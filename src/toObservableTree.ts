@@ -1,5 +1,5 @@
-import { isPlainObject } from "./observables/internal/utils";
-import { observable } from "./observables/preact";
+import { isPlainObject } from "./observables/internal/utils.js";
+import { observable } from "./observables/preact.js";
 
 /**
  * Performs a one-time recursive pass over a JSON-like structure (plain objects

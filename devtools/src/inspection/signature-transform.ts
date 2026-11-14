@@ -5,7 +5,7 @@ import {
 	MAX_INSPECTION_SIGNATURE_BYTES,
 	type InspectionMethod,
 	type InspectionParameter,
-} from "./signatures";
+} from "./signatures.js";
 
 const secret = /password|secret|token|authorization|cookie|credential/i;
 const blocked = new Set(["constructor", "prototype", "__proto__"]);

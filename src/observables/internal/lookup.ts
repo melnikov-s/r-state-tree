@@ -1,11 +1,11 @@
-import { CollectionAdministration } from "../collection";
-import { PreactObjectAdministration } from "../preact";
-import { ArrayAdministration } from "../array";
-import { DateAdministration } from "../date";
-import type { Administration } from "./Administration";
-import { batch } from "../preact";
-import { debugCall, debugBatch, debugEnabled } from "./debug";
-import { isPlainObject } from "./utils";
+import { CollectionAdministration } from "../collection.js";
+import { PreactObjectAdministration } from "../preact.js";
+import { ArrayAdministration } from "../array.js";
+import { DateAdministration } from "../date.js";
+import type { Administration } from "./Administration.js";
+import { batch } from "../preact.js";
+import { debugCall, debugBatch, debugEnabled } from "./debug.js";
+import { isPlainObject } from "./utils.js";
 
 const administrationMap: WeakMap<object, Administration> = new WeakMap();
 

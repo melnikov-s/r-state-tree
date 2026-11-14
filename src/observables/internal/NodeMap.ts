@@ -1,10 +1,10 @@
-import type { AtomNode, SignalNode } from "../preact";
+import type { AtomNode, SignalNode } from "../preact.js";
 import {
 	createCachedAtom,
 	createCachedSignal,
 	type CachedNode,
-} from "./CachedNode";
-import { isNonPrimitive } from "./utils";
+} from "./CachedNode.js";
+import { isNonPrimitive } from "./utils.js";
 
 // Per NodeMap, in addition to nodes with live subscribers. Object keys remain weak.
 export const MAX_INACTIVE_NODES = 256;

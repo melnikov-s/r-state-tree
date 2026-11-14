@@ -1,26 +1,26 @@
-import type { OperationTimeline } from "./operations";
+import type { OperationTimeline } from "./operations.js";
 import {
 	getConfigurationForCtor,
 	getConfigType,
-} from "../../../src/configuration";
-import { withRetainedChildren } from "../../../src/observables/internal/retainedRead";
+} from "../../../src/configuration.js";
+import { withRetainedChildren } from "../../../src/observables/internal/retainedRead.js";
 import {
 	createActivityRecorder,
 	type ActivityLocation,
 	type ActivityOptions,
-} from "./activity";
-import Store from "../../../src/store/Store";
-import Model from "../../../src/model/Model";
-import { StoreAdministration } from "../../../src/store/StoreAdministration";
-import { ModelAdministration } from "../../../src/model/ModelAdministration";
+} from "./activity.js";
+import Store from "../../../src/store/Store.js";
+import Model from "../../../src/model/Model.js";
+import { StoreAdministration } from "../../../src/store/StoreAdministration.js";
+import { ModelAdministration } from "../../../src/model/ModelAdministration.js";
 import {
 	getAdministration,
 	getSource,
 	Observable,
-} from "../../../src/observables/internal/lookup";
-import { PreactObjectAdministration } from "../../../src/observables/preact";
-import { untracked } from "../../../src/observables";
-import { lookupInspectionMethod, type InspectionMethod } from "./signatures";
+} from "../../../src/observables/internal/lookup.js";
+import { PreactObjectAdministration } from "../../../src/observables/preact.js";
+import { untracked } from "../../../src/observables/index.js";
+import { lookupInspectionMethod, type InspectionMethod } from "./signatures.js";
 import {
 	contextData,
 	contextDescriptor,
@@ -29,12 +29,12 @@ import {
 	knownContextProvider,
 	MAX_INSPECTION_CONTEXTS,
 	type InspectionContext,
-} from "./contexts";
+} from "./contexts.js";
 import {
 	isBlockedKey,
 	validateRequest,
 	type InspectionRequest,
-} from "./protocol";
+} from "./protocol.js";
 
 export type InspectionValue =
 	| null

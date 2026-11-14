@@ -1,13 +1,13 @@
 import { Signal } from "@preact/signals-core";
-import type { IdType, ModelConfiguration } from "./types";
-import { CommonCfgTypes, ModelCfgTypes } from "./types";
-import { getConfigType } from "./configuration";
-import { isPlainObject } from "./observables/internal/utils";
+import type { IdType, ModelConfiguration } from "./types.js";
+import { CommonCfgTypes, ModelCfgTypes } from "./types.js";
+import { getConfigType } from "./configuration.js";
+import { isPlainObject } from "./observables/internal/utils.js";
 import {
 	getObservable,
 	getSource,
 	isObservable,
-} from "./observables/internal/lookup";
+} from "./observables/internal/lookup.js";
 
 export function getPropertyDescriptor(
 	obj: object,

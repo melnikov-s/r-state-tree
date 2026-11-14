@@ -1,5 +1,5 @@
-import type Store from "./store/Store";
-import type Model from "./model/Model";
+import type Store from "./store/Store.js";
+import type Model from "./model/Model.js";
 import type { Signal } from "@preact/signals-core";
 
 export type StoreElement = {

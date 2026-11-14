@@ -1,25 +1,25 @@
 /// <reference lib="dom" />
-export { createInspector } from "./inspection/runtime";
-export { createOperationTimeline } from "./inspection/operations";
-export type { ActivityOptions, ActivityRecord } from "./inspection/activity";
+export { createInspector } from "./inspection/runtime.js";
+export { createOperationTimeline } from "./inspection/operations.js";
+export type { ActivityOptions, ActivityRecord } from "./inspection/activity.js";
 export type {
 	OperationTimeline,
 	OperationRecord,
 	OperationTimelineOptions,
 	OperationRunOptions,
-} from "./inspection/operations";
+} from "./inspection/operations.js";
 export type {
 	Inspector,
 	InspectorOptions,
 	InspectionValue,
-} from "./inspection/runtime";
-export type { InspectionRequest, ControlValue } from "./inspection/protocol";
-import type { Inspector } from "./inspection/runtime";
-import { CHANNEL, isRecord } from "./inspection/protocol";
+} from "./inspection/runtime.js";
+export type { InspectionRequest, ControlValue } from "./inspection/protocol.js";
+import type { Inspector } from "./inspection/runtime.js";
+import { CHANNEL, isRecord } from "./inspection/protocol.js";
 import {
 	connectExtensionBridge,
 	dispatchInspection,
-} from "./inspection/bridge";
+} from "./inspection/bridge.js";
 
 export interface InspectorHot {
 	on(event: string, callback: (data: any) => void): void;

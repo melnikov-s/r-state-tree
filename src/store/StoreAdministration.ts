@@ -9,17 +9,17 @@ import {
 	untracked,
 	createComputed,
 	createAtom,
-} from "../observables";
+} from "../observables/index.js";
 import type {
 	ListenerNode,
 	SignalNode,
 	ComputedNode,
 	AtomNode,
-} from "../observables";
-import { allowNewStore } from "./Store";
-import { debugWrite, debugEnabled } from "../observables/internal/debug";
-import { retainedChildRead } from "../observables/internal/retainedRead";
-import type Store from "./Store";
+} from "../observables/index.js";
+import { allowNewStore } from "./Store.js";
+import { debugWrite, debugEnabled } from "../observables/internal/debug.js";
+import { retainedChildRead } from "../observables/internal/retainedRead.js";
+import type Store from "./Store.js";
 import type {
 	StoreConfiguration,
 	StoreElement,
@@ -27,10 +27,14 @@ import type {
 	StoreSnapshot,
 	StoreChildSnapshot,
 	StoreSnapshotChange,
-} from "../types";
-import { CommonCfgTypes, StoreCfgTypes } from "../types";
-import { getConfigType } from "../configuration";
-import { clone, getPropertyDescriptor, hydrateSnapshotValue } from "../utils";
+} from "../types.js";
+import { CommonCfgTypes, StoreCfgTypes } from "../types.js";
+import { getConfigType } from "../configuration.js";
+import {
+	clone,
+	getPropertyDescriptor,
+	hydrateSnapshotValue,
+} from "../utils.js";
 
 const MAX_MOUNT_DEPTH = 100;
 

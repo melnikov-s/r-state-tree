@@ -1,5 +1,5 @@
-import { getAdministration } from "./observables";
-import type Store from "./store/Store";
+import { getAdministration } from "./observables/index.js";
+import type Store from "./store/Store.js";
 
 // Unique symbol to identify Context objects
 const CONTEXT_SYMBOL = Symbol("context");

@@ -4,8 +4,12 @@ import {
 	ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { lstat, readFile } from "node:fs/promises";
-import { relayRequest, type RelayRecord } from "./relay";
-import { isRecord, validateRequest, type InspectionRequest } from "./protocol";
+import { relayRequest, type RelayRecord } from "./relay.js";
+import {
+	isRecord,
+	validateRequest,
+	type InspectionRequest,
+} from "./protocol.js";
 
 export async function readRelayRecord(file: string): Promise<RelayRecord> {
 	const stat = await lstat(file);

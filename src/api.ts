@@ -4,18 +4,18 @@ import type {
 	SnapshotDiff,
 	IdType,
 	StoreSnapshot,
-} from "./types";
-import { getDiff } from "./utils";
-import Store from "./store/Store";
-import { allowNewStore } from "./store/Store";
-import { getStoreAdm } from "./store/StoreAdministration";
-import type Model from "./model/Model";
+} from "./types.js";
+import { getDiff } from "./utils.js";
+import Store from "./store/Store.js";
+import { allowNewStore } from "./store/Store.js";
+import { getStoreAdm } from "./store/StoreAdministration.js";
+import type Model from "./model/Model.js";
 import {
 	getModelAdm,
 	getConfigurationFromSnapshot,
-} from "./model/ModelAdministration";
-import { getModelById } from "./model/idMap";
-import { batch } from "./observables";
+} from "./model/ModelAdministration.js";
+import { getModelById } from "./model/idMap.js";
+import { batch } from "./observables/index.js";
 
 export function findModelById<T extends Model>(
 	root: Model,

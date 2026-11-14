@@ -8,18 +8,18 @@ import {
 } from "@preact/signals-core";
 import type { ReadonlySignal } from "@preact/signals-core";
 
-import { computedType } from "../types";
-import { retainedChildRead } from "./internal/retainedRead";
+import { computedType } from "../types.js";
+import { retainedChildRead } from "./internal/retainedRead.js";
 
-import { ObjectAdministration } from "./object";
+import { ObjectAdministration } from "./object.js";
 import {
 	getAdministration,
 	getInternalNode,
 	getObservable,
 	getSource,
-} from "./internal/lookup";
+} from "./internal/lookup.js";
 
-export { isObservable } from "./index";
+export { isObservable } from "./index.js";
 
 export class PreactObjectAdministration<
 	T extends object,

@@ -1,12 +1,12 @@
-import type { AtomNode, ComputedNode, SignalNode } from "../preact";
+import type { AtomNode, ComputedNode, SignalNode } from "../preact.js";
 import {
 	ObservableCfgTypes,
 	ModelCfgTypes,
 	StoreCfgTypes,
 	CommonCfgTypes,
-} from "../../types";
-import { getConfigurationValue } from "../../configuration";
-import { getConfigType } from "../../configuration";
+} from "../../types.js";
+import { getConfigurationValue } from "../../configuration.js";
+import { getConfigType } from "../../configuration.js";
 
 export function defaultEquals<T>(a: T, b: T): boolean {
 	return a === b || (a !== a && b !== b);

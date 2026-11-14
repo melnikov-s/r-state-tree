@@ -2,9 +2,9 @@ import type {
 	ConfigurationType,
 	ConfigurationTypes,
 	ConfigurationValue,
-} from "./types";
-import { childType, idType, transientType, snapshotType } from "./types";
-import { child, id, modelRef, transient, snapshot } from "./decorators";
+} from "./types.js";
+import { childType, idType, transientType, snapshotType } from "./types.js";
+import { child, id, modelRef, transient, snapshot } from "./decorators.js";
 
 type Ctor = Function;
 type Config = Record<PropertyKey, ConfigurationType>;

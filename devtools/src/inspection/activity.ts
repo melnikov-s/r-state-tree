@@ -1,10 +1,10 @@
 import {
 	subscribeDebug,
 	type DebugEvent,
-} from "../../../src/observables/internal/debug";
-import { untracked } from "../../../src/observables/preact";
-import { getSource } from "../../../src/observables/internal/lookup";
-import type { OperationRecord } from "./operations";
+} from "../../../src/observables/internal/debug.js";
+import { untracked } from "../../../src/observables/preact.js";
+import { getSource } from "../../../src/observables/internal/lookup.js";
+import type { OperationRecord } from "./operations.js";
 
 export type ActivityOptions = {
 	maxEntries?: number;

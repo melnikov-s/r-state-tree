@@ -12,7 +12,7 @@ import {
 	validateRequest,
 	MAX_FRAME_BYTES,
 	type InspectionRequest,
-} from "./protocol";
+} from "./protocol.js";
 
 export type RelayRecord = { version: 1; url: string; token: string };
 export type BrowserPeer = { send(frame: unknown): void };

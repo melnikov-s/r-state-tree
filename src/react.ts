@@ -9,7 +9,7 @@ import {
 	type ReactNode,
 } from "react";
 
-import type Store from "./store/Store";
+import type Store from "./store/Store.js";
 
 export type StoreType<T extends Store = Store> = abstract new (
 	...args: any[]

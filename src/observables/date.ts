@@ -1,6 +1,6 @@
-import { Administration } from "./internal/Administration";
-import { getAdministration } from "./internal/lookup";
-import { debugWrite, debugEnabled } from "./internal/debug";
+import { Administration } from "./internal/Administration.js";
+import { getAdministration } from "./internal/lookup.js";
+import { debugWrite, debugEnabled } from "./internal/debug.js";
 
 export class DateAdministration extends Administration<Date> {
 	static proxyTraps: ProxyHandler<Date> = {

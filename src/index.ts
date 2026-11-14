@@ -1,6 +1,6 @@
 import "@tsmetadata/polyfill";
-import Store, { createStore, updateStore } from "./store/Store";
-import Model from "./model/Model";
+import Store, { createStore, updateStore } from "./store/Store.js";
+import Model from "./model/Model.js";
 import {
 	mount,
 	onSnapshot,
@@ -8,9 +8,9 @@ import {
 	applySnapshot,
 	onSnapshotDiff,
 	findModelById,
-} from "./api";
-import { createContext } from "./context";
-import { toObservableTree } from "./toObservableTree";
+} from "./api.js";
+import { createContext } from "./context.js";
+import { toObservableTree } from "./toObservableTree.js";
 
 export {
 	createStore,
@@ -43,9 +43,9 @@ export {
 	effect,
 	signal,
 	Observable,
-} from "./observables";
+} from "./observables/index.js";
 
-export * from "./decorators";
+export * from "./decorators.js";
 
 export type {
 	Configuration,
@@ -55,5 +55,5 @@ export type {
 	SnapshotDiff,
 	StoreSnapshot,
 	StoreChildSnapshot,
-} from "./types";
-export type { Context } from "./context";
+} from "./types.js";
+export type { Context } from "./context.js";

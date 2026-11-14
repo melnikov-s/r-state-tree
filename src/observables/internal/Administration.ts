@@ -1,7 +1,7 @@
-import { createAtom, createObservedAtom } from "../preact";
-import type { AtomNode, ObservedAtomNode } from "../preact";
-import type { SignalMap } from "./NodeMap";
-import { resolveNode } from "./utils";
+import { createAtom, createObservedAtom } from "../preact.js";
+import type { AtomNode, ObservedAtomNode } from "../preact.js";
+import type { SignalMap } from "./NodeMap.js";
+import { resolveNode } from "./utils.js";
 
 let circularRefSet: WeakSet<object> | null = null;
 

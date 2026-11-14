@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { diagramStyles } from "./diagram-styles";
+import { diagramStyles } from "./diagram-styles.js";
 
 export type DiagramNode = {
 	id: string;

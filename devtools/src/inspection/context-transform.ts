@@ -1,5 +1,5 @@
 import { parseSync, type ESTree } from "vite";
-import { INSPECTION_CONTEXT_KEY, INSPECTION_CONTEXTS_KEY } from "./contexts";
+import { INSPECTION_CONTEXT_KEY, INSPECTION_CONTEXTS_KEY } from "./contexts.js";
 
 const object = "globalThis.Object";
 const symbol = (key: string) => `globalThis.Symbol.for(${JSON.stringify(key)})`;

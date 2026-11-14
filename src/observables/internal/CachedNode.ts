@@ -1,5 +1,5 @@
-import { Signal } from "../preact";
-import type { AtomNode, SignalNode } from "../preact";
+import { Signal } from "../preact.js";
+import type { AtomNode, SignalNode } from "../preact.js";
 
 export type CachedNode<T> = T & {
 	readonly observing: boolean;

@@ -6,12 +6,12 @@ export {
 	getInternalNode,
 	createObservableWithCustomAdministration,
 	Observable,
-} from "./internal/lookup";
-export { batch } from "./internal/debug";
-export { ArrayAdministration } from "./array";
-export { CollectionAdministration } from "./collection";
-export { DateAdministration } from "./date";
-export { ObjectAdministration } from "./object";
+} from "./internal/lookup.js";
+export { batch } from "./internal/debug.js";
+export { ArrayAdministration } from "./array.js";
+export { CollectionAdministration } from "./collection.js";
+export { DateAdministration } from "./date.js";
+export { ObjectAdministration } from "./object.js";
 export {
 	type AtomNode,
 	reaction,
@@ -34,4 +34,4 @@ export {
 	type ReadonlySignal,
 	effect,
 	signal,
-} from "./preact";
+} from "./preact.js";

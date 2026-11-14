@@ -1,10 +1,14 @@
-import { createAtom, batch } from "./preact";
-import type { AtomNode } from "./preact";
-import { getAdministration, getSource, isObservable } from "./internal/lookup";
-import { Administration } from "./internal/Administration";
-import { SignalMap } from "./internal/NodeMap";
-import { resolveNode } from "./internal/utils";
-import { debugWrite, debugEnabled } from "./internal/debug";
+import { createAtom, batch } from "./preact.js";
+import type { AtomNode } from "./preact.js";
+import {
+	getAdministration,
+	getSource,
+	isObservable,
+} from "./internal/lookup.js";
+import { Administration } from "./internal/Administration.js";
+import { SignalMap } from "./internal/NodeMap.js";
+import { resolveNode } from "./internal/utils.js";
+import { debugWrite, debugEnabled } from "./internal/debug.js";
 
 /**
  * Check if a property key is a valid array index per ECMAScript spec.

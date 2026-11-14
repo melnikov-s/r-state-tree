@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
-import type { Inspector } from "./runtime";
-import { isRecord, MAX_FRAME_BYTES, validateRequest } from "./protocol";
+import type { Inspector } from "./runtime.js";
+import { isRecord, MAX_FRAME_BYTES, validateRequest } from "./protocol.js";
 
 /** Same bounded protocol for both transports; no JS expressions or relay credentials. */
 export function dispatchInspection(
