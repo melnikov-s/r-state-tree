@@ -24,7 +24,7 @@ Restricting to straight-line methods does not solve those policy ambiguities. Re
 
 A load can combine Store lifetime, an operation controller, revision equality, guarded success/error writes, and listener cleanup. A persistence queue may also need a deferred `.finally()` to clear its in-flight handle and restart queued work. These policies cannot be established from guard spelling alone.
 
-The shared async-policy fixtures in `tests/helpers/lint.ts`, exercised by `tests/lint.testDiscardedChildRead.ts` and `tests/lint.testIntegration.ts`, cover all of the following syntax in the real Oxlint host; absence of diagnostics only locks down the deliberate policy boundary:
+The shared async-policy fixtures in `tests/helpers/lint.ts`, exercised by `tests/lint.discardedChildRead.test.ts` and `tests/lint.integration.test.ts`, cover all of the following syntax in the real Oxlint host; absence of diagnostics only locks down the deliberate policy boundary:
 
 | Continuation                                                   | Required review/test distinction                                                                                                    |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |

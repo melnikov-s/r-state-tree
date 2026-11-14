@@ -28,8 +28,13 @@ export default defineConfig({
 	test: {
 		globals: true,
 		environment: "node",
-		// Focused suites use <subject>.test<Type>.ts; helpers stay undiscovered.
-		include: ["tests/**/*.test.ts", "tests/**/*.test[A-Z]*.ts"],
+		include: ["tests/**/*.test.ts"],
+		// Browser suites run in Playwright; type-only suites run via test:types.
+		exclude: [
+			"tests/browser/**",
+			"tests/types.test.ts",
+			"tests/react.types.test.ts",
+		],
 		setupFiles: ["@tsmetadata/polyfill", "./tests/setup.ts"],
 		coverage: {
 			provider: "v8",

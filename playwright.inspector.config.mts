@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
 	testDir: "./tests/browser",
 	outputDir: "./test-results/inspector",
-	testMatch: "*.spec.ts",
+	testMatch: "*.test.ts",
 	workers: 1,
 	projects: [
 		{ name: "chromium", use: { browserName: "chromium" } },
