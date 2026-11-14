@@ -2153,6 +2153,104 @@ describe("store context", () => {
 		expect(parent.c.theme).toBe("dark");
 	});
 
+	test.each(["light", undefined])(
+		"early context reads recover after attachment (fallback: %s)",
+		(fallback) => {
+			const ThemeContext =
+				fallback === undefined
+					? createContext<string>()
+					: createContext(fallback);
+			const seen: Array<string | undefined> = [];
+
+			class ChildStore extends Store {
+				initialTheme = ThemeContext.consume(this);
+				initialComputedTheme = this.theme;
+				stop = this.effect(() => {
+					seen.push(this.theme);
+				});
+
+				@computed get theme() {
+					return ThemeContext.consume(this);
+				}
+			}
+
+			class ParentStore extends Store {
+				theme = "dark";
+
+				[ThemeContext.provide]() {
+					return this.theme;
+				}
+
+				@child get c() {
+					return createStore(ChildStore);
+				}
+			}
+
+			const parent = mount(createStore(ParentStore));
+			const childStore = parent.c;
+			expect(childStore.initialTheme).toBe(fallback);
+			expect(childStore.initialComputedTheme).toBe(fallback);
+			expect(ThemeContext.consume(childStore)).toBe("dark");
+			expect(childStore.theme).toBe("dark");
+			expect(seen).toEqual(["dark"]);
+
+			parent.theme = "blue";
+			expect(ThemeContext.consume(childStore)).toBe("blue");
+			expect(childStore.theme).toBe("blue");
+			expect(seen).toEqual(["dark", "blue"]);
+			parent[Symbol.dispose]();
+		}
+	);
+
+	test("early context reads in realized descendants recover during tree mounting", () => {
+		const ThemeContext = createContext("light");
+		const seen: string[] = [];
+
+		class LeafStore extends Store {
+			initialTheme = this.theme;
+			stop = this.effect(() => {
+				seen.push(this.theme);
+			});
+
+			@computed get theme() {
+				return ThemeContext.consume(this);
+			}
+		}
+
+		class BranchStore extends Store {
+			@child get leaf() {
+				return createStore(LeafStore);
+			}
+
+			initialTheme = this.leaf.theme;
+		}
+
+		class RootStore extends Store {
+			theme = "dark";
+
+			[ThemeContext.provide]() {
+				return this.theme;
+			}
+
+			@child get branch() {
+				return createStore(BranchStore);
+			}
+
+			initialTheme = this.branch.leaf.theme;
+		}
+
+		const root = mount(createStore(RootStore));
+		expect(root.initialTheme).toBe("light");
+		expect(root.branch.initialTheme).toBe("light");
+		expect(root.branch.leaf.initialTheme).toBe("light");
+		expect(root.branch.leaf.theme).toBe("dark");
+		expect(seen).toEqual(["dark"]);
+		root.theme = "blue";
+		expect(root.branch.leaf.theme).toBe("blue");
+		expect(seen).toEqual(["dark", "blue"]);
+		root[Symbol.dispose]();
+	});
+
 	test("context flows down multiple levels", () => {
 		const ThemeContext = createContext<string>("light");
 

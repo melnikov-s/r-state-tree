@@ -241,6 +241,7 @@ export class StoreAdministration<
 	private readonly abortController = new AbortController();
 	private mounted = false;
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
+	private contextParentAtom: AtomNode = createAtom();
 	private childStoreDataMap: Map<PropertyKey, ChildStoreData> = new Map();
 	private reactiveRegistrations = new Set<ReactiveRegistration>();
 	private configurationGetter?: () => StoreConfiguration<StoreType>;
@@ -777,6 +778,8 @@ export class StoreAdministration<
 			return provideMethod.call(this.proxy);
 		}
 
+		// An early read may cache the fallback before ownership is established.
+		this.contextParentAtom.reportObserved();
 		// Walk up the parent chain
 		if (this.parent) {
 			return this.parent.getContextValue(
@@ -860,6 +863,7 @@ export class StoreAdministration<
 		try {
 			batch(() => {
 				this.parent = parent || null;
+				this.contextParentAtom.reportChanged();
 				this.childStoreDataMap.forEach(({ value }, name) => {
 					const stores = value.get();
 					if (Array.isArray(stores)) {
