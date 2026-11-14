@@ -1,49 +1,37 @@
 // @vitest-environment jsdom
-import { createInspector } from "../src/devtools";
+import { createInspector } from "../devtools/src/devtools";
 import { Store, child, createStore, mount } from "../src/index";
 import { getStoreAdm } from "../src/store/StoreAdministration";
 import { cleanups, openPanel, fixture } from "./helpers/inspection-panel";
 
-test("tree expansion and breadcrumbs keep the workspace, expansion and independent scroll positions", () => {
-	const { shadow, click, row } = fixture();
-	const tree = shadow.querySelector('[role="tree"]')!;
-	const treePane = shadow.querySelector<HTMLElement>(".tree-pane")!;
-	const detailsPane = shadow.querySelector<HTMLElement>(".details-pane")!;
-	expect(
-		tree.querySelector('[aria-label="Counter"]')!.getAttribute("aria-expanded")
-	).toBe("true");
-	click("Expand settings");
-	expect(
-		tree
-			.querySelector('[role="treeitem"][aria-label="appearance"]')!
-			.hasAttribute("aria-expanded")
-	).toBe(false);
-	expect(tree.querySelector('[aria-label="Expand appearance"]')).toBeNull();
-	expect(tree.textContent).not.toContain("No child objects");
-	treePane.scrollTop = 70;
-	detailsPane.scrollTop = 30;
-	click("Select settings");
+// The extension replaces the old expandable tree, custom keyboard model and
+// cached scroll panes with root buttons, explicit object links and an Up button.
+test("nested object navigation keeps the extension shell and selection path across refresh", async () => {
+	const { page, click, row, button } = await fixture();
+	const roots = page.getElementById("roots");
+	const state = page.getElementById("state");
+	expect(button("Up").disabled).toBe(true);
+	await click("Inspect settings");
 	expect(row("theme").textContent).toContain("dark");
-	expect(shadow.querySelector(".tree-pane")).toBe(treePane);
-	expect(shadow.querySelector(".details-pane")).toBe(detailsPane);
-	expect(treePane.scrollTop).toBe(70);
-	expect(detailsPane.scrollTop).toBe(0);
-	expect(
-		tree.querySelector('[aria-label="settings"]')!.getAttribute("aria-selected")
-	).toBe("true");
-	click("Go to Counter");
-	expect(detailsPane.scrollTop).toBe(30);
-	expect(
-		tree.querySelector('[aria-label="settings"]')!.getAttribute("aria-expanded")
-	).toBe("true");
-	click("Refresh");
-	expect(treePane.scrollTop).toBe(70);
-	expect(
-		tree.querySelector('[aria-label="settings"]')!.getAttribute("aria-expanded")
-	).toBe("true");
+	expect(page.getElementById("selection")!.textContent).toBe(
+		"Counter · Store / settings"
+	);
+	await click("Inspect appearance");
+	expect(row("density").textContent).toContain("compact");
+	await click("Reconnect / refresh");
+	expect(page.getElementById("selection")!.textContent).toBe(
+		"Counter · Store / settings / appearance"
+	);
+	expect(page.getElementById("roots")).toBe(roots);
+	expect(page.getElementById("state")).toBe(state);
+	await click("Up");
+	expect(row("theme").textContent).toContain("dark");
+	await click("Up");
+	expect(button("Up").disabled).toBe(true);
+	expect(row("count").querySelector("code")!.textContent).toBe("1");
 });
 
-test("leaf objects stay selectable without an expand action, and refresh updates affordances when children change", () => {
+test("empty objects stay selectable and refreshed fields follow changes in the live app", async () => {
 	class Root extends Store {
 		bucket: { nested?: { label: string } } = {};
 	}
@@ -54,34 +42,30 @@ test("leaf objects stay selectable without an expand action, and refresh updates
 		() => root[Symbol.dispose](),
 		() => inspector.dispose()
 	);
-	const { shadow, body, click } = openPanel(inspector, "Mutable");
-	const tree = shadow.querySelector('[role="tree"]')!;
-	expect(tree.querySelector('[aria-label="Expand bucket"]')).toBeNull();
-	click("Select bucket");
-	expect(shadow.querySelector('[aria-current="page"]')!.textContent).toBe(
-		"bucket"
+	const { page, body, click, row } = await openPanel(inspector, "Mutable");
+	await click("Inspect bucket");
+	expect(page.getElementById("selection")!.textContent).toBe(
+		"Mutable · Store / bucket"
 	);
-	expect(
-		tree
-			.querySelector('[role="treeitem"][aria-label="bucket"]')!
-			.hasAttribute("aria-expanded")
-	).toBe(false);
-	expect(body.textContent).not.toContain("No child objects");
+	expect(body.querySelectorAll("tbody tr")).toHaveLength(0);
 	root.bucket = { nested: { label: "Ready" } };
-	click("Refresh");
-	expect(tree.querySelector('[aria-label="Collapse bucket"]')).not.toBeNull();
-	expect(tree.querySelector('[aria-label="Expand nested"]')).toBeNull();
+	await click("Reconnect / refresh");
+	expect(row("nested").querySelector("button")!.textContent).toBe(
+		"Inspect nested"
+	);
+	await click("Inspect nested");
+	expect(row("label").querySelector("code")!.textContent).toBe('"Ready"');
+	await click("Up");
 	root.bucket = {};
-	click("Refresh");
-	expect(
-		tree.querySelector(
-			'[aria-label="Expand bucket"], [aria-label="Collapse bucket"]'
-		)
-	).toBeNull();
-	expect(tree.querySelector('[aria-label="Select bucket"]')).not.toBeNull();
+	await click("Reconnect / refresh");
+	expect(body.querySelectorAll("tbody tr")).toHaveLength(0);
+	await click("Up");
+	expect(row("bucket").querySelector("button")!.textContent).toBe(
+		"Inspect bucket"
+	);
 });
 
-test("tree does not initialize children and stops cycles without losing reference navigation", () => {
+test("cyclic reference navigation stays bounded and never initializes lazy children", async () => {
 	class Cyclic extends Store {
 		static types = { lazy: child };
 		self = this;
@@ -96,69 +80,39 @@ test("tree does not initialize children and stops cycles without losing referenc
 		() => root[Symbol.dispose](),
 		() => inspector.dispose()
 	);
-	const { shadow, click } = openPanel(inspector, "Cycle");
-	const tree = shadow.querySelector('[role="tree"]')!;
-	expect(tree.textContent).toContain("lazy · not initialized");
-	expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(3);
-	expect(
-		tree.querySelector('[aria-label="self"]')!.hasAttribute("aria-expanded")
-	).toBe(false);
-	expect(getStoreAdm(root).peekInspectionChild("lazy").initialized).toBe(false);
-	click("Select self");
-	expect(shadow.querySelector('[aria-current="page"]')!.textContent).toBe(
-		"self"
+	const { page, body, row, click, requests } = await openPanel(
+		inspector,
+		"Cycle"
 	);
-	click("Refresh");
-	expect(tree.querySelectorAll('[role="treeitem"]')).toHaveLength(3);
+	const fieldCount = body.querySelectorAll("[data-field]").length;
+	expect(row("lazy").querySelector("code")!.textContent).toBe(
+		"Not initialized"
+	);
+	await click("Inspect self");
+	expect(page.getElementById("selection")!.textContent).toBe(
+		"Cycle · Store / self"
+	);
+	await click("Reconnect / refresh");
+	expect(body.querySelectorAll("[data-field]")).toHaveLength(fieldCount);
+	expect(getStoreAdm(root).peekInspectionChild("lazy").initialized).toBe(false);
+	expect(requests.some((request) => request.op === "initialize")).toBe(false);
 });
 
-test("tree keyboard navigation expands and collapses branches with one tab stop", () => {
-	const { shadow, click } = fixture();
-	const tree = shadow.querySelector('[role="tree"]')!;
-	const choices = () => [
-		...tree.querySelectorAll<HTMLButtonElement>(".tree-choice"),
-	];
-	const root = choices()[0];
-	root.focus();
-	root.dispatchEvent(
-		new KeyboardEvent("keydown", {
-			key: "ArrowDown",
-			bubbles: true,
-			cancelable: true,
-		})
+test("extension navigation exposes native buttons rather than the retired tree keyboard model", async () => {
+	const { page, click, button, row } = await fixture();
+	for (const label of ["Counter · Store", "Inspect settings", "Up"]) {
+		expect(button(label).tagName).toBe("BUTTON");
+		expect(button(label).tabIndex).toBe(0);
+	}
+	expect(button("Up").disabled).toBe(true);
+	await click("Inspect settings");
+	expect(button("Up").disabled).toBe(false);
+	expect(row("theme").querySelector("code")!.textContent).toBe('"dark"');
+	expect(button("Inspect appearance").tabIndex).toBe(0);
+	await click("Up");
+	expect(page.querySelector('#roots [aria-current="page"]')!.textContent).toBe(
+		"Counter · Store"
 	);
-	expect(shadow.activeElement).toBe(choices()[1]);
-	expect(choices().filter((choice) => choice.tabIndex === 0)).toHaveLength(1);
-	click("Select settings");
-	const selected = choices().find(
-		(choice) => choice.getAttribute("aria-label") === "Select settings"
-	)!;
-	selected.focus();
-	selected.dispatchEvent(
-		new KeyboardEvent("keydown", {
-			key: "ArrowLeft",
-			bubbles: true,
-			cancelable: true,
-		})
-	);
-	expect(
-		tree
-			.querySelector('[role="treeitem"][aria-label="settings"]')!
-			.getAttribute("aria-expanded")
-	).toBe("false");
-	const collapsed = choices().find(
-		(choice) => choice.getAttribute("aria-label") === "Select settings"
-	)!;
-	collapsed.dispatchEvent(
-		new KeyboardEvent("keydown", {
-			key: "ArrowRight",
-			bubbles: true,
-			cancelable: true,
-		})
-	);
-	expect(
-		tree
-			.querySelector('[role="treeitem"][aria-label="settings"]')!
-			.getAttribute("aria-expanded")
-	).toBe("true");
+	expect(button("Up").disabled).toBe(true);
+	expect(row("count").querySelector("code")!.textContent).toBe("1");
 });

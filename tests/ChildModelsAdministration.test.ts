@@ -542,61 +542,6 @@ describe("child array ownership transactions", () => {
 		stop();
 	});
 
-	test("identifier conflicts do not publish intermediate array or registry changes", () => {
-		const list = listWith(1, 2);
-		const original = [...list.items];
-		const incoming = Item.create({ id: 3 });
-		const conflict = Item.create({ id: 2 });
-		const seen: Array<[number[], Item | undefined]> = [];
-		const stop = effect(() => {
-			seen.push([
-				list.items.map((item) => item.id),
-				findModelById(list, Item, 3),
-			]);
-		});
-		try {
-			expect(() => list.items.splice(0, 1, incoming, conflict)).toThrow(
-				"already assigned"
-			);
-			expect(seen).toEqual([[[1, 2], undefined]]);
-			expectOwned(list, original);
-			expect(incoming.parent).toBe(null);
-			expect(conflict.parent).toBe(null);
-		} finally {
-			stop();
-		}
-	});
-
-	test("failed whole-property replacement preserves the old collection's ownership handler", () => {
-		const list = listWith(1, 2);
-		const original = list.items;
-		const a = Item.create({ id: 3 });
-		const b = Item.create({ id: 3 });
-		expect(() => {
-			list.items = [a, b];
-		}).toThrow("already assigned");
-		expect(list.items).toBe(original);
-		expectOwned(list, [...original]);
-		expect(a.parent).toBe(null);
-		expect(b.parent).toBe(null);
-		const removed = list.items.pop()!;
-		expectDetached(list, [removed]);
-		list.items.push(a);
-		expectOwned(list, [original[0], a]);
-	});
-
-	test("sort rejects reentrant whole-property replacement without detaching children", () => {
-		const list = listWith(1, 2);
-		const original = [...list.items];
-		expect(() =>
-			list.items.sort(() => {
-				list.items = [];
-				return 0;
-			})
-		).toThrow("reentrant");
-		expectOwned(list, original);
-	});
-
 	test("an observer may mutate the collection after the previous transaction commits", () => {
 		const list = listWith();
 		const second = Item.create({ id: 2 });

@@ -1,105 +1,87 @@
 // @vitest-environment jsdom
-import { createInspector } from "../src/devtools";
-import { Store, computed, createStore, mount } from "../src/index";
-import { INSPECTION_SIGNATURES } from "../src/inspection/signatures";
+import { createInspector } from "../devtools/src/devtools";
+import { Store, createStore, mount } from "../src/index";
+import { INSPECTION_SIGNATURES } from "../devtools/src/inspection/signatures";
 import { cleanups, openPanel, fixture } from "./helpers/inspection-panel";
 
-test("opt-in panel edits inline and calls methods with named typed arguments through the shared engine", async () => {
-	const { root, body, row, click } = fixture(true);
-	// Let the browser's queued initial details toggle finish before submitting async controls.
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	expect(body.textContent).toContain("Controls enabled");
-	expect(row("password").querySelector("input,textarea,select")).toBeNull();
-	expect(row("double").querySelector("input,textarea,select")).toBeNull();
-	expect(row("lazy").querySelector("input,textarea,select")).toBeNull();
-	expect(body.querySelector('[aria-label="Edit field count"]')).toBeNull();
-	let form = row("count").querySelector("form")!;
-	const input = form.querySelector("input")!;
-	input.value = "not a number";
-	form.dispatchEvent(new Event("submit", { cancelable: true }));
-	expect(form.textContent).toContain("finite number");
+// The extension uses explicit JSON Set/Call actions, not the retired embedded
+// panel's blur-to-save forms, named-argument widgets or persistent draft cache.
+test("opted-in extension edits and async calls use the shared engine with displayed signatures", async () => {
+	const { root, page, body, row, click, input, button, status, requests } =
+		await fixture(true);
+	expect(page.getElementById("mode")!.textContent).toContain(
+		"Controls explicitly enabled"
+	);
+	for (const field of ["password", "double", "lazy"])
+		expect(row(field).querySelector("textarea")).toBeNull();
+	input("JSON value for count").value = "not JSON";
+	await click("Set count");
+	expect(status.className).toBe("error");
 	expect(root.count).toBe(1);
-	input.value = "10";
-	form.dispatchEvent(new Event("submit", { cancelable: true }));
-	await vi.waitFor(() =>
-		expect(row("count").querySelector("input")!.value).toBe("10")
-	);
+	expect(requests.some((request) => request.op === "set")).toBe(false);
+	input("JSON value for count").value = "10";
+	await click("Set count");
 	expect(root.count).toBe(10);
-	form = body.querySelector('[data-method="addAsync"] form')!;
-	form.querySelector("input")!.value = "3";
-	expect(form.textContent).toContain("number");
-	form.dispatchEvent(new Event("submit", { cancelable: true }));
-	expect(form.querySelector("button")!.disabled).toBe(true);
-	await vi.waitFor(() => expect(body.textContent).toContain("Returned: 13"));
-	expect(root.count).toBe(13);
-	expect(row("count").querySelector("input")!.value).toBe("13");
-});
-
-test("panel reports method failures safely and refreshes partial effects", async () => {
-	const { root, body, row, click } = fixture(true);
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	click("Configure method fail");
-	body
-		.querySelector('[data-method="fail"] form')!
-		.dispatchEvent(new Event("submit", { cancelable: true }));
-	await vi.waitFor(() =>
-		expect(body.querySelector('[role="alert"]')!.textContent).toContain(
-			"state may have changed"
-		)
+	expect(row("count").querySelector("code")!.textContent).toBe("10");
+	expect(body.querySelector('[data-method="addAsync"] code')!.textContent).toBe(
+		"addAsync(n: number)"
 	);
-	expect(root.count).toBe(2);
-	expect(row("count").querySelector("input")!.value).toBe("2");
-	expect(body.textContent).not.toContain("never-show-this-exception");
+	input("JSON arguments for addAsync").value = "[3]";
+	const pending = click("Call addAsync");
+	expect(button("Call addAsync").disabled).toBe(true);
+	await pending;
+	expect(root.count).toBe(13);
+	expect(status.textContent).toBe("Returned: 13");
+	expect(input("JSON value for count").value).toBe("13");
+	expect(requests).toContainEqual(
+		expect.objectContaining({ op: "call", method: "addAsync", args: [3] })
+	);
 });
 
-test("inline edits save on blur, cancel on Escape, and preserve focus after saving", async () => {
-	const { root, row, body } = fixture(true);
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	let input = row("count").querySelector("input")!;
-	input.focus();
-	input.value = "9";
-	input.dispatchEvent(
+test("method failures with partial effects are safely reported without rollback or automatic retry", async () => {
+	const { root, page, row, click, status, requests } = await fixture(true);
+	await click("Call fail");
+	expect(root.count).toBe(2);
+	expect(status.className).toBe("error");
+	expect(status.textContent).toContain("state may have changed");
+	expect(page.body.textContent).not.toContain("never-show-this-exception");
+	expect(requests.filter((request) => request.op === "call")).toHaveLength(1);
+	await click("Reconnect / refresh");
+	expect(row("count").querySelector("code")!.textContent).toBe("2");
+	expect(root.count).toBe(2);
+});
+
+test("JSON edit drafts never mutate app state on blur or Escape; only Set commits", async () => {
+	const { root, input, click, requests } = await fixture(true);
+	const draft = input("JSON value for count");
+	draft.value = "9";
+	draft.dispatchEvent(
 		new KeyboardEvent("keydown", { key: "Escape", cancelable: true })
 	);
+	draft.dispatchEvent(new FocusEvent("blur"));
 	expect(root.count).toBe(1);
-	input.focus();
-	input.value = "7";
-	input.dispatchEvent(new FocusEvent("blur"));
-	await vi.waitFor(() => expect(root.count).toBe(7));
-	await vi.waitFor(() => expect(body.textContent).toContain("Saved count"));
-	input = row("count").querySelector("input")!;
-	expect(input.value).toBe("7");
+	expect(requests.some((request) => request.op === "set")).toBe(false);
+	draft.value = "7";
+	await click("Set count");
+	expect(root.count).toBe(7);
+	expect(input("JSON value for count").value).toBe("7");
 });
 
-test("typed method drafts survive refresh and tree navigation", async () => {
-	const { shadow, body, click } = fixture(true);
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	click("Configure method add");
-	body.querySelector<HTMLInputElement>(
-		'[data-method="add"] [data-parameter="n"]'
-	)!.value = "42";
-	click("Refresh");
-	expect(
-		body.querySelector<HTMLInputElement>(
-			'[data-method="add"] [data-parameter="n"]'
-		)!.value
-	).toBe("42");
-	expect(
-		body.querySelector<HTMLDetailsElement>('[data-method="add"]')!.open
-	).toBe(true);
-	click("Select settings");
-	click("Go to Counter");
-	expect(
-		body.querySelector<HTMLInputElement>(
-			'[data-method="add"] [data-parameter="n"]'
-		)!.value
-	).toBe("42");
-	expect(
-		shadow.querySelector("textarea[aria-label='JSON arguments for add']")
-	).toBeNull();
+test("refreshing or changing selection cannot submit an uncommitted method draft", async () => {
+	const { root, input, click, requests, page } = await fixture(true);
+	input("JSON arguments for add").value = "[42]";
+	await click("Reconnect / refresh");
+	await click("Inspect settings");
+	expect(page.getElementById("selection")!.textContent).toContain("/ settings");
+	await click("Up");
+	expect(root.count).toBe(1);
+	expect(requests.some((request) => request.op === "call")).toBe(false);
+	input("JSON arguments for add").value = "[2]";
+	await click("Call add");
+	expect(root.count).toBe(3);
 });
 
-test("missing method metadata gets individual arguments, without guessed names or types", async () => {
+test("missing method metadata is labeled honestly while positional JSON arguments still work", async () => {
 	class Plain extends Store {
 		count = 1;
 		add(n: number) {
@@ -114,20 +96,19 @@ test("missing method metadata gets individual arguments, without guessed names o
 		() => root[Symbol.dispose](),
 		() => inspector.dispose()
 	);
-	const { body, click } = openPanel(inspector, "Plain");
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	click("Configure method add");
-	click("+ Argument");
-	body.querySelector<HTMLTextAreaElement>(
-		'[data-parameter="argument 1"]'
-	)!.value = "5";
-	click("Run method add");
-	await vi.waitFor(() => expect(root.count).toBe(6));
-	await vi.waitFor(() => expect(body.textContent).toContain("Returned: 6"));
+	const { body, click, input, status } = await openPanel(inspector, "Plain");
+	expect(body.querySelector('[data-method="add"] code')!.textContent).toBe(
+		"add(signature unavailable)"
+	);
+	input("JSON arguments for add").value = "[5]";
+	await click("Call add");
+	expect(root.count).toBe(6);
+	expect(status.textContent).toBe("Returned: 6");
 });
 
-test("overview groups show props, computed fields and methods together, and inline props target their own path", async () => {
+test("props navigate to their own control path rather than writing a same-named Store field", async () => {
 	class Feature extends Store<{ title: string }> {
+		title = "Store title";
 		count = 2;
 		get double() {
 			return this.count * 2;
@@ -143,42 +124,31 @@ test("overview groups show props, computed fields and methods together, and inli
 		() => root[Symbol.dispose](),
 		() => inspector.dispose()
 	);
-	const { shadow, body } = openPanel(inspector, "Feature");
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	expect(
-		[...body.querySelectorAll(".overview-group > summary")].map(
-			(node) => node.textContent
-		)
-	).toEqual(
-		expect.arrayContaining([
-			"Props1",
-			"Available Context0",
-			"Computed1",
-			"Methods1",
-		])
+	const { row, body, input, click, requests } = await openPanel(
+		inspector,
+		"Feature"
 	);
-	expect(
-		body.querySelector('[data-group="Props"] [data-field="props"]')
-	).toBeNull();
-	const input = body.querySelector<HTMLInputElement>(
-		'[aria-label="Value for prop title"]'
-	)!;
-	input.value = "Edited prop";
-	input.form!.dispatchEvent(new Event("submit", { cancelable: true }));
-	await vi.waitFor(() => expect(root.props.title).toBe("Edited prop"));
-	expect(
-		shadow.querySelector('[aria-label="Object overview"]')!.textContent
-	).toContain("1 Props");
-	expect(
-		[...body.querySelectorAll(".overview-member-names")].map(
-			(node) => node.textContent
-		)
-	).toEqual(["title", "None discovered", "double", "rename"]);
-	expect(root).not.toHaveProperty("title");
+	expect(row("double").textContent).toContain("Not evaluated");
+	expect(body.querySelector('[data-method="rename"]')).not.toBeNull();
+	await click("Inspect props");
+	input("JSON value for title").value = '"Edited prop"';
+	await click("Set title");
+	expect(root.props.title).toBe("Edited prop");
+	expect(root.title).toBe("Store title");
+	expect(requests).toContainEqual(
+		expect.objectContaining({
+			op: "set",
+			path: ["props"],
+			field: "title",
+			value: "Edited prop",
+		})
+	);
+	await click("Up");
+	expect(row("title").querySelector("code")!.textContent).toBe('"Store title"');
 });
 
 test.each([false, true])(
-	"props list values and callable props directly with controls=%s",
+	"props and their callable members retain receiver identity with controls=%s",
 	async (controls) => {
 		type Props = { title: string; save: (title: string) => string };
 		let receiver: unknown;
@@ -206,59 +176,40 @@ test.each([false, true])(
 			() => root[Symbol.dispose](),
 			() => inspector.dispose()
 		);
-		const { body, click } = openPanel(inspector, "Feature");
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		const props = body.querySelector('[data-group="Props"]')!;
-		expect(props.querySelector('[data-field="props"]')).toBeNull();
-		expect(props.querySelector('[aria-label="Inspect props"]')).toBeNull();
-		expect(props.textContent).not.toContain("Observable");
-		expect(props.querySelector('[data-field="title"]')).not.toBeNull();
-		expect(props.querySelector('[data-prop-method="save"]')).not.toBeNull();
-		expect(props.querySelector("summary")!.textContent).toBe("Props2");
-		expect(body.querySelector('[aria-label="2 Props"]')!.textContent).toContain(
-			"title · save"
+		const { body, row, click, input, requests, status } = await openPanel(
+			inspector,
+			"Feature"
 		);
-		click("Configure callback prop save");
-		const callback = props.querySelector('[data-prop-method="save"]')!;
-		const input = callback.querySelector<HTMLInputElement>(
-			'[data-parameter="title"]'
-		)!;
-		expect(input.disabled).toBe(!controls);
+		expect(body.querySelector('[data-method="save"]')).not.toBeNull();
+		await click("Inspect props");
+		expect(row("title").querySelector("code")!.textContent).toBe('"Original"');
 		expect(
-			callback.querySelector<HTMLButtonElement>(
-				'[aria-label="Run callback prop save"]'
-			)!.disabled
-		).toBe(!controls);
-		input.value = "Updated through callback";
-		callback
-			.querySelector("form")!
-			.dispatchEvent(new Event("submit", { cancelable: true }));
+			body.querySelector('[data-method="save"] code')!.textContent
+		).toContain("save(title: string)");
 		if (controls) {
-			await vi.waitFor(() =>
-				expect(body.textContent).toContain(
-					'Returned: "Updated through callback"'
-				)
-			);
+			input("JSON arguments for save").value = '["Updated through callback"]';
+			await click("Call save");
+			expect(status.textContent).toBe('Returned: "Updated through callback"');
 			expect(root.props.title).toBe("Updated through callback");
 			expect(receiver).toBe(root.props);
-			expect(
-				body.querySelector<HTMLInputElement>(
-					'[aria-label="Value for prop title"]'
-				)!.value
-			).toBe("Updated through callback");
+			expect(requests).toContainEqual(
+				expect.objectContaining({
+					op: "call",
+					path: ["props"],
+					method: "save",
+					args: ["Updated through callback"],
+				})
+			);
 		} else {
+			expect(body.querySelector("textarea")).toBeNull();
 			expect(root.props.title).toBe("Original");
 			expect(receiver).toBeUndefined();
+			expect(requests.some((request) => request.op === "call")).toBe(false);
 		}
-		expect(
-			body.querySelector(
-				'[data-group="Methods"] [aria-label="Configure method save"]'
-			)
-		).not.toBeNull();
 	}
 );
 
-test("finishing a pending call refreshes but never changes the user's new selection", async () => {
+test("a completed async call never overwrites the user's newer selection or retries its effects", async () => {
 	let release!: () => void;
 	const wait = new Promise<void>((resolve) => {
 		release = resolve;
@@ -278,26 +229,21 @@ test("finishing a pending call refreshes but never changes the user's new select
 		() => root[Symbol.dispose](),
 		() => inspector.dispose()
 	);
-	const { body, shadow, click } = openPanel(inspector, "Slow");
-	await new Promise((resolve) => setTimeout(resolve, 0));
-	click("Configure method increment");
-	click("Run method increment");
-	expect(body.textContent).toContain("Running…");
-	click("Select settings");
-	expect(
-		body.querySelector<HTMLInputElement>('[aria-label="Value for theme"]')!
-			.disabled
-	).toBe(true);
-	release();
-	await vi.waitFor(() =>
-		expect(
-			body.querySelector<HTMLInputElement>('[aria-label="Value for theme"]')!
-				.disabled
-		).toBe(false)
+	const { body, page, row, click, requests, button, status } = await openPanel(
+		inspector,
+		"Slow"
 	);
+	const pending = click("Call increment");
+	expect(button("Call increment").disabled).toBe(true);
+	await click("Inspect settings");
+	expect(row("theme").querySelector("code")!.textContent).toBe('"dark"');
+	release();
+	await pending;
 	expect(root.count).toBe(2);
-	expect(shadow.querySelector('[aria-current="page"]')!.textContent).toBe(
-		"settings"
+	expect(page.getElementById("selection")!.textContent).toBe(
+		"Slow · Store / settings"
 	);
 	expect(body.textContent).not.toContain("Returned:");
+	expect(status.textContent).not.toContain("Returned:");
+	expect(requests.filter((request) => request.op === "call")).toHaveLength(1);
 });
