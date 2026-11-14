@@ -93,9 +93,10 @@ test("subtree initialization respects redacted array-item ancestors", () => {
 	inspector.dispose();
 });
 
-test("key errors are bounded and disposed Stores do not evaluate their keys", () => {
+test("declared computed key errors are bounded and disposed Stores do not evaluate their keys", () => {
 	let reads = 0;
 	class Root extends Store {
+		static types = { key: computed };
 		override get key(): string {
 			reads++;
 			throw new Error("SECRET KEY ERROR");
@@ -118,7 +119,7 @@ test("key errors are bounded and disposed Stores do not evaluate their keys", ()
 	inspector.dispose();
 });
 
-test("ordinary computed values on observable objects and Observable classes are evaluated live", () => {
+test("declared Observable computeds are live; ordinary observable-object getters stay deferred", () => {
 	class Data extends Observable {
 		count = 2;
 		@computed get double() {
@@ -144,8 +145,9 @@ test("ordinary computed values on observable objects and Observable classes are 
 		inspect(["data"]).fields.find((f: any) => f.name === "double").value
 	).toBe(4);
 	expect(
-		inspect(["record"]).fields.find((f: any) => f.name === "count").value
-	).toBe(5);
+		inspect(["record"]).fields.find((f: any) => f.name === "count").value.kind
+	).toBe("deferred");
+	expect(() => inspect(["record", "count"])).toThrow("Undeclared accessor");
 	data.count = 3;
 	expect(inspect(["data", "double"])).toBe(6);
 	root[Symbol.dispose]();

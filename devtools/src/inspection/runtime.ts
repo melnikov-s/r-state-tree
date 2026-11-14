@@ -1,5 +1,10 @@
 import type { OperationTimeline } from "./operations";
 import {
+	getConfigurationForCtor,
+	getConfigType,
+} from "../../../src/configuration";
+import { withRetainedChildren } from "../../../src/observables/internal/retainedRead";
+import {
 	createActivityRecorder,
 	type ActivityLocation,
 	type ActivityOptions,
@@ -143,8 +148,20 @@ function inspectionClassName(source: object): string | undefined {
 function fields(value: object): Field[] {
 	const adm = administration(value);
 	const source = getSource(value);
+	const constructor = Object.getOwnPropertyDescriptor(
+		Object.getPrototypeOf(source) ?? {},
+		"constructor"
+	)?.value;
+	const configuration =
+		objectAdministration(value) && typeof constructor === "function"
+			? getConfigurationForCtor(constructor)
+			: {};
 	const metadata = new Map<PropertyKey, string | undefined>(
-		adm?.getInspectionMetadata().fields.map((f) => [f.key, f.type])
+		adm?.getInspectionMetadata().fields.map((f) => [f.key, f.type]) ??
+			Reflect.ownKeys(configuration).map((key) => [
+				key,
+				getConfigType(configuration[key]),
+			])
 	);
 	const keys = new Map<PropertyKey, boolean>();
 	for (const [key, descriptor] of descriptors(value)) {
@@ -306,7 +323,13 @@ export function createInspector(options: InspectorOptions = {}) {
 			return child.value;
 		}
 		const objectAdm = objectAdministration(value);
-		if (field.getter && !objectAdm) throw new Error("Unsupported accessor");
+		if (field.getter) {
+			if (!objectAdm || field.type !== "computed")
+				throw new Error("Undeclared accessor is not inspectable");
+			return withRetainedChildren(() =>
+				Reflect.get(objectAdm.proxy, field.key)
+			);
+		}
 		return Reflect.get(objectAdm?.proxy ?? value, field.key);
 	};
 	function select(
@@ -401,14 +424,17 @@ export function createInspector(options: InspectorOptions = {}) {
 				budget.contexts?.push({ value, path, result });
 				try {
 					const keyHidden = hidden(path.concat("key"));
-					if (!keyHidden && budget.evaluateComputeds === false)
-						budget.remaining--;
+					const keyField = fields(value).find((field) => field.key === "key");
+					const deferKey =
+						budget.evaluateComputeds === false ||
+						(keyField?.getter && keyField.type !== "computed");
+					if (!keyHidden && deferKey) budget.remaining--;
 					result.key = keyHidden
 						? marker("redacted")
-						: budget.evaluateComputeds === false
+						: deferKey
 							? marker("deferred", "Computed value not evaluated")
 							: inspect(
-									(adm.proxy as Store).key,
+									withRetainedChildren(() => (adm.proxy as Store).key),
 									path.concat("key"),
 									0,
 									budget,
@@ -506,7 +532,7 @@ export function createInspector(options: InspectorOptions = {}) {
 						: "object";
 			const entry: { [key: string]: InspectionValue } = {
 				name: name.slice(0, 256),
-				type: field.type ?? (field.getter ? "computed" : "value"),
+				type: field.type ?? (field.getter ? "accessor" : "value"),
 				edge,
 			};
 			entries.push(entry);
@@ -530,8 +556,14 @@ export function createInspector(options: InspectorOptions = {}) {
 					entry.value = marker("uninitialized", "Not yet initialized");
 					continue;
 				}
+				if (exposeControls)
+					entry.writable = writable(
+						value,
+						name,
+						controlDescriptors.get(field.key)
+					);
 				if (
-					budget.evaluateComputeds === false &&
+					(budget.evaluateComputeds === false || field.type !== "computed") &&
 					field.getter &&
 					!(adm instanceof StoreAdministration && field.type === "child")
 				) {
@@ -539,12 +571,6 @@ export function createInspector(options: InspectorOptions = {}) {
 					entry.value = marker("deferred", "Computed value not evaluated");
 					continue;
 				}
-				if (exposeControls)
-					entry.writable = writable(
-						value,
-						name,
-						controlDescriptors.get(field.key)
-					);
 				const child = read(value, field, nextPath);
 				entry.value = inspect(
 					child,

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>RStateTree</title>
+		<link rel="stylesheet" href="panel.css" />
+	</head>
+	<body>
+		<header>
+			<strong>RStateTree</strong><span>Local development · manual refresh</span>
+			<button id="refresh">Reconnect / refresh</button>
+		</header>
+		<div class="connection">
+			<label
+				>Running instance
+				<select id="instances" aria-label="Running instance"></select
+			></label>
+			<span id="mode"></span>
+		</div>
+		<p id="status" role="status">Looking for registered development roots…</p>
+		<main>
+			<nav aria-label="Registered roots" id="roots"></nav>
+			<section aria-label="Selected live state">
+				<div class="toolbar">
+					<button id="up" disabled>Up</button>
+					<h1 id="selection">Select a root</h1>
+					<label
+						><input id="computeds" type="checkbox" />Evaluate computeds</label
+					>
+					<button id="operations">Operations</button>
+				</div>
+				<p class="note">
+					Opening and expanding never initialize lazy children. Computeds run
+					app code when enabled.
+				</p>
+				<div id="state"></div>
+				<div id="history" hidden></div>
+			</section>
+		</main>
+		<script src="panel.js"></script>
+	</body>
+</html>

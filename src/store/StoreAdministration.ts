@@ -18,6 +18,7 @@ import type {
 } from "../observables";
 import { allowNewStore } from "./Store";
 import { debugWrite, debugEnabled } from "../observables/internal/debug";
+import { retainedChildRead } from "../observables/internal/retainedRead";
 import type Store from "./Store";
 import type {
 	StoreConfiguration,
@@ -609,6 +610,13 @@ export class StoreAdministration<
 			);
 		}
 		const childStoreData = this.childStoreDataMap.get(name);
+		if (retainedChildRead) {
+			if (!childStoreData?.initialized)
+				throw new Error(
+					"Child requires explicit initialization before retained reads"
+				);
+			return childStoreData.value.get() as Store | null;
+		}
 
 		if (!childStoreData) {
 			untracked(() => this.initializeStore(name));

@@ -16,6 +16,7 @@ import type { PropertyType } from "./internal/utils";
 import { Administration } from "./internal/Administration";
 import { AtomMap, SignalMap } from "./internal/NodeMap";
 import { debugWrite, debugEnabled } from "./internal/debug";
+import { retainedChildRead } from "./internal/retainedRead";
 
 export class ObjectAdministration<T extends object> extends Administration<T> {
 	keysAtom: AtomNode;
@@ -178,6 +179,9 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	}
 
 	private callComputed(key: keyof T): T[keyof T] {
+		// A restricted read must not cache an error/value under different application semantics.
+		if (retainedChildRead)
+			return getPropertyDescriptor(this.source, key)!.get!.call(this.proxy);
 		const computedNode = this.getComputed(key);
 
 		return computedNode.get();

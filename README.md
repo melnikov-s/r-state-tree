@@ -30,7 +30,7 @@ The library includes a decorator metadata polyfill for runtimes that don't yet n
 
 ## Live inspection (opt-in)
 
-A lightweight in-page inspector and local Vite → stdio MCP bridge are available for development. They inspect live Store/Model state, evaluate ordinary computeds, and explicitly initialize selected lazy children. Separately opt into `controls: true` to edit writable fields and invoke application methods from the panel or an agent—without a browser extension or arbitrary JavaScript evaluation.
+A Chromium MV3 browser DevTools extension and independent local Vite → stdio MCP bridge inspect live Store/Model state in development. The UI never lives inside your app: no overlays, floating buttons, embedded panels, or fallback UI. MCP discovers registered running instances and works with the extension absent or closed. Declared computeds are supported; lazy children initialize only explicitly. Separately opt into `controls: true` for field edits and application method calls. No arbitrary getter/JavaScript evaluator or general browser automation.
 
 Enable `activity: true` separately to record observable method calls and writes, grouped by synchronous batch, without wrapping application methods. Recording is development-only, off by default, and has overhead; keep setup behind `import.meta.hot` and dispose it on teardown.
 
@@ -287,7 +287,10 @@ observe the change.
 ```ts
 type StoreSnapshot = {
 	state?: Record<string, unknown>;
-	children?: Record<string, StoreChildSnapshot | (StoreChildSnapshot | null)[] | null>;
+	children?: Record<
+		string,
+		StoreChildSnapshot | (StoreChildSnapshot | null)[] | null
+	>;
 };
 ```
 

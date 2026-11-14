@@ -80,6 +80,9 @@ test("production build has no active inspector setup or relay record", async () 
 			.join("\n");
 		expect(code).not.toContain("RStateTree · live inspector");
 		expect(code).not.toContain("r-state-tree:inspector");
+		expect(code).not.toContain("r-state-tree:extension");
+		expect(code).not.toContain("r-state-tree:page");
+		expect(code).not.toContain("data-r-state-tree-inspector");
 		await expect(stat(file)).rejects.toThrow();
 	} finally {
 		await rm(dir, { recursive: true, force: true });

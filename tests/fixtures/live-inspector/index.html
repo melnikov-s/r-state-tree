@@ -1,6 +1,8 @@
 <!doctype html>
-<html>
+<html lang="en">
 	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" href="data:," />
 		<title>RStateTree live inspection fixture</title>
 	</head>
 	<body>
@@ -8,19 +10,9 @@
 		<p>Count: <output id="count"></output></p>
 		<button id="increment">Increment app state</button>
 		<p>
-			The lazy child starts uninitialized. Open the inspector at bottom right,
-			select Counter, and initialize it explicitly.
+			The lazy child starts uninitialized. Inspect it in the RStateTree browser
+			DevTools extension or through local MCP.
 		</p>
-		<div
-			id="inspector-slot"
-			hidden
-			style="
-				width: min(960px, 100%);
-				height: 560px;
-				transform: translateZ(0);
-				overflow: hidden;
-			"
-		></div>
 		<script type="module" src="/main.ts"></script>
 	</body>
 </html>

@@ -15,12 +15,11 @@ export type {
 } from "./inspection/runtime";
 export type { InspectionRequest, ControlValue } from "./inspection/protocol";
 import type { Inspector } from "./inspection/runtime";
+import { CHANNEL, isRecord } from "./inspection/protocol";
 import {
-	CHANNEL,
-	MAX_FRAME_BYTES,
-	validateRequest,
-	isRecord,
-} from "./inspection/protocol";
+	connectExtensionBridge,
+	dispatchInspection,
+} from "./inspection/bridge";
 
 export interface InspectorHot {
 	on(event: string, callback: (data: any) => void): void;
@@ -37,13 +36,14 @@ export function connectViteInspector(
 ) {
 	if (!token) throw new Error("Inspector Vite plugin is not enabled");
 	const tabId = crypto.randomUUID();
+	const disconnectExtension = connectExtensionBridge(inspector, tabId);
 	let disposed = false;
 	const announce = () => {
 		if (!disposed)
 			hot.send(CHANNEL + ":hello", {
 				token,
 				tabId,
-				title: "RStateTree",
+				title: document.title.slice(0, 100) || "RStateTree",
 				url: location.origin,
 			});
 	};
@@ -57,43 +57,21 @@ export function connectViteInspector(
 			frame.id.length > 100
 		)
 			return;
-		const failure = {
-			error:
-				"Inspection failed; check controls opt-in, root/path, redaction, and field/method",
-		};
-		const send = (response: unknown) => {
-			if (disposed) return;
-			try {
-				if (
-					new TextEncoder().encode(JSON.stringify(response)).byteLength >
-					MAX_FRAME_BYTES - 1024
-				)
-					response = {
-						error:
-							"Inspection exceeds transport byte limit; lower maxEntries or depth. Control effects may already have happened; do not retry automatically.",
-					};
-			} catch {
-				response = failure;
-			}
-			hot.send(CHANNEL + ":response", { token, tabId, id: frame.id, response });
-		};
-		try {
-			validateRequest(frame.request);
-			const result = inspector.query(frame.request);
-			if (result instanceof Promise)
-				void result.then(
-					(value) => send({ value }),
-					() => send(failure)
-				);
-			else send({ value: result });
-		} catch {
-			send(failure);
-		}
+		dispatchInspection(inspector, frame.request, (response) => {
+			if (!disposed)
+				hot.send(CHANNEL + ":response", {
+					token,
+					tabId,
+					id: frame.id,
+					response,
+				});
+		});
 	};
 	const dispose = () => {
 		if (disposed) return;
 		hot.send(CHANNEL + ":bye", { token, tabId });
 		disposed = true;
+		disconnectExtension();
 		hot.off(CHANNEL + ":request", handle);
 		hot.off("vite:ws:connect", announce);
 		window.removeEventListener("pageshow", announce);
@@ -105,8 +83,3 @@ export function connectViteInspector(
 	announce();
 	return dispose;
 }
-
-export {
-	mountInspectorPanel,
-	type InspectorPanelOptions,
-} from "./inspection/panel";

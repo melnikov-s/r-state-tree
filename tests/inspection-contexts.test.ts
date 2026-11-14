@@ -8,6 +8,7 @@ import {
 	Store,
 	Model,
 	child,
+	computed,
 	createStore,
 	createContext,
 	mount,
@@ -55,6 +56,7 @@ function execute(source: string, globals: Record<string, unknown> = {}) {
 		createContext,
 		createStore,
 		child,
+		computed,
 		require: () => ({ createContext }),
 		...globals,
 	});
@@ -129,7 +131,7 @@ test("nearest providers follow real Store parents; ordinary references and Model
 	const { Root } = execute(
 		`
 		const Theme = createContext<string>("default");
-		export class Leaf extends Store { read() { return Theme.consume(this); } get current() { return Theme.consume(this); } }
+		export class Leaf extends Store { static types = { current: computed }; read() { return Theme.consume(this); } get current() { return Theme.consume(this); } }
 		class Middle extends Store {
 			static types = { leaf: child };
 			get leaf() { return createStore(Leaf); }
@@ -395,7 +397,7 @@ test("structure-only inspect defers all ordinary computeds and key getters but t
 		const Theme = createContext<string>();
 		class Leaf extends Store { count = 1; }
 		export class Root extends Store {
-			static types = { lazy: child, realized: child };
+			static types = { lazy: child, realized: child, key: computed, value: computed };
 			get lazy() { counters.child++; return createStore(Leaf); }
 			get realized() { counters.child++; return createStore(Leaf); }
 			get key() { counters.key++; return "app-key"; }

@@ -123,7 +123,7 @@ test("explicit initialization preserves mount/disposal effects, keyed identity, 
 	inspector.dispose();
 });
 
-test("ordinary computed values and errors evaluate; indirect child initialization is possible", () => {
+test("only declared computeds evaluate; indirect child initialization is blocked without poisoning application caches", () => {
 	let runs = 0;
 	class Leaf extends Store {
 		value = 9;
@@ -137,11 +137,17 @@ test("ordinary computed values and errors evaluate; indirect child initializatio
 			runs++;
 			return this.count * 2;
 		}
-		get error() {
+		@computed get error() {
 			throw new Error("SECRET ERROR PAYLOAD");
 		}
-		get indirect() {
+		@computed get indirect() {
+			return this.nested;
+		}
+		@computed get nested() {
 			return this.lazy.value;
+		}
+		get arbitrary() {
+			throw new Error("Arbitrary getter must not run");
 		}
 	}
 	const root = mount(createStore(Root));
@@ -151,7 +157,14 @@ test("ordinary computed values and errors evaluate; indirect child initializatio
 	expect(field(result, "double").value).toBe(6);
 	expect(runs).toBe(1);
 	expect(field(result, "error").value.kind).toBe("error");
-	expect(field(result, "indirect").value).toBe(9);
+	expect(field(result, "indirect").value.kind).toBe("error");
+	expect(field(result, "arbitrary").value.kind).toBe("deferred");
+	expect(() =>
+		inspector.query({ op: "inspect", rootId, path: ["arbitrary"] })
+	).toThrow("Undeclared accessor");
+	expect(getStoreAdm(root).peekInspectionChild("lazy").initialized).toBe(false);
+	// Normal application execution still initializes the child, with no cached inspector error.
+	expect(root.indirect).toBe(9);
 	expect(getStoreAdm(root).peekInspectionChild("lazy").initialized).toBe(true);
 	expect(JSON.stringify(result)).not.toContain("SECRET ERROR PAYLOAD");
 	root.count = 4;
@@ -160,6 +173,48 @@ test("ordinary computed values and errors evaluate; indirect child initializatio
 	).toBe(8);
 	root[Symbol.dispose]();
 	inspector.dispose();
+});
+
+test("declared computed reads use already-realized children without rerunning factories or populating application caches", () => {
+	let factories = 0,
+		computations = 0;
+	class Leaf extends Store {
+		value = 5;
+	}
+	class Root extends Store {
+		@child get leaf() {
+			factories++;
+			return createStore(Leaf);
+		}
+		@computed get selected() {
+			computations++;
+			return this.leaf.value;
+		}
+		override get key(): string {
+			throw new Error("Undeclared key accessor must not run");
+		}
+	}
+	const root = mount(createStore(Root));
+	const inspector = createInspector();
+	const { rootId } = inspector.registerRoot("Root", root);
+	try {
+		const before = inspector.query({ op: "inspect", rootId });
+		expect(field(before, "selected").value.kind).toBe("error");
+		expect(asObject(before).key.kind).toBe("deferred");
+		expect(factories).toBe(0);
+		inspector.query({ op: "initialize", rootId, field: "leaf" });
+		expect(factories).toBe(1);
+		expect(inspector.query({ op: "inspect", rootId, path: ["selected"] })).toBe(
+			5
+		);
+		expect(factories).toBe(1);
+		const captured = computations;
+		expect(root.selected).toBe(5);
+		expect(computations).toBeGreaterThan(captured);
+	} finally {
+		inspector.dispose();
+		root[Symbol.dispose]();
+	}
 });
 
 test("runtime Model ownership/reference metadata is distinct; cycles and source/proxy identity are preserved", () => {

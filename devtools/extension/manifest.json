@@ -1,0 +1,25 @@
+{
+	"manifest_version": 3,
+	"name": "RStateTree DevTools",
+	"version": "0.1.0",
+	"description": "Inspect explicitly registered local development Store and Model roots. No in-app UI.",
+	"devtools_page": "devtools.html",
+	"content_scripts": [
+		{
+			"matches": [
+				"http://localhost/*",
+				"http://127.0.0.1/*",
+				"http://[::1]/*",
+				"https://localhost/*",
+				"https://127.0.0.1/*",
+				"https://[::1]/*"
+			],
+			"js": ["content.js"],
+			"run_at": "document_start",
+			"all_frames": false
+		}
+	],
+	"content_security_policy": {
+		"extension_pages": "script-src 'self'; object-src 'none'"
+	}
+}

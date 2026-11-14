@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import {
 	Store,
+	Model,
 	child,
 	computed,
 	createStore,
@@ -11,7 +12,6 @@ import {
 import {
 	createInspector,
 	connectViteInspector,
-	mountInspectorPanel,
 } from "../../../devtools/src/devtools";
 import { token } from "virtual:r-state-tree-inspector";
 
@@ -41,7 +41,13 @@ class Counter extends Store<{
 	onAdd: (amount: number) => number;
 	onRename: (title: string) => string;
 }> {
-	static types = { lazy: child, broken: child, double: computed };
+	static types = {
+		lazy: child,
+		broken: child,
+		double: computed,
+		mountedChildren: computed,
+		contextReads: computed,
+	};
 	count = 1;
 	[DemoContext.provide]() {
 		providerReads++;
@@ -112,25 +118,35 @@ const increment = () => {
 const incrementButton = document.querySelector("#increment")!;
 incrementButton.addEventListener("click", increment);
 if (import.meta.hot) {
+	const parameters = new URLSearchParams(location.search);
+	class Document extends Model {
+		static types = { upper: computed };
+		title = "Live document";
+		get upper() {
+			return this.title.toUpperCase();
+		}
+	}
+	const documentModel = Document.create();
 	const inspector = createInspector({
 		// Explicit opt-in for the fixture. Normal inspection remains read-only.
-		controls: new URLSearchParams(location.search).get("controls") === "1",
+		controls: parameters.get("controls") === "1",
+		activity: parameters.get("activity") === "1",
 	});
 	inspector.registerRoot("Counter", counter);
+	inspector.registerRoot("Document", documentModel);
 	const disconnect = connectViteInspector(inspector, import.meta.hot, token);
-	const parameters = new URLSearchParams(location.search);
-	const embedded = parameters.get("layout") === "embedded";
-	const slot = document.querySelector<HTMLElement>("#inspector-slot")!;
-	slot.hidden = !embedded;
-	const removePanel = mountInspectorPanel(inspector, {
-		container: embedded ? slot : document.body,
-		layout: embedded ? "embedded" : "floating",
-		fullscreen: parameters.get("fullscreen") === "1",
-	});
+	const second =
+		parameters.get("instances") === "2" ? createInspector() : undefined;
+	second?.registerRoot("Second bridge", counter);
+	const disconnectSecond = second
+		? connectViteInspector(second, import.meta.hot, token)
+		: () => {};
 	import.meta.hot.dispose(() => {
 		disconnect();
-		removePanel();
+		disconnectSecond();
+		second?.dispose();
 		inspector.dispose();
+		documentModel[Symbol.dispose]();
 		stop();
 		incrementButton.removeEventListener("click", increment);
 		counter[Symbol.dispose]();
