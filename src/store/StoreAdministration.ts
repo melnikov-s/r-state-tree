@@ -150,6 +150,7 @@ function validateStoreChildValue(
 
 type ChildStoreData = {
 	initialized?: boolean;
+	reconciledElement?: StoreElement | null | StoreElement[];
 	value: SignalNode<Store | null | Store[]>;
 	computed: ComputedNode<StoreElement | null | StoreElement[]>;
 	listener: ListenerNode;
@@ -560,7 +561,10 @@ export class StoreAdministration<
 			? this.setStoreList(name, storeElement)
 			: this.setSingleStore(name, storeElement as StoreElement | null);
 		this.finishPendingChildSnapshots(name);
-		this.childStoreDataMap.get(name)!.initialized = true;
+		const childStoreData = this.childStoreDataMap.get(name)!;
+		// Only cache successful reconciliation so failed attempts remain retryable.
+		childStoreData.reconciledElement = storeElement;
+		childStoreData.initialized = true;
 		if (debugEnabled) {
 			const after = this.peekInspectionChild(name).value;
 			if (before !== after)
@@ -568,11 +572,18 @@ export class StoreAdministration<
 		}
 	}
 
-	private updateStore(name: PropertyKey): void {
+	private updateStore(name: PropertyKey, forceReconcile = false): void {
 		// Abort handlers and child cleanups can mutate dependencies before listeners stop.
 		if (this.disposalState !== "active") return;
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		this.reconcileStore(name, childStoreData.computed.get());
+		const storeElement = childStoreData.computed.get();
+		if (
+			forceReconcile ||
+			!childStoreData.initialized ||
+			!Object.is(childStoreData.reconciledElement, storeElement)
+		) {
+			this.reconcileStore(name, storeElement);
+		}
 	}
 
 	private getComputedGetter(
@@ -622,8 +633,9 @@ export class StoreAdministration<
 			untracked(() => this.initializeStore(name));
 			return this.childStoreDataMap.get(name)!.value.get() as Store | null;
 		} else {
-			const storeElement = untracked(() => childStoreData.computed.get());
-			this.reconcileStore(name, storeElement);
+			// Refresh stale descriptors synchronously, including inside a batch before
+			// the listener runs. Unchanged descriptors need no reconciliation work.
+			untracked(() => this.updateStore(name));
 			return childStoreData.value.get() as Store | null;
 		}
 	}
@@ -665,9 +677,10 @@ export class StoreAdministration<
 					this.atom.reportChanged();
 				}
 				// Hydrated state can select a different Type from an already-realized
-				// child getter. Reconcile it before hydrating any reused children.
+				// child getter. Reconcile it before hydrating any reused children,
+				// even when the descriptor is unchanged but a child snapshot is pending.
 				Array.from(this.childStoreDataMap.keys()).forEach((name) => {
-					this.updateStore(name);
+					this.updateStore(name, true);
 				});
 				this.snapshotStructureAtom.reportChanged();
 			});
