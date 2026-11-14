@@ -938,6 +938,17 @@ todo.title = "Learn r-state-tree";
 stop();
 ```
 
+### Failed snapshot application
+
+For Models, `applySnapshot()` batches loading and the existing rollback together.
+Snapshot/diff subscribers do not receive failed intermediate snapshots or a
+redundant notification when rollback restores the previous snapshot. Reactive
+effects are delayed until application or rollback finishes. Subscriber errors
+propagate after commitment without triggering rollback.
+
+This is notification isolation, not an identity-preserving transaction. Existing
+attachment behavior and rollback limitations are unchanged.
+
 ### Snapshot data contract
 
 Snapshots are plain JavaScript representations. r-state-tree creates and loads

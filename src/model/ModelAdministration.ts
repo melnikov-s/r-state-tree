@@ -41,6 +41,30 @@ import type { MutationEvent } from "./ChildModelsAdministration";
 
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
+let snapshotRollbackVersion = 0;
+
+// Snapshots contain only primitives, arrays, and plain objects. Compare values
+// only after rollback, when reloading can create an equivalent new snapshot.
+function equalSnapshots(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (!left || !right || typeof left !== "object" || typeof right !== "object")
+		return false;
+	if (Array.isArray(left) !== Array.isArray(right)) return false;
+	if (Array.isArray(left) && left.length !== (right as unknown[]).length)
+		return false;
+	const keys = Object.keys(left);
+	return (
+		keys.length === Object.keys(right).length &&
+		keys.every(
+			(key) =>
+				Object.hasOwn(right, key) &&
+				equalSnapshots(
+					(left as Record<string, unknown>)[key],
+					(right as Record<string, unknown>)[key]
+				)
+		)
+	);
+}
 
 export function getConfigurationFromSnapshot(
 	snapshot: object
@@ -668,10 +692,21 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		});
 	}
 
+	recordSnapshotRollback(): void {
+		snapshotRollbackVersion++;
+	}
+
 	onSnapshotChange(onChange: SnapshotChange<any>): () => void {
+		let rollbackVersion = snapshotRollbackVersion;
 		return reaction(
 			() => this.getSnapshot(),
-			(snapshot) => onChange(snapshot, this.proxy)
+			(snapshot, previous) => {
+				const rolledBack = rollbackVersion !== snapshotRollbackVersion;
+				rollbackVersion = snapshotRollbackVersion;
+				// A lasting change in the same outer batch must still be delivered.
+				if (!rolledBack || !equalSnapshots(snapshot, previous))
+					onChange(snapshot, this.proxy);
+			}
 		);
 	}
 

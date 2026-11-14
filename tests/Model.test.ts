@@ -1674,6 +1674,42 @@ describe("model references", () => {
 		expect(root.second).toEqual([]);
 	});
 
+	test("failed snapshot application does not notify snapshot observers", () => {
+		class User extends Model {
+			@id id!: number;
+		}
+		class Root extends Model {
+			value = 0;
+			@child(User) first: User[] = [];
+			@child(User) second: User[] = [];
+		}
+
+		const root = Root.create();
+		const observedValues: number[] = [];
+		const stop = onSnapshot(root, (snapshot) => {
+			observedValues.push(snapshot.value!);
+		});
+
+		try {
+			expect(() =>
+				applySnapshot(root, {
+					value: 99,
+					first: [{ id: 1 }],
+					second: [{ id: 1 }],
+				})
+			).toThrow("already assigned");
+
+			expect(toSnapshot(root)).toEqual({
+				value: 0,
+				first: [],
+				second: [],
+			});
+			expect(observedValues).toEqual([]);
+		} finally {
+			stop();
+		}
+	});
+
 	test("singular snapshot reconciliation uses the declared child type", () => {
 		class User extends Model {
 			@id id = 1;

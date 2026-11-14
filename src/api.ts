@@ -15,6 +15,7 @@ import {
 	getConfigurationFromSnapshot,
 } from "./model/ModelAdministration";
 import { getModelById } from "./model/idMap";
+import { batch } from "./observables";
 
 export function findModelById<T extends Model>(
 	root: Model,
@@ -123,12 +124,15 @@ export function applySnapshot(
 
 	const adm = getModelAdm(value);
 	const previousSnapshot = adm.getSnapshotForRollback();
-	try {
-		adm.loadSnapshot(snapshot as Snapshot);
-	} catch (error) {
-		adm.loadSnapshot(previousSnapshot);
-		throw error;
-	}
+	batch(() => {
+		try {
+			adm.loadSnapshot(snapshot as Snapshot);
+		} catch (error) {
+			adm.loadSnapshot(previousSnapshot);
+			adm.recordSnapshotRollback();
+			throw error;
+		}
+	});
 
 	return value;
 }
