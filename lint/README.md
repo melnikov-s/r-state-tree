@@ -12,7 +12,7 @@ In an application already using `r-state-tree`:
 pnpm add -D oxlint@1.87.0
 ```
 
-Use a release of `r-state-tree` containing the `./lint` export. For an isolated adoption file, create `r-state-tree.oxlint.json` in **your application**, and enable only the rules you want:
+Use a release of `r-state-tree` containing the `./lint` export. For an isolated strict setup, create `r-state-tree.oxlint.json` in **your application**, and enable all five rules at `error`:
 
 ```json
 {
@@ -22,8 +22,8 @@ Use a release of `r-state-tree` containing the `./lint` export. For an isolated 
 	"rules": {
 		"r-state-tree/no-computed-mutation": "error",
 		"r-state-tree/no-direct-construction": "error",
-		"r-state-tree/no-plain-collection-mutation": "warn",
-		"r-state-tree/no-observable-collection-replacement": "warn",
+		"r-state-tree/no-plain-collection-mutation": "error",
+		"r-state-tree/no-observable-collection-replacement": "error",
 		"r-state-tree/no-discarded-child-read": "error"
 	}
 }
