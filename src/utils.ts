@@ -1,13 +1,13 @@
-import type { ModelConfiguration } from "./types";
-import { CommonCfgTypes } from "./types";
 import { Signal } from "@preact/signals-core";
+import type { IdType, ModelConfiguration } from "./types";
+import { CommonCfgTypes, ModelCfgTypes } from "./types";
+import { getConfigType } from "./configuration";
 import { isPlainObject } from "./observables/internal/utils";
 import {
 	getObservable,
 	getSource,
 	isObservable,
 } from "./observables/internal/lookup";
-import { getConfigType } from "./configuration";
 
 export function getPropertyDescriptor(
 	obj: object,
@@ -301,55 +301,113 @@ function getTypeName(val: unknown): string {
 	return "non-plain object";
 }
 
-export function getDiff<T extends object>(
-	o1: T,
-	o2: T,
-	getConfig: (snapshot: object) => ModelConfiguration<unknown> | undefined
-): Partial<T> | null {
-	const config = getConfig(o2);
-	if (!config) {
-		return null;
-	}
-	const keys = Object.keys(o1);
-	const diff: any = {};
+type SnapshotConfigLookup = (
+	snapshot: object
+) => ModelConfiguration<unknown> | undefined;
 
-	const obj1 = o1 as any;
-	const obj2 = o2 as any;
+type SnapshotIdentity = {
+	config: ModelConfiguration<unknown>;
+	key: string;
+	id: IdType;
+};
 
-	for (let i = 0; i < keys.length; i++) {
-		const key = keys[i];
+function getSnapshotIdentity(
+	snapshot: object,
+	getConfig: SnapshotConfigLookup
+): SnapshotIdentity | undefined {
+	const config = getConfig(snapshot);
+	if (!config) return undefined;
+	const key = Object.keys(config).find(
+		(key) => getConfigType(config[key]) === ModelCfgTypes.id
+	);
+	if (key === undefined) return undefined;
+	const id = (snapshot as Record<string, unknown>)[key];
+	return typeof id === "string" || typeof id === "number"
+		? { config, key, id }
+		: undefined;
+}
 
-		if (!Object.is(obj1[key], obj2[key])) {
-			if (getConfigType(config?.[key]) === CommonCfgTypes.child) {
-				const value = obj2[key];
-				const previousValue = obj1[key];
-				if (
-					value == null ||
-					previousValue == null ||
-					Array.isArray(value) !== Array.isArray(previousValue)
-				) {
-					diff[key] = value;
-				} else if (Array.isArray(value)) {
-					// Array of children
-					diff[key] = value.map((model: object, index: number) => {
-						if (previousValue[index]) {
-							return getDiff(previousValue[index], model, getConfig);
-						}
+function getIdentifiedChildDiff(
+	previous: object,
+	next: object,
+	identity: SnapshotIdentity,
+	getConfig: SnapshotConfigLookup
+): object {
+	// Even an unchanged child needs its identifier: the containing array
+	// describes membership/order, and hydration must reuse the correct Model.
+	return { ...getDiff(previous, next, getConfig), [identity.key]: identity.id };
+}
 
-						return model;
-					});
-				} else {
-					// Single child
-					const childDiff = getDiff(obj1[key], obj2[key], getConfig);
-					if (childDiff) {
-						diff[key] = childDiff;
-					}
-				}
-			} else {
-				diff[key] = obj2[key];
+function getChildDiff(
+	previous: unknown,
+	next: unknown,
+	getConfig: SnapshotConfigLookup
+): unknown {
+	if (Array.isArray(previous) && Array.isArray(next)) {
+		const previousByConfig = new Map<
+			ModelConfiguration<unknown>,
+			Map<IdType, object>
+		>();
+		for (const snapshot of previous) {
+			const identity = getSnapshotIdentity(snapshot, getConfig);
+			if (!identity) continue;
+			let byId = previousByConfig.get(identity.config);
+			if (!byId) {
+				byId = new Map();
+				previousByConfig.set(identity.config, byId);
 			}
+			byId.set(identity.id, snapshot);
+		}
+		return next.map((snapshot: object) => {
+			const identity = getSnapshotIdentity(snapshot, getConfig);
+			const match =
+				identity && previousByConfig.get(identity.config)?.get(identity.id);
+			return match && identity
+				? getIdentifiedChildDiff(match, snapshot, identity, getConfig)
+				: snapshot;
+		});
+	}
+
+	if (isPlainObject(previous) && isPlainObject(next)) {
+		const previousIdentity = getSnapshotIdentity(previous, getConfig);
+		const identity = getSnapshotIdentity(next, getConfig);
+		if (
+			identity &&
+			previousIdentity?.config === identity.config &&
+			previousIdentity.id === identity.id
+		) {
+			return getIdentifiedChildDiff(previous, next, identity, getConfig);
 		}
 	}
 
-	return Object.keys(diff).length > 0 ? diff : null;
+	// Missing/changed identity, null, or a single/array transition may require
+	// creation rather than patching. Never omit persisted data in those cases.
+	return next;
+}
+
+/**
+ * Match children by configured identifier, never by array position. Children
+ * present on both sides carry only their id and changed fields; children that
+ * may need recreation carry full snapshots. Ordinary fields remain shallow.
+ */
+export function getDiff<T extends object>(
+	o1: T,
+	o2: T,
+	getConfig: SnapshotConfigLookup
+): Partial<T> | null {
+	const config = getConfig(o2);
+	const diff: Record<string, unknown> = {};
+	const obj1 = o1 as Record<string, unknown>;
+	const obj2 = o2 as Record<string, unknown>;
+
+	for (const key of Object.keys(obj2)) {
+		if (!Object.is(obj1[key], obj2[key])) {
+			diff[key] =
+				getConfigType(config?.[key]) === CommonCfgTypes.child
+					? getChildDiff(obj1[key], obj2[key], getConfig)
+					: obj2[key];
+		}
+	}
+
+	return Object.keys(diff).length > 0 ? (diff as Partial<T>) : null;
 }

@@ -1311,7 +1311,22 @@ The lookup searches descendants of the current tree root, excluding the tree roo
 
 ### Snapshot diffs
 
-Use `onSnapshotDiff` to receive undo/redo payloads:
+Use `onSnapshotDiff` to receive compact undo/redo payloads. Unchanged fields are omitted. Children are matched by their configured `@id` (or static `id` configuration), not by array position:
+
+- Surviving children carry their identifier plus changed fields; unchanged array children carry only their identifier. Arrays describe the target membership and order.
+- Children absent from the other state carry complete snapshots, so undo can recreate a deleted child without losing persisted data. The same applies to inserted and replaced children.
+- Children without an established identifier, and transitions between single/array/null shapes, use complete snapshots where recreation may be required.
+
+For a child with `@id id`, deleting `{ id: 1, value: 10 }` from `[ { id: 1, value: 10 }, { id: 2, value: 10 } ]` produces:
+
+```ts
+const diff = {
+	undo: { items: [{ id: 1, value: 10 }, { id: 2 }] },
+	redo: { items: [{ id: 2 }] },
+};
+```
+
+Record and apply these payloads with the existing snapshot API:
 
 ```ts
 const history: SnapshotDiff[] = [];

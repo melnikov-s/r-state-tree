@@ -784,7 +784,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 											const foundModel =
 												id != null
 													? getModelById(this.root.proxy, Ctor, id)
-													: this.proxy[key][index];
+													: this.proxy[key]?.[index];
 											const adm = foundModel && getModelAdm(foundModel);
 
 											if (
@@ -844,10 +844,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	getSnapshot(): Snapshot<any> {
 		if (!this.computedSnapshot) {
 			this.computedSnapshot = createComputed(() => {
-				const json = this.toJSON();
-				configMap.set(json, this.configuration);
-
-				return json;
+				const snapshot = this.toJSON();
+				configMap.set(snapshot, this.configuration);
+				return snapshot;
 			});
 		}
 
