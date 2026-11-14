@@ -78,7 +78,10 @@ export function useStore<T extends Store>(StoreClass: StoreType<T>): T {
 
 /**
  * Makes a function component rerender when signals read during rendering
- * change. Store props are not provisioned and Store lifecycle is unaffected.
+ * change. Store props are not provisioned; Store ownership stays external.
+ * Reading a lazy child of a mounted Store can activate its effects during
+ * render (including SSR), even if rendering later throws or suspends. React
+ * does not roll back that activation or dispose the child on unmount.
  */
 export function observer<T extends FunctionComponent<any>>(Component: T): T {
 	const ObservedComponent = memo(function RStateTreeObserver(

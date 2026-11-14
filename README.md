@@ -108,6 +108,45 @@ The React adapter is not loaded when importing only `r-state-tree`. Preact
 applications can use this entry point through `preact/compat`; native Preact
 integration without React compatibility aliases is not currently provided.
 
+### Lazy children, rendering, and SSR
+
+**Store ownership, not React commitment, controls activation.** Reading an
+unrealized `@child` on a mounted Store realizes and mounts that child and starts
+its owned effects. This can happen during render, before React commits anything.
+Neither `observer` nor `StoreProvider` defers activation until commitment or rolls
+it back when rendering throws, suspends, or is abandoned.
+
+Consequently, lazy reads during render can acquire resources or start I/O,
+including during SSR. Those resources can outlive a view that never committed;
+they remain owned by the Store tree until the child is removed/replaced or its
+owner is disposed. Strict Mode replay and Suspense retries reuse the same child
+while its type and key remain stable; React unmount does not dispose it.
+
+Accept read-triggered activation only when that lifetime is appropriate. If a
+resource must start only after a view commits, gate it explicitly through an
+application-controlled start/stop boundary, such as a React effect calling Store
+methods. If it must not run on the server, supply server-safe dependencies or
+disable it explicitly. Lazy realization alone is not a resource-activation guard.
+
+For SSR, create a separate Store root per request and dispose it in `finally`,
+including when rendering fails:
+
+```tsx
+const store = mount(createStore(RequestStore));
+try {
+	return renderToString(
+		<StoreProvider store={store}>
+			<App />
+		</StoreProvider>
+	);
+} finally {
+	store[Symbol.dispose]();
+}
+```
+
+For streaming SSR, retain the root for the stream's lifetime and dispose it on
+completion, error, or cancellation—not immediately after creating the stream.
+
 ## TypeScript config (Stage 3 decorators)
 
 TypeScript 5+ supports TC39 Stage 3 decorators.
