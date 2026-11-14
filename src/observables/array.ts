@@ -27,6 +27,12 @@ function isArrayIndexKey(key: PropertyKey): boolean {
 	);
 }
 
+/** ECMAScript ToIntegerOrInfinity (unary + also rejects BigInt and Symbol). */
+function toIntegerOrInfinity(value: unknown): number {
+	const number = +(value as number);
+	return Number.isNaN(number) ? 0 : Math.trunc(number);
+}
+
 /**
  * Report a conflict when the same source is assigned as both observable and raw.
  * Throws in dev mode; silently proceeds in production.
@@ -276,25 +282,31 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		sort<T>(this: T[], compareFn?: ((a: T, b: T) => number) | undefined): T[] {
 			const adm = getAdministration(this);
-			// Parent-based ownership: no index tracking needed on reorder
-			// Sort using proxy values for correct comparison behavior
-			const pairs = adm.source.map((stored, i) => ({
-				value: (this as any)[i] as T,
-				stored,
-			}));
+			if (compareFn !== undefined && typeof compareFn !== "function") {
+				throw new TypeError(
+					"The comparison function must be a function or undefined"
+				);
+			}
+			// Keep stored identities, but compare observed values. Leave undefined
+			// entries and holes intact so native sort orders them without comparing them.
+			const pairs = adm.source.map((stored, i) =>
+				stored === undefined ? undefined : { value: this[i], stored }
+			);
 
-			const comparator =
-				compareFn ??
-				((a: T, b: T) => {
-					const as = String(a);
-					const bs = String(b);
-					return as < bs ? -1 : as > bs ? 1 : 0;
-				});
-
-			pairs.sort((a, b) => comparator(a.value, b.value));
+			pairs.sort((a, b) => {
+				if (compareFn !== undefined) return compareFn(a!.value, b!.value);
+				// Template coercion uses ToString, which (unlike String) rejects Symbols.
+				const as = `${a!.value as string}`;
+				const bs = `${b!.value as string}`;
+				return as < bs ? -1 : as > bs ? 1 : 0;
+			});
 
 			for (let i = 0; i < pairs.length; i++) {
-				adm.source[i] = pairs[i].stored;
+				if (i in pairs) {
+					adm.source[i] = pairs[i]?.stored as T;
+				} else if (!Reflect.deleteProperty(adm.source, i)) {
+					throw new TypeError("Cannot delete array index during sort");
+				}
 			}
 
 			if (debugEnabled)
@@ -451,8 +463,20 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 	spliceWithArray(index: number, deleteCount?: number, newItems?: T[]): T[] {
 		const length = this.source.length;
-		const newTargetItems: T[] = [];
+		const relativeIndex = toIntegerOrInfinity(index);
+		index =
+			relativeIndex < 0
+				? Math.max(length + relativeIndex, 0)
+				: Math.min(relativeIndex, length);
+		deleteCount =
+			arguments.length === 1
+				? length - index
+				: Math.max(
+						0,
+						Math.min(toIntegerOrInfinity(deleteCount), length - index)
+					);
 
+		const newTargetItems: T[] = [];
 		if (newItems) {
 			for (let i = 0; i < newItems.length; i++) {
 				newTargetItems[i] = getSource(newItems[i]);
@@ -461,18 +485,12 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 			}
 		}
 
-		if (index === undefined) index = 0;
-		else if (index > length) index = length;
-		else if (index < 0) index = Math.max(0, length + index);
-
-		if (arguments.length === 1) deleteCount = length - index;
-		else if (deleteCount === undefined || deleteCount === null) deleteCount = 0;
-		else deleteCount = Math.max(0, Math.min(deleteCount, length - index));
-
-		// JS semantics: removed items must match identities at removal time
-		const removedItems: T[] = [];
-		for (let i = index; i < index + deleteCount; i++) {
-			removedItems.push(this._getEffectiveValue(i) as T);
+		// Removed items preserve both holes and identities at removal time.
+		const removedItems = new Array<T>(deleteCount);
+		for (let i = 0; i < deleteCount; i++) {
+			if (index + i in this.source) {
+				removedItems[i] = this._getEffectiveValue(index + i) as T;
+			}
 		}
 
 		this.spliceItemsIntoValues(index, deleteCount, newTargetItems);

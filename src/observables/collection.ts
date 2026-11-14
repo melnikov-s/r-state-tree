@@ -12,6 +12,8 @@ import {
 
 type Collection<K, V> = Set<K> | Map<K, V>;
 
+const KEY_NOT_FOUND = Symbol("key not found");
+
 export class CollectionAdministration<K, V = K> extends Administration<
 	Collection<K, V>
 > {
@@ -127,7 +129,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		return undefined;
 	}
 
-	private getExistingKey(key: K): K | undefined {
+	private getExistingKey(key: K): K | typeof KEY_NOT_FOUND {
 		const target = getSource(key) as K;
 		if (this.source.has(target)) return target;
 		if (this.source.has(key)) return key;
@@ -135,11 +137,11 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		const proxy = this.getProxyVariant(key);
 		if (proxy !== undefined && this.source.has(proxy)) return proxy;
 
-		return undefined;
+		return KEY_NOT_FOUND;
 	}
 
 	private hasEntry(key: K): boolean {
-		return this.getExistingKey(key) !== undefined;
+		return this.getExistingKey(key) !== KEY_NOT_FOUND;
 	}
 
 	private onCollectionChange(key: K): void {
@@ -211,7 +213,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 
 	delete(value: K): boolean {
 		const existingKey = this.getExistingKey(value);
-		if (existingKey === undefined) return false;
+		if (existingKey === KEY_NOT_FOUND) return false;
 
 		const before = debugEnabled
 			? this.isMap
@@ -317,7 +319,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		const has = this.has(key);
 		if (!has) return undefined;
 
-		const existingKey = this.getExistingKey(key)!;
+		const existingKey = this.getExistingKey(key);
 		const value = sourceMap.get(existingKey as K);
 
 		this.valuesMap!.reportObserved(targetKey, value);
@@ -360,7 +362,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		}
 
 		const existingKey = this.getExistingKey(key);
-		const hasKey = existingKey !== undefined;
+		const hasKey = existingKey !== KEY_NOT_FOUND;
 		const oldValue: V | undefined = hasKey
 			? sourceMap.get(existingKey as K)
 			: undefined;
@@ -372,7 +374,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 			batch(() => {
 				this.flushChange();
 				// Preserve existing identity if present (raw vs proxy), otherwise store raw.
-				if (existingKey !== undefined) {
+				if (existingKey !== KEY_NOT_FOUND) {
 					sourceMap.set(existingKey as K, targetValue);
 				} else {
 					sourceMap.set(targetKey as K, targetValue);
