@@ -9,6 +9,7 @@ import {
 import type { ReadonlySignal } from "@preact/signals-core";
 
 import { computedType } from "../types";
+import { retainedChildRead } from "./internal/retainedRead";
 
 import { ObjectAdministration } from "./object";
 import {
@@ -244,7 +245,9 @@ export function createComputed<T>(
 	return {
 		node: c,
 		get() {
-			return c.value;
+			// Inspection has different child-read semantics. Neither reuse an application
+			// cache nor retain a restricted value/error in any internal computed cache.
+			return retainedChildRead ? bound() : c.value;
 		},
 		clear: () => {
 			untracked(() => {

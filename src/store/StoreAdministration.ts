@@ -765,6 +765,15 @@ export class StoreAdministration<
 		defaultValue: T | undefined,
 		hasDefault: boolean
 	): T {
+		// Bypass caches along the entire provider chain during restricted inspection.
+		if (retainedChildRead)
+			return this.lookupContextValue(
+				contextId,
+				provideSymbol,
+				defaultValue,
+				hasDefault
+			);
+
 		// Check cache first
 		let computed = this.contextCache.get(contextId);
 

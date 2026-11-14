@@ -173,7 +173,8 @@ test("nearest providers follow real Store parents; ordinary references and Model
 		ok: true,
 		result: "middle",
 	});
-	expect(counters.calls).toBe(1);
+	// The restricted computed read above must not prepopulate normal Context caches.
+	expect(counters.calls).toBe(2);
 	const detached = setup(leaf.constructor);
 	expect(detached.inspect().contexts[0].status).toBe("default");
 	class Example extends Model {}
