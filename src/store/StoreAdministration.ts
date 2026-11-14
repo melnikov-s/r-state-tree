@@ -912,44 +912,70 @@ export class StoreAdministration<
 		}
 		this.disposalState = "disposing";
 		const errors: unknown[] = [];
-		const attempt = (cleanup: () => void): void => {
+		try {
 			try {
-				cleanup();
+				this.abortController.abort();
 			} catch (error) {
 				errors.push(error);
 			}
-		};
-		try {
-			attempt(() => this.abortController.abort());
-			// Also capture errors from reactions flushed at the end of the batch.
-			attempt(() =>
+			try {
 				batch(() => {
 					this.childStoreDataMap.forEach(({ value, computed, listener }) => {
-						attempt(() => listener.dispose());
-						attempt(() => {
+						try {
+							listener.dispose();
+						} catch (error) {
+							errors.push(error);
+						}
+						try {
 							const stores = value.get();
-							if (Array.isArray(stores)) {
-								stores.forEach((store) =>
-									attempt(() => getStoreAdm(store).dispose(true))
-								);
-							} else if (stores) {
-								attempt(() => getStoreAdm(stores).dispose(true));
+							const children = Array.isArray(stores)
+								? stores
+								: stores
+									? [stores]
+									: [];
+							for (const store of children) {
+								try {
+									getStoreAdm(store).dispose(true);
+								} catch (error) {
+									errors.push(error);
+								}
 							}
-						});
-						attempt(() => computed.clear());
+						} catch (error) {
+							errors.push(error);
+						}
+						try {
+							computed.clear();
+						} catch (error) {
+							errors.push(error);
+						}
 					});
-					this.contextCache.forEach((computed) =>
-						attempt(() => computed.clear())
-					);
-					attempt(() => this.computedSnapshot?.clear());
+					this.contextCache.forEach((computed) => {
+						try {
+							computed.clear();
+						} catch (error) {
+							errors.push(error);
+						}
+					});
+					try {
+						this.computedSnapshot?.clear();
+					} catch (error) {
+						errors.push(error);
+					}
 					this.reactiveRegistrations.forEach((registration) => {
 						registration.disposed = true;
 						const stop = registration.stop;
 						registration.stop = undefined;
-						if (stop) attempt(stop);
+						try {
+							stop?.();
+						} catch (error) {
+							errors.push(error);
+						}
 					});
-				})
-			);
+				});
+			} catch (error) {
+				// Reactions flushed at the end of the batch may also throw.
+				errors.push(error);
+			}
 		} finally {
 			this.childStoreDataMap.clear();
 			this.contextCache.clear();
