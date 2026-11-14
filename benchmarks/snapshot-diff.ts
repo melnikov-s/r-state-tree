@@ -7,112 +7,36 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
-// Run from the repository root. Candidates patch isolated benchmark bundles,
-// never production files. Fail loudly if a source change invalidates a patch.
-// DIFF_BENCH_VERIFY_ONLY=1 runs the actual diff regression suite on each candidate.
+// Run from the repository root. Compare current source with an optional
+// DIFF_BENCH_BASELINE=<git revision> in isolated bundles, never rewriting source.
+// DIFF_BENCH_VERIFY_ONLY=1 runs the diff regression suite on each version.
 // DIFF_BENCH_SIZES, DIFF_BENCH_SAMPLES, and DIFF_BENCH_SAMPLE_MS control
 // the workload sizes and sampling, not the production code.
 const root = process.cwd();
 const utilsPath = resolve("src/utils.ts");
-const original = await readFile(utilsPath, "utf8");
-function replaceOnce(source: string, oldText: string, newText: string): string {
-	if (source.split(oldText).length !== 2) {
-		throw new Error(`Benchmark patch no longer matches uniquely: ${oldText}`);
-	}
-	return source.replace(oldText, newText);
-}
-function referenceShortcut(source: string): string {
-	return replaceOnce(
-		source,
-		"return { ...getDiff(previous, next, getConfig), [identity.key]: identity.id };",
-		"return previous === next ? { [identity.key]: identity.id } : { ...getDiff(previous, next, getConfig), [identity.key]: identity.id };"
-	);
-}
-function cachedKeys(source: string): string {
-	source = replaceOnce(
-		source,
-		"function getSnapshotIdentity(",
-		"const identifierKeys = new WeakMap<ModelConfiguration<unknown>, string | undefined>();\nfunction getSnapshotIdentity("
-	);
-	return replaceOnce(
-		source,
-		`const key = Object.keys(config).find(
-		(key) => getConfigType(config[key]) === ModelCfgTypes.id
-	);`,
-		`if (!identifierKeys.has(config)) {
-		identifierKeys.set(config, Object.keys(config).find(key => getConfigType(config[key]) === ModelCfgTypes.id));
-	}
-	const key = identifierKeys.get(config);`
-	);
-}
-function cachedIdentities(source: string): string {
-	return replaceOnce(
-		source,
-		"function getSnapshotIdentity(",
-		`const identitiesByLookup = new WeakMap<SnapshotConfigLookup, WeakMap<object, SnapshotIdentity | undefined>>();
-function getSnapshotIdentity(snapshot: object, getConfig: SnapshotConfigLookup): SnapshotIdentity | undefined {
-	let cache = identitiesByLookup.get(getConfig);
-	if (!cache) { cache = new WeakMap(); identitiesByLookup.set(getConfig, cache); }
-	if (!cache.has(snapshot)) cache.set(snapshot, computeSnapshotIdentity(snapshot, getConfig));
-	return cache.get(snapshot);
-}
-function computeSnapshotIdentity(`
-	);
-}
-function alignedShortcut(source: string): string {
-	const start = source.indexOf("\t\tconst previousByConfig = new Map<");
-	const end = source.indexOf("\n\t}\n\n\tif (isPlainObject(previous)", start);
-	if (start < 0 || end < 0)
-		throw new Error("Array benchmark patch no longer matches");
-	return (
-		source.slice(0, start) +
-		`
-		let previousByConfig: Map<ModelConfiguration<unknown>, Map<IdType, object>> | undefined;
-		return next.map((snapshot: object, index: number) => {
-			const identity = getSnapshotIdentity(snapshot, getConfig);
-			if (!identity) return snapshot;
-			const positional = previous[index];
-			if (positional === snapshot) return { [identity.key]: identity.id };
-			// Position is only a shortcut after verifying identity. Once structure
-			// differs, build the index once and use it for the remaining children.
-			if (!previousByConfig) {
-				const positionalIdentity = positional && getSnapshotIdentity(positional, getConfig);
-				if (positionalIdentity?.config === identity.config && positionalIdentity.id === identity.id) {
-					return getIdentifiedChildDiff(positional, snapshot, identity, getConfig);
-				}
-				previousByConfig = new Map();
-				for (const oldSnapshot of previous) {
-					const oldIdentity = getSnapshotIdentity(oldSnapshot, getConfig);
-					if (!oldIdentity) continue;
-					let byId = previousByConfig.get(oldIdentity.config);
-					if (!byId) { byId = new Map(); previousByConfig.set(oldIdentity.config, byId); }
-					byId.set(oldIdentity.id, oldSnapshot);
-				}
+const baseline = process.env.DIFF_BENCH_BASELINE;
+const candidates: Record<string, string> = {
+	current: await readFile(utilsPath, "utf8"),
+	...(baseline
+		? {
+				baseline: execFileSync("git", ["show", `${baseline}:src/utils.ts`], {
+					encoding: "utf8",
+					maxBuffer: 2 * 1024 * 1024,
+				}),
 			}
-			const match = previousByConfig.get(identity.config)?.get(identity.id);
-			return match ? getIdentifiedChildDiff(match, snapshot, identity, getConfig) : snapshot;
-		});` +
-		source.slice(end)
-	);
-}
-const candidates = {
-	current: original,
-	reference: referenceShortcut(original),
-	"reference+keys": cachedKeys(referenceShortcut(original)),
-	"reference+identities": cachedIdentities(referenceShortcut(original)),
-	"aligned+keys": alignedShortcut(cachedKeys(referenceShortcut(original))),
-	"aligned+identities": alignedShortcut(
-		cachedIdentities(referenceShortcut(original))
-	),
+		: {}),
 };
 
 if (process.env.DIFF_BENCH_VERIFY_ONLY === "1") {
 	const { startVitest } = await import("vitest/node");
 	for (const [name, contents] of Object.entries(candidates)) {
+		const filters = ["tests/Model.snapshotDiff.test.ts"];
+		if (name === "current")
+			filters.push("tests/snapshotDiff.optimization.test.ts");
 		let transformed = 0;
 		const ctx = await startVitest(
 			"test",
-			["tests/Model.snapshotDiff.test.ts"],
+			filters,
 			{ watch: false, maxWorkers: 1 },
 			{
 				plugins: [
@@ -132,7 +56,7 @@ if (process.env.DIFF_BENCH_VERIFY_ONLY === "1") {
 		const files = ctx.state.getFiles();
 		const passed =
 			transformed > 0 &&
-			files.length === 1 &&
+			files.length === filters.length &&
 			files.every((file) => file.result?.state === "pass") &&
 			ctx.state.getUnhandledErrors().length === 0;
 		await ctx.close();
@@ -285,7 +209,7 @@ for (const [name, contents] of Object.entries(candidates)) {
 		logLevel: "silent",
 		plugins: [
 			{
-				name: "experimental-snapshot-diff",
+				name: "snapshot-diff-version",
 				setup(build) {
 					build.onLoad({ filter: /\/src\/utils\.ts$/ }, () => ({
 						contents,
@@ -306,6 +230,12 @@ const environment = {
 	arch: process.arch,
 	cpu: cpus()[0]?.model,
 	nodeEnv: process.env.NODE_ENV ?? "unset",
+	baseline: baseline ?? null,
+	productionSourceDirty: Boolean(
+		execFileSync("git", ["diff", "HEAD", "--name-only", "--", "src/utils.ts"], {
+			encoding: "utf8",
+		}).trim()
+	),
 	productionSourceCommit: execFileSync("git", ["rev-parse", "HEAD"], {
 		encoding: "utf8",
 	}).trim(),
@@ -354,7 +284,7 @@ type Result = {
 };
 const results: Result[] = [];
 // Runtime variants each get their own process and one live Model tree. Keeping
-// six 10k-Model trees alive together distorts GC costs and JIT specialization.
+// multiple 10k-Model trees alive together distorts GC costs and JIT specialization.
 const runtimeWorker = `
 const [bundle, n, fields, observer, operation, samples, targetMs] = process.argv.slice(1);
 const workload = require(bundle).prepareRuntime(+n, +fields, observer, operation);
@@ -487,11 +417,7 @@ for (const n of sizes) {
 			await measure("runtime", "edit", n, fields, observer, ["current"]);
 		}
 	}
-	await measure("runtime", "scalar", n, 8, "diff", [
-		"current",
-		"aligned+keys",
-		"aligned+identities",
-	]);
+	await measure("runtime", "scalar", n, 8, "diff", Object.keys(harnesses));
 }
 const output = resolve("node_modules/.cache/snapshot-diff-results.json");
 await writeFile(

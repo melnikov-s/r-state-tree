@@ -311,16 +311,28 @@ type SnapshotIdentity = {
 	id: IdType;
 };
 
+// Effective configurations are reused across snapshots; a new configuration
+// gets its own entry. Cache misses too, without retaining individual snapshots.
+const identifierKeys = new WeakMap<
+	ModelConfiguration<unknown>,
+	string | null
+>();
+
 function getSnapshotIdentity(
 	snapshot: object,
 	getConfig: SnapshotConfigLookup
 ): SnapshotIdentity | undefined {
 	const config = getConfig(snapshot);
 	if (!config) return undefined;
-	const key = Object.keys(config).find(
-		(key) => getConfigType(config[key]) === ModelCfgTypes.id
-	);
-	if (key === undefined) return undefined;
+	let key = identifierKeys.get(config);
+	if (key === undefined) {
+		key =
+			Object.keys(config).find(
+				(key) => getConfigType(config[key]) === ModelCfgTypes.id
+			) ?? null;
+		identifierKeys.set(config, key);
+	}
+	if (key === null) return undefined;
 	const id = (snapshot as Record<string, unknown>)[key];
 	return typeof id === "string" || typeof id === "number"
 		? { config, key, id }
@@ -335,7 +347,9 @@ function getIdentifiedChildDiff(
 ): object {
 	// Even an unchanged child needs its identifier: the containing array
 	// describes membership/order, and hydration must reuse the correct Model.
-	return { ...getDiff(previous, next, getConfig), [identity.key]: identity.id };
+	return previous === next
+		? { [identity.key]: identity.id }
+		: { ...getDiff(previous, next, getConfig), [identity.key]: identity.id };
 }
 
 function getChildDiff(
@@ -344,25 +358,45 @@ function getChildDiff(
 	getConfig: SnapshotConfigLookup
 ): unknown {
 	if (Array.isArray(previous) && Array.isArray(next)) {
-		const previousByConfig = new Map<
-			ModelConfiguration<unknown>,
-			Map<IdType, object>
-		>();
-		for (const snapshot of previous) {
+		let previousByConfig:
+			| Map<ModelConfiguration<unknown>, Map<IdType, object>>
+			| undefined;
+		return next.map((snapshot: object, index: number) => {
 			const identity = getSnapshotIdentity(snapshot, getConfig);
-			if (!identity) continue;
-			let byId = previousByConfig.get(identity.config);
-			if (!byId) {
-				byId = new Map();
-				previousByConfig.set(identity.config, byId);
+			if (!identity) return snapshot;
+			const positional = previous[index];
+			if (positional === snapshot) return { [identity.key]: identity.id };
+
+			if (!previousByConfig) {
+				// Position is only a shortcut when identity agrees. Ordinary edits
+				// need no index; structural changes build one, then reuse it.
+				const positionalIdentity =
+					positional && getSnapshotIdentity(positional, getConfig);
+				if (
+					positionalIdentity?.config === identity.config &&
+					positionalIdentity.id === identity.id
+				) {
+					return getIdentifiedChildDiff(
+						positional,
+						snapshot,
+						identity,
+						getConfig
+					);
+				}
+				previousByConfig = new Map();
+				for (const oldSnapshot of previous) {
+					const oldIdentity = getSnapshotIdentity(oldSnapshot, getConfig);
+					if (!oldIdentity) continue;
+					let byId = previousByConfig.get(oldIdentity.config);
+					if (!byId) {
+						byId = new Map();
+						previousByConfig.set(oldIdentity.config, byId);
+					}
+					byId.set(oldIdentity.id, oldSnapshot);
+				}
 			}
-			byId.set(identity.id, snapshot);
-		}
-		return next.map((snapshot: object) => {
-			const identity = getSnapshotIdentity(snapshot, getConfig);
-			const match =
-				identity && previousByConfig.get(identity.config)?.get(identity.id);
-			return match && identity
+			const match = previousByConfig.get(identity.config)?.get(identity.id);
+			return match
 				? getIdentifiedChildDiff(match, snapshot, identity, getConfig)
 				: snapshot;
 		});
