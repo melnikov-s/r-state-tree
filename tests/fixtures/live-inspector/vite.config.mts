@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
-import { rStateTreeInspector } from "../../../src/devtools-vite";
+import { rStateTreeInspector } from "../../../devtools/src/devtools-vite";
 export default defineConfig({
 	root: fileURLToPath(new URL(".", import.meta.url)),
 	cacheDir: fileURLToPath(

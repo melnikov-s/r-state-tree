@@ -1,7 +1,7 @@
 {
 	"extends": "@tsmetadata/polyfill/lib/tsconfig.polyfill.json",
 	"compilerOptions": {
-		"rootDir": "src",
+		"rootDir": ".",
 		"target": "es2022",
 		"alwaysStrict": true,
 		"sourceMap": false,
@@ -22,6 +22,6 @@
 		"moduleResolution": "Bundler",
 		"skipLibCheck": true
 	},
-	"include": ["src/**/*"],
+	"include": ["src/**/*", "devtools/src/**/*"],
 	"exclude": ["node_modules"]
 }

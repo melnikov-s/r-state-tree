@@ -4,18 +4,18 @@ import {
 	relayRequest,
 	proof,
 	type BrowserPeer,
-} from "../src/inspection/relay";
+} from "../devtools/src/inspection/relay";
 import { randomBytes } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
 	createInspectorMcpServer,
 	readRelayRecord,
-} from "../src/inspection/mcp";
+} from "../devtools/src/inspection/mcp";
 import { mkdtemp, writeFile, chmod, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInspector } from "../src/inspection/runtime";
+import { createInspector } from "../devtools/src/inspection/runtime";
 import { Store, createStore, mount } from "../src/index";
 
 async function setup(timeoutMs = 100) {

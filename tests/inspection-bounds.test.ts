@@ -7,7 +7,7 @@ import {
 	Observable,
 	computed,
 } from "../src/index";
-import { createInspector } from "../src/devtools";
+import { createInspector } from "../devtools/src/devtools";
 
 test("recursive child materialization and wide realized lists are bounded", () => {
 	class Node extends Store {

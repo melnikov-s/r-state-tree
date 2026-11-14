@@ -1,5 +1,5 @@
 import { createServer } from "vite";
-import { rStateTreeInspector } from "../src/devtools-vite";
+import { rStateTreeInspector } from "../devtools/src/devtools-vite";
 
 test("credentials may not be placed in Vite's public directory", async () => {
 	await expect(

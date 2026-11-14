@@ -1,8 +1,8 @@
 import { createServer, build } from "vite";
 import { fileURLToPath } from "node:url";
-import { rStateTreeInspector } from "../src/devtools-vite";
-import { readRelayRecord } from "../src/inspection/mcp";
-import { relayRequest } from "../src/inspection/relay";
+import { rStateTreeInspector } from "../devtools/src/devtools-vite";
+import { readRelayRecord } from "../devtools/src/inspection/mcp";
+import { relayRequest } from "../devtools/src/inspection/relay";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -12,14 +12,14 @@ import {
 	mount,
 	source,
 } from "../src/index";
-import { createInspector } from "../src/inspection/runtime";
-import { rStateTreeInspector } from "../src/devtools-vite";
-import { transformInspectionSignatures } from "../src/inspection/signature-transform";
+import { createInspector } from "../devtools/src/inspection/runtime";
+import { rStateTreeInspector } from "../devtools/src/devtools-vite";
+import { transformInspectionSignatures } from "../devtools/src/inspection/signature-transform";
 import {
 	INSPECTION_SIGNATURES,
 	INSPECTION_SIGNATURES_KEY,
 	lookupInspectionMethod,
-} from "../src/inspection/signatures";
+} from "../devtools/src/inspection/signatures";
 
 function execute(source: string, id = "fixture.ts") {
 	const transformed = transformInspectionSignatures(source, id);
@@ -633,7 +633,7 @@ test("concrete Store/Model/Observable class labels use data descriptors, never c
 
 test("core and browser inspector bundles never import the Node signature parser", () => {
 	const result = buildSync({
-		entryPoints: ["src/index.ts", "src/devtools.ts"],
+		entryPoints: ["src/index.ts", "devtools/src/devtools.ts"],
 		bundle: true,
 		write: false,
 		metafile: true,
@@ -642,7 +642,7 @@ test("core and browser inspector bundles never import the Node signature parser"
 		logLevel: "silent",
 	});
 	const inputs = Object.keys(result.metafile!.inputs);
-	expect(inputs).toContain("src/inspection/signatures.ts");
+	expect(inputs).toContain("devtools/src/inspection/signatures.ts");
 	expect(
 		inputs.some((path) =>
 			/signature-transform|node_modules\/(?:vite|typescript|esbuild|rolldown)\//.test(

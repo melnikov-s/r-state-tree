@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createInspector, mountInspectorPanel } from "../src/devtools";
+import { createInspector, mountInspectorPanel } from "../devtools/src/devtools";
 import { Store, mount, createStore } from "../src/index";
 
 test("Operations shows automatic calls and inline before/after values grouped by batch", () => {

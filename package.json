@@ -26,29 +26,29 @@
 	],
 	"main": "dist/r-state-tree.cjs",
 	"module": "dist/r-state-tree.js",
-	"types": "dist/index.d.ts",
+	"types": "dist/src/index.d.ts",
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
+			"types": "./dist/src/index.d.ts",
 			"import": "./dist/r-state-tree.js",
 			"require": "./dist/r-state-tree.cjs"
 		},
 		"./lint": "./lint/index.mjs",
 		"./devtools": {
-			"types": "./dist/devtools.d.ts",
+			"types": "./dist/devtools/src/devtools.d.ts",
 			"import": "./dist/devtools.js",
 			"require": "./dist/devtools.cjs"
 		},
 		"./devtools/vite/client": {
-			"types": "./dist/devtools-vite-client.d.ts"
+			"types": "./dist/devtools/src/devtools-vite-client.d.ts"
 		},
 		"./devtools/vite": {
-			"types": "./dist/devtools-vite.d.ts",
+			"types": "./dist/devtools/src/devtools-vite.d.ts",
 			"import": "./dist/devtools-vite.js",
 			"require": "./dist/devtools-vite.cjs"
 		},
 		"./react": {
-			"types": "./dist/react.d.ts",
+			"types": "./dist/src/react.d.ts",
 			"import": "./dist/react.js",
 			"require": "./dist/react.cjs"
 		}
@@ -63,10 +63,10 @@
 		"test:types": "tsc --noEmit -p tests/tsconfig.json",
 		"build": "vite build && pnpm run build:types",
 		"build:types": "tsc --emitDeclarationOnly",
-		"lint": "oxlint --type-aware src tests benchmarks scripts && pnpm run lint:fixtures && pnpm run format:check",
+		"lint": "oxlint --type-aware src devtools/src tests benchmarks scripts && pnpm run lint:fixtures && pnpm run format:check",
 		"lint:fixtures": "node scripts/lint-fixtures.mjs",
-		"format": "oxfmt --write src tests benchmarks scripts *.mts",
-		"format:check": "oxfmt --check src tests benchmarks scripts *.mts",
+		"format": "oxfmt --write src devtools/src tests benchmarks scripts *.mts",
+		"format:check": "oxfmt --check src devtools/src tests benchmarks scripts *.mts",
 		"prepublishOnly": "pnpm run build"
 	},
 	"dependencies": {

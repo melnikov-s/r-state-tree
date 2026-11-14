@@ -1,5 +1,8 @@
-import { createOperationTimeline, createInspector } from "../src/devtools";
-import { validateRequest } from "../src/inspection/protocol";
+import {
+	createOperationTimeline,
+	createInspector,
+} from "../devtools/src/devtools";
+import { validateRequest } from "../devtools/src/inspection/protocol";
 import { runInNewContext } from "node:vm";
 
 afterEach(() => vi.useRealTimers());

@@ -22,6 +22,12 @@ Available Context lists provider names/types, whether each is provided here, inh
 
 Names/declarations come from the dev-only Vite transform: named r-state-tree `createContext` calls, `[NamedContext.provide]` methods, and statically resolvable direct consumption. Discovery follows real Store ownership, not React ancestry or arbitrary props. It is best-effort, not an exhaustive global registry or read trace: helper-only default Contexts, dependency modules, unsupported expressions, and unavailable metadata may not be discoverable. Models do not inherit Store Context. No core Context/Store/Model hooks or extra consumer annotations are needed.
 
+## Repository source layout
+
+Core library code and the React integration live in `src/`. Inspector runtime, panel/diagrams, Vite relay and transforms, virtual client types, and MCP implementation and entry points live in `devtools/src/`. Devtools may import core internals; core must not import devtools. The disabled debug-event hooks remain in core so opt-in activity recording can subscribe without reversing that dependency.
+
+This is one npm package, not a separate devtools package. Public imports remain `r-state-tree/devtools`, `r-state-tree/devtools/vite`, and `r-state-tree/devtools/vite/client`; the CLI remains `r-state-tree-inspector`. JavaScript entry filenames stay at the `dist/` root. TypeScript emits declarations under `dist/src/` and `dist/devtools/src/`, preserving relative references between the two source trees; the package's type export conditions point to those declarations. Run `pnpm build`, `pnpm test`, `pnpm lint`, and `pnpm test:inspector:e2e` from the repository root.
+
 ## Add to a Vite app
 
 The package exposes `r-state-tree/devtools`, `r-state-tree/devtools/vite`, and the `r-state-tree-inspector` stdio executable. Node-only dependencies never enter the browser entry point. Use a current Node supported by Vite 8 (22.12+ or 24+); the integration is tested with Vite 8.

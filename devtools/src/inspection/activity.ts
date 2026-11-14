@@ -1,6 +1,9 @@
-import { subscribeDebug, type DebugEvent } from "../observables/internal/debug";
-import { untracked } from "../observables/preact";
-import { getSource } from "../observables/internal/lookup";
+import {
+	subscribeDebug,
+	type DebugEvent,
+} from "../../../src/observables/internal/debug";
+import { untracked } from "../../../src/observables/preact";
+import { getSource } from "../../../src/observables/internal/lookup";
 import type { OperationRecord } from "./operations";
 
 export type ActivityOptions = {

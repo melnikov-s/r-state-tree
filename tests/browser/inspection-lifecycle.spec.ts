@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { createServer } from "vite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { rStateTreeInspector } from "../../src/devtools-vite";
+import { rStateTreeInspector } from "../../devtools/src/devtools-vite";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";

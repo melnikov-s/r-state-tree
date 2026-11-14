@@ -4,7 +4,7 @@ import {
 	mountStateDiagram,
 	type DiagramData,
 	type DiagramNode,
-} from "../src/inspection/diagram";
+} from "../devtools/src/inspection/diagram";
 
 const node = (id: string): DiagramNode => ({ id, name: id, kind: "Store" });
 const ownership = (from: string, to: string) => ({

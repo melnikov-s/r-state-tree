@@ -1,4 +1,4 @@
-import { createInspector } from "../src/devtools";
+import { createInspector } from "../devtools/src/devtools";
 import { runInNewContext } from "node:vm";
 import {
 	Store,

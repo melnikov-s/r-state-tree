@@ -16,17 +16,17 @@ import { getStoreAdm } from "../src/store/StoreAdministration";
 import {
 	createInspector,
 	type InspectorOptions,
-} from "../src/inspection/runtime";
-import { transformInspectionContexts } from "../src/inspection/context-transform";
-import { transformInspectionSignatures } from "../src/inspection/signature-transform";
+} from "../devtools/src/inspection/runtime";
+import { transformInspectionContexts } from "../devtools/src/inspection/context-transform";
+import { transformInspectionSignatures } from "../devtools/src/inspection/signature-transform";
 import {
 	INSPECTION_CONTEXT,
 	INSPECTION_CONTEXTS,
 	INSPECTION_CONTEXT_KEY,
 	contextMetadata,
-} from "../src/inspection/contexts";
-import { rStateTreeInspector } from "../src/devtools-vite";
-import { validateRequest } from "../src/inspection/protocol";
+} from "../devtools/src/inspection/contexts";
+import { rStateTreeInspector } from "../devtools/src/devtools-vite";
+import { validateRequest } from "../devtools/src/inspection/protocol";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -604,7 +604,7 @@ test("factory extraction requires proven package/source imports and respects lex
 
 test("browser bundles exclude Node Context extraction; actual Vite builds omit Context instrumentation", async () => {
 	const browser = buildSync({
-		entryPoints: ["src/index.ts", "src/devtools.ts"],
+		entryPoints: ["src/index.ts", "devtools/src/devtools.ts"],
 		bundle: true,
 		write: false,
 		metafile: true,

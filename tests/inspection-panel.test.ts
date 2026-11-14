@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { createInspector, mountInspectorPanel } from "../src/devtools";
-import type { Inspector, InspectionValue } from "../src/inspection/runtime";
-import type { InspectionRequest } from "../src/inspection/protocol";
+import { createInspector, mountInspectorPanel } from "../devtools/src/devtools";
+import type {
+	Inspector,
+	InspectionValue,
+} from "../devtools/src/inspection/runtime";
+import type { InspectionRequest } from "../devtools/src/inspection/protocol";
 import {
 	Model,
 	Store,
@@ -11,7 +14,7 @@ import {
 	mount,
 } from "../src/index";
 import { getStoreAdm } from "../src/store/StoreAdministration";
-import { INSPECTION_SIGNATURES } from "../src/inspection/signatures";
+import { INSPECTION_SIGNATURES } from "../devtools/src/inspection/signatures";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {

@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
-import { parameterInput, readArguments } from "../src/inspection/panel-inputs";
-import type { InspectionParameter } from "../src/inspection/signatures";
+import {
+	parameterInput,
+	readArguments,
+} from "../devtools/src/inspection/panel-inputs";
+import type { InspectionParameter } from "../devtools/src/inspection/signatures";
 
 function inputs(parameters: InspectionParameter[]) {
 	return parameters.map((parameter) => parameterInput(parameter));

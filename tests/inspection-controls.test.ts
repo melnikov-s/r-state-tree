@@ -1,8 +1,8 @@
 import {
 	createInspector,
 	type InspectorOptions,
-} from "../src/inspection/runtime";
-import { validateRequest } from "../src/inspection/protocol";
+} from "../devtools/src/inspection/runtime";
+import { validateRequest } from "../devtools/src/inspection/protocol";
 import {
 	Store,
 	Model,

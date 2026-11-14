@@ -6,5 +6,5 @@
 		"lib": ["es2022", "esnext", "dom"],
 		"types": ["vitest/globals", "node"]
 	},
-	"include": ["src/**/*", "tests/**/*"]
+	"include": ["src/**/*", "devtools/src/**/*", "tests/**/*"]
 }

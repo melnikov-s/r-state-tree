@@ -4,17 +4,17 @@ import {
 	type ActivityLocation,
 	type ActivityOptions,
 } from "./activity";
-import Store from "../store/Store";
-import Model from "../model/Model";
-import { StoreAdministration } from "../store/StoreAdministration";
-import { ModelAdministration } from "../model/ModelAdministration";
+import Store from "../../../src/store/Store";
+import Model from "../../../src/model/Model";
+import { StoreAdministration } from "../../../src/store/StoreAdministration";
+import { ModelAdministration } from "../../../src/model/ModelAdministration";
 import {
 	getAdministration,
 	getSource,
 	Observable,
-} from "../observables/internal/lookup";
-import { PreactObjectAdministration } from "../observables/preact";
-import { untracked } from "../observables";
+} from "../../../src/observables/internal/lookup";
+import { PreactObjectAdministration } from "../../../src/observables/preact";
+import { untracked } from "../../../src/observables";
 import { lookupInspectionMethod, type InspectionMethod } from "./signatures";
 import {
 	contextData,

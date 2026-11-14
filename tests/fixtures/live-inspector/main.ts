@@ -12,7 +12,7 @@ import {
 	createInspector,
 	connectViteInspector,
 	mountInspectorPanel,
-} from "../../../src/devtools";
+} from "../../../devtools/src/devtools";
 import { token } from "virtual:r-state-tree-inspector";
 
 let mounts = 0;

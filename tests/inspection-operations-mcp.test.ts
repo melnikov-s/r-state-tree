@@ -1,10 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createInspectorMcpServer } from "../src/inspection/mcp";
-import { relayRequest } from "../src/inspection/relay";
-import type { RelayRecord } from "../src/inspection/relay";
+import { createInspectorMcpServer } from "../devtools/src/inspection/mcp";
+import { relayRequest } from "../devtools/src/inspection/relay";
+import type { RelayRecord } from "../devtools/src/inspection/relay";
 
-vi.mock("../src/inspection/relay", () => ({ relayRequest: vi.fn() }));
+vi.mock("../devtools/src/inspection/relay", () => ({ relayRequest: vi.fn() }));
 
 test("MCP advertises and explicitly requests structured operation records without control capabilities", async () => {
 	const server = createInspectorMcpServer(async () => ({}) as RelayRecord);

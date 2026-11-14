@@ -1,11 +1,11 @@
 import {
 	buildInspectorGraph,
 	type GraphAddress,
-} from "../src/inspection/graph-data";
+} from "../devtools/src/inspection/graph-data";
 import {
 	createInspector,
 	type InspectionValue,
-} from "../src/inspection/runtime";
+} from "../devtools/src/inspection/runtime";
 import { Store, child, createStore, mount } from "../src/index";
 import { getStoreAdm } from "../src/store/StoreAdministration";
 

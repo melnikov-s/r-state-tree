@@ -3,7 +3,7 @@ import {
 	createInspector,
 	createOperationTimeline,
 	mountInspectorPanel,
-} from "../src/devtools";
+} from "../devtools/src/devtools";
 import { Store, createStore, mount } from "../src/index";
 
 test("Operations view shows safe text, manual updates, gated clear and preserves state views", () => {

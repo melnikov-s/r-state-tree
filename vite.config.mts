@@ -12,9 +12,9 @@ export default defineConfig({
 			entry: {
 				index: resolve(rootDir, "src/index.ts"),
 				react: resolve(rootDir, "src/react.ts"),
-				devtools: resolve(rootDir, "src/devtools.ts"),
-				"devtools-vite": resolve(rootDir, "src/devtools-vite.ts"),
-				"devtools-mcp": resolve(rootDir, "src/devtools-mcp.ts"),
+				devtools: resolve(rootDir, "devtools/src/devtools.ts"),
+				"devtools-vite": resolve(rootDir, "devtools/src/devtools-vite.ts"),
+				"devtools-mcp": resolve(rootDir, "devtools/src/devtools-mcp.ts"),
 			},
 			name: "RStateTree",
 			formats: ["es", "cjs"],

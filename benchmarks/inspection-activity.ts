@@ -10,7 +10,7 @@ const baseline = process.env.ACTIVITY_BASELINE;
 const root = process.cwd();
 const source = `
 import { Store, createStore, mount, observable, batch } from ${JSON.stringify(resolve("src/index.ts"))};
-import { createInspector } from ${JSON.stringify(resolve("src/devtools.ts"))};
+import { createInspector } from ${JSON.stringify(resolve("devtools/src/devtools.ts"))};
 class Counter extends Store {
  count = 0;
  list = observable([]);

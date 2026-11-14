@@ -3,7 +3,7 @@ import {
 	createInspector,
 	mountInspectorPanel,
 	type InspectorPanelOptions,
-} from "../src/devtools";
+} from "../devtools/src/devtools";
 import { Store, createStore, mount } from "../src/index";
 
 const cleanups: (() => void)[] = [];

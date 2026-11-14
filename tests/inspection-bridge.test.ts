@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
-import { connectViteInspector, type InspectorHot } from "../src/devtools";
-import type { Inspector } from "../src/inspection/runtime";
-import { CHANNEL } from "../src/inspection/protocol";
+import {
+	connectViteInspector,
+	type InspectorHot,
+} from "../devtools/src/devtools";
+import type { Inspector } from "../devtools/src/inspection/runtime";
+import { CHANNEL } from "../devtools/src/inspection/protocol";
 
 test("in-page bridge validates capabilities and targets, bounds Unicode bytes, reconnects and disposes without a panel", () => {
 	const handlers = new Map<string, (value: unknown) => void>();
