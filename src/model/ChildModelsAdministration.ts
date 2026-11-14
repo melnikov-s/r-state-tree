@@ -1,4 +1,5 @@
 import { ArrayAdministration, getSource, batch } from "../observables";
+import { getAdministration } from "../observables/internal/lookup";
 
 const listenerMap: WeakMap<object, ObservableListener<unknown>> = new WeakMap();
 
@@ -113,7 +114,33 @@ class ObservableListener<T> {
 }
 
 export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
+	static methods = Object.assign({}, ArrayAdministration.methods, {
+		fill(): never {
+			throw new TypeError(
+				"r-state-tree: child arrays do not support fill(); use indexed assignment or splice()"
+			);
+		},
+		copyWithin(): never {
+			throw new TypeError(
+				"r-state-tree: child arrays do not support copyWithin(); use splice()"
+			);
+		},
+	});
+
+	setArrayLength(): never {
+		throw new TypeError(
+			"r-state-tree: child array length is read-only; use splice() to remove children"
+		);
+	}
+
 	set(index: number, newValue: T): boolean {
+		if (index > this.source.length)
+			throw new RangeError("r-state-tree: child arrays cannot contain holes");
+		newValue = (getAdministration(newValue as object)?.proxy as T) ?? newValue;
+		if (index === this.source.length) {
+			this.spliceWithArray(index, 0, [newValue]);
+			return true;
+		}
 		return batch(() => {
 			const oldValue = this.source[index];
 			const result = super.set(index, newValue);
@@ -123,7 +150,10 @@ export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 				try {
 					notifyArrayUpdate(this.proxy, index, oldValue, sourceValue);
 				} catch (error) {
-					super.set(index, oldValue);
+					super.set(
+						index,
+						(getAdministration(oldValue as object)?.proxy as T) ?? oldValue
+					);
 					throw error;
 				}
 			}
@@ -136,9 +166,19 @@ export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 		deleteCount?: number | undefined,
 		newItems?: T[] | undefined
 	): T[] {
+		const argumentCount = arguments.length;
 		return batch(() => {
-			const deleted = super.spliceWithArray(index, deleteCount, newItems);
-			if (deleteCount || newItems?.length) {
+			// Keep the normalized index for rollback after a length-changing splice.
+			const start = Math.trunc(+index) || 0;
+			index =
+				start < 0
+					? Math.max(this.source.length + start, 0)
+					: Math.min(start, this.source.length);
+			const deleted =
+				argumentCount === 1
+					? super.spliceWithArray(index)
+					: super.spliceWithArray(index, deleteCount, newItems);
+			if (deleted.length || newItems?.length) {
 				try {
 					notifySpliceArray(this.proxy, index, newItems ?? [], deleted);
 				} catch (error) {
