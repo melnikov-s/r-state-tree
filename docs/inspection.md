@@ -8,8 +8,8 @@ The extension and MCP share a bounded **live runtime** protocol. MCP works with 
 
 The UI currently supports **Chromium Manifest V3** (Chrome/Chromium). It is an unpacked extension, not a signed store release. Firefox and Safari extension UIs are not implemented. MCP is exercised on Chromium, Firefox, and WebKit and does not require any extension. Electron renderer MCP uses the renderer's Vite setup; installing the extension in Electron is not implemented or verified.
 
-1. Obtain this repository and open `chrome://extensions` in Chrome/Chromium.
-2. Enable Developer mode, choose **Load unpacked**, and select the absolute `devtools/extension` directory in the checkout.
+1. Install `r-state-tree` or obtain this repository, then open `chrome://extensions` in Chrome/Chromium.
+2. Enable Developer mode, choose **Load unpacked**, and select the absolute `node_modules/r-state-tree/devtools/extension` directory from the installed package, or `devtools/extension` in the checkout.
 3. Start the development app configured below and reload its page after installing the extension.
 4. Open browser DevTools and choose **RStateTree** (it may be under the overflow menu). Select an instance, then a registered Store or Model root.
 

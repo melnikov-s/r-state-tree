@@ -57,6 +57,8 @@ test("the public browser entry has no UI mount or UI implementation dependency",
 
 test("MV3 extension is a separate static DevTools-only UI with loopback content access, not arbitrary browser automation", () => {
 	const directory = "devtools/extension";
+	const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+	expect(pkg.files).toContain(directory);
 	const manifest = JSON.parse(
 		readFileSync(join(directory, "manifest.json"), "utf8")
 	);
