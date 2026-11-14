@@ -911,71 +911,9 @@ export class StoreAdministration<
 			throw new Error("r-state-tree: can only dispose root stores");
 		}
 		this.disposalState = "disposing";
-		const errors: unknown[] = [];
+		let errors: unknown[];
 		try {
-			try {
-				this.abortController.abort();
-			} catch (error) {
-				errors.push(error);
-			}
-			try {
-				batch(() => {
-					this.childStoreDataMap.forEach(({ value, computed, listener }) => {
-						try {
-							listener.dispose();
-						} catch (error) {
-							errors.push(error);
-						}
-						try {
-							const stores = value.get();
-							const children = Array.isArray(stores)
-								? stores
-								: stores
-									? [stores]
-									: [];
-							for (const store of children) {
-								try {
-									getStoreAdm(store).dispose(true);
-								} catch (error) {
-									errors.push(error);
-								}
-							}
-						} catch (error) {
-							errors.push(error);
-						}
-						try {
-							computed.clear();
-						} catch (error) {
-							errors.push(error);
-						}
-					});
-					this.contextCache.forEach((computed) => {
-						try {
-							computed.clear();
-						} catch (error) {
-							errors.push(error);
-						}
-					});
-					try {
-						this.computedSnapshot?.clear();
-					} catch (error) {
-						errors.push(error);
-					}
-					this.reactiveRegistrations.forEach((registration) => {
-						registration.disposed = true;
-						const stop = registration.stop;
-						registration.stop = undefined;
-						try {
-							stop?.();
-						} catch (error) {
-							errors.push(error);
-						}
-					});
-				});
-			} catch (error) {
-				// Reactions flushed at the end of the batch may also throw.
-				errors.push(error);
-			}
+			errors = this.disposeResources();
 		} finally {
 			this.childStoreDataMap.clear();
 			this.contextCache.clear();
@@ -989,5 +927,73 @@ export class StoreAdministration<
 		if (errors.length) {
 			throw new AggregateError(errors, "r-state-tree: store disposal failed");
 		}
+	}
+
+	private disposeResources(): unknown[] {
+		const errors: unknown[] = [];
+		try {
+			this.abortController.abort();
+		} catch (error) {
+			errors.push(error);
+		}
+		try {
+			batch(() => {
+				this.childStoreDataMap.forEach(({ value, computed, listener }) => {
+					try {
+						listener.dispose();
+					} catch (error) {
+						errors.push(error);
+					}
+					try {
+						const stores = value.get();
+						const children = Array.isArray(stores)
+							? stores
+							: stores
+								? [stores]
+								: [];
+						for (const store of children) {
+							try {
+								getStoreAdm(store).dispose(true);
+							} catch (error) {
+								errors.push(error);
+							}
+						}
+					} catch (error) {
+						errors.push(error);
+					}
+					try {
+						computed.clear();
+					} catch (error) {
+						errors.push(error);
+					}
+				});
+				this.contextCache.forEach((computed) => {
+					try {
+						computed.clear();
+					} catch (error) {
+						errors.push(error);
+					}
+				});
+				try {
+					this.computedSnapshot?.clear();
+				} catch (error) {
+					errors.push(error);
+				}
+				this.reactiveRegistrations.forEach((registration) => {
+					registration.disposed = true;
+					const stop = registration.stop;
+					registration.stop = undefined;
+					try {
+						stop?.();
+					} catch (error) {
+						errors.push(error);
+					}
+				});
+			});
+		} catch (error) {
+			// Reactions flushed at the end of the batch may also throw.
+			errors.push(error);
+		}
+		return errors;
 	}
 }
