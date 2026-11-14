@@ -92,6 +92,41 @@ export function getModelById<T extends Model>(
 	return ids.get(id) as T | undefined;
 }
 
+/** Validate only the changed subtrees, allowing identifiers released by removals. */
+export function validateModelAttachments(
+	parent: Model,
+	added: Model[],
+	removed: Model[]
+): void {
+	const released = new Set(
+		removed.flatMap(entriesFor).map(([, , model]) => model)
+	);
+	const incoming: TypeMap = new Map();
+	for (const model of added) {
+		for (const [Type, id, value] of entriesFor(model)) {
+			const duplicate = incoming.get(Type)?.get(id);
+			if (duplicate && duplicate !== value) {
+				throw new Error(
+					`r-state-tree: id: ${id} is already assigned to another model`
+				);
+			}
+			let node: Model | null = parent;
+			while (node) {
+				const existing = attachedIdMap.get(node)?.get(Type)?.get(id);
+				if (existing && existing !== value && !released.has(existing)) {
+					throw new Error(
+						`r-state-tree: id: ${id} is already assigned to another model`
+					);
+				}
+				node = node.parent;
+			}
+			let ids = incoming.get(Type);
+			if (!ids) incoming.set(Type, (ids = new Map()));
+			ids.set(id, value);
+		}
+	}
+}
+
 export function onModelAttached(model: Model): void {
 	const entries = entriesFor(model);
 	if (!entries.length) return;

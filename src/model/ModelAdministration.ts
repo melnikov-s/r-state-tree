@@ -25,6 +25,7 @@ import {
 	getModelById,
 	onModelAttached,
 	onModelDetached,
+	validateModelAttachments,
 	setIdentifier,
 } from "./idMap.js";
 import { clone, hydrateSnapshotValue } from "../utils.js";
@@ -33,11 +34,7 @@ import {
 	getConfigType,
 	getConfigurationForCtor,
 } from "../configuration.js";
-import {
-	ChildModelsAdministration,
-	observe,
-} from "./ChildModelsAdministration.js";
-import type { MutationEvent } from "./ChildModelsAdministration.js";
+import { ChildModelsAdministration } from "./ChildModelsAdministration.js";
 
 const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
@@ -373,92 +370,83 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		}
 	}
 
+	private changeModels(
+		name: PropertyKey,
+		added: Model[],
+		removed: Model[],
+		commit: () => void
+	): void {
+		this.assertUsable();
+		const removedSet = new Set(removed.map((model) => getModelAdm(model)));
+		const addedSet = new Set(added.map((model) => getModelAdm(model)));
+		for (const adm of addedSet) {
+			adm.assertUsable();
+			let ancestor: ModelAdministration | null = this;
+			while (ancestor) {
+				if (ancestor === adm)
+					throw new Error("r-state-tree: cannot attach an ancestor as a child");
+				ancestor = ancestor.parent;
+			}
+			if (
+				adm.parent &&
+				!(removedSet.has(adm) && adm.parent === this && adm.parentName === name)
+			) {
+				throw new Error(
+					"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
+				);
+			}
+		}
+		const detaching = [...removedSet].filter((adm) => !addedSet.has(adm));
+		const attaching = [...addedSet].filter((adm) => !removedSet.has(adm));
+		validateModelAttachments(
+			this.proxy,
+			attaching.map((adm) => adm.proxy),
+			detaching.map((adm) => adm.proxy)
+		);
+		commit();
+		for (const adm of detaching) adm.detach();
+		for (const adm of attaching) adm.attach(this, name);
+	}
+
 	private setModels(name: PropertyKey, newModelsSource: Model[]): void {
 		validateModelChildValue(newModelsSource, name);
+		const currentValue = this.proxy[name];
+		if (currentValue === newModelsSource) return;
+		if (Array.isArray(currentValue)) {
+			(
+				getAdministration(currentValue) as ChildModelsAdministration<Model>
+			).assertMutable();
+		}
 		const newModels = createObservableWithCustomAdministration(
 			[] as Model[],
 			ChildModelsAdministration
 		);
-
 		newModels.push(...newModelsSource);
+		const adm = getAdministration(
+			newModels
+		) as ChildModelsAdministration<Model>;
+		const removed = Array.isArray(currentValue)
+			? Array.from(currentValue as Model[])
+			: currentValue
+				? [currentValue as Model]
+				: [];
 
-		const currentValue = this.proxy[name];
-
-		if (currentValue === newModels) {
-			return;
-		}
-
-		this.activeModels.add(name);
-
-		// Handle switching from single to array: clean up the single model first
-		if (currentValue && !Array.isArray(currentValue)) {
-			getModelAdm(currentValue).detach();
-		} else if (Array.isArray(currentValue)) {
-			// Handle normal array replacement
-			const oldModels = currentValue as Model[];
-			// Use getSource to normalize comparison - currentValue may contain proxies
-			const newModelSet = new Set(newModels.map((m) => getSource(m)));
-
-			oldModels.forEach(
-				(child) =>
-					newModelSet.has(getSource(child)) || getModelAdm(child).detach()
-			);
-
-			// unsub from old model trace
+		batch(() => {
+			this.changeModels(name, Array.from(newModels), removed, () => {
+				PreactObjectAdministration.proxyTraps.set!(
+					this.source,
+					name as string,
+					newModels,
+					this.proxy
+				);
+			});
+			this.activeModels.add(name);
 			this.modelsTraceUnsub.get(name)?.();
-		}
-
-		// set the model on the observable proxy
-		PreactObjectAdministration.proxyTraps.set!(
-			this.source,
-			name as string,
-			newModels,
-			this.proxy
-		);
-
-		// Observe ownership changes so models attach and detach with the collection.
-		// on the observable proxy.
-		this.modelsTraceUnsub.set(
-			name,
-			observe(this.proxy[name], (event: MutationEvent<Model>) => {
-				if (event.type === "updateArray") {
-					const oldAdm = getModelAdm(event.oldValue);
-					const newAdm = getModelAdm(event.newValue);
-					oldAdm.detach();
-					try {
-						newAdm.attach(this, name);
-					} catch (error) {
-						oldAdm.attach(this, name);
-						throw error;
-					}
-				} else if (event.type === "spliceArray") {
-					const attached: Model[] = [];
-					event.removed.forEach((model) => getModelAdm(model).detach());
-					try {
-						event.added.forEach((model) => {
-							getModelAdm(model).attach(this, name);
-							attached.push(model);
-						});
-					} catch (error) {
-						attached.forEach((model) => getModelAdm(model).detach());
-						event.removed.forEach((model) =>
-							getModelAdm(model).attach(this, name)
-						);
-						throw error;
-					}
-				}
-			})
-		);
-
-		const oldModelSet = Array.isArray(currentValue)
-			? new Set((currentValue as Model[]).map((m) => getSource(m)))
-			: new Set();
-
-		newModels.forEach((child) => {
-			if (!oldModelSet.has(getSource(child))) {
-				const internalModel = getModelAdm(child);
-				internalModel.attach(this, name);
-			}
+			adm.change = (added, removed, commit) =>
+				this.changeModels(name, added, removed, commit);
+			this.modelsTraceUnsub.set(name, () => {
+				adm.change = undefined;
+			});
 		});
 	}
 

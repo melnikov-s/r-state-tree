@@ -1,119 +1,57 @@
 import { ArrayAdministration, getSource, batch } from "../observables/index.js";
 import { getAdministration } from "../observables/internal/lookup.js";
+import Model from "./Model.js";
 
-const listenerMap: WeakMap<object, ObservableListener<unknown>> = new WeakMap();
-
-export function notifyArrayUpdate<T>(
-	arr: T[],
-	index: number,
-	oldValue: T,
-	newValue: T
-): void {
-	listenerMap.get(arr)?.notify({
-		object: arr,
-		type: "updateArray",
-		index,
-		oldValue,
-		newValue,
-	});
+function isIndex(name: PropertyKey): boolean {
+	if (typeof name !== "string") return false;
+	const index = Number(name);
+	return (
+		Number.isInteger(index) &&
+		index >= 0 &&
+		index < 2 ** 32 - 1 &&
+		String(index) === name
+	);
 }
 
-export function notifySpliceArray<T>(
-	arr: T[],
-	index: number,
-	added: T[],
-	removed: T[]
-): void {
-	listenerMap.get(arr)?.notify({
-		object: arr,
-		type: "spliceArray",
-		index,
-		added,
-		removed,
-	});
-}
+export class ChildModelsAdministration<
+	T extends Model,
+> extends ArrayAdministration<T> {
+	private members = new Set<T>();
+	private mutating = false;
+	// The owner validates before commit, then publishes ownership in the same batch.
+	change?: (added: T[], removed: T[], commit: () => void) => void;
 
-export function observe<T>(
-	obj: object,
-	method: MutationListener<T>
-): () => void {
-	let listener = listenerMap.get(obj) as ObservableListener<unknown>;
-
-	if (!listener) {
-		listener = new ObservableListener<unknown>();
-		listenerMap.set(obj, listener);
-	}
-
-	return listener.subscribe(method as MutationListener<unknown>);
-}
-
-export type UpdateArrayEvent<T> = {
-	object: T[];
-	type: "updateArray";
-	index: number;
-	oldValue: T;
-	newValue: T;
-};
-
-export type SpliceArrayEvent<T> = {
-	object: T[];
-	type: "spliceArray";
-	index: number;
-	added: T[];
-	removed: T[];
-};
-
-export type MutationEvent<T> = UpdateArrayEvent<T> | SpliceArrayEvent<T>;
-
-export type MutationListener<T> = (ev: MutationEvent<T>) => void;
-export type HasListener<T> = {
-	listener: ObservableListener<T>;
-};
-
-class ObservableListener<T> {
-	private listeners: MutationListener<T>[] | undefined;
-	private notifying: boolean = false;
-
-	subscribe(l: MutationListener<T>): () => void {
-		let unsubed = false;
-
-		this.listeners = this.listeners || [];
-
-		this.listeners.push(l);
-
-		return (): void => {
-			if (!unsubed) {
-				if (this.notifying) {
-					throw new Error(
-						"Can't unsubscribe from observer during notification"
-					);
-				}
-				const idx = this.listeners?.indexOf(l);
-				if (idx != null && idx !== -1) this.listeners!.splice(idx, 1);
-				unsubed = true;
+	static proxyTraps: ProxyHandler<unknown[]> = {
+		...ArrayAdministration.proxyTraps,
+		defineProperty(target, name, descriptor) {
+			if (name === "length" || isIndex(name)) {
+				throw new TypeError(
+					"r-state-tree: child arrays do not support defineProperty(); use indexed assignment or splice()"
+				);
 			}
-		};
-	}
+			return ArrayAdministration.proxyTraps.defineProperty!(
+				target,
+				name,
+				descriptor
+			);
+		},
+		deleteProperty(target, name) {
+			if (isIndex(name))
+				throw new TypeError(
+					"r-state-tree: child arrays cannot contain holes; use splice()"
+				);
+			return ArrayAdministration.proxyTraps.deleteProperty!(target, name);
+		},
+		preventExtensions(): never {
+			throw new TypeError("r-state-tree: child arrays must remain extensible");
+		},
+		setPrototypeOf(): never {
+			throw new TypeError(
+				"r-state-tree: child array prototypes cannot be changed"
+			);
+		},
+	};
 
-	get size(): number {
-		return this.listeners?.length ?? 0;
-	}
-
-	notify(ev: MutationEvent<T>): void {
-		if (!this.listeners) return;
-
-		this.notifying = true;
-		try {
-			for (let i = 0; i < this.listeners.length; i++) {
-				this.listeners[i](ev);
-			}
-		} finally {
-			this.notifying = false;
-		}
-	}
-}
-
-export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 	static methods = Object.assign({}, ArrayAdministration.methods, {
 		fill(): never {
 			throw new TypeError(
@@ -125,7 +63,64 @@ export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 				"r-state-tree: child arrays do not support copyWithin(); use splice()"
 			);
 		},
+		reverse<T extends Model>(this: T[]): T[] {
+			const adm = getAdministration(this) as ChildModelsAdministration<T>;
+			return adm.transaction(
+				() => ArrayAdministration.methods.reverse!.call(this) as T[]
+			);
+		},
+		sort<T extends Model>(this: T[], compareFn?: (a: T, b: T) => number): T[] {
+			const adm = getAdministration(this) as ChildModelsAdministration<T>;
+			return adm.transaction(
+				() => ArrayAdministration.methods.sort!.call(this, compareFn) as T[]
+			);
+		},
 	});
+
+	assertMutable(): void {
+		if (this.mutating)
+			throw new Error("r-state-tree: reentrant child array mutation");
+	}
+
+	private transaction<R>(commit: () => R): R {
+		this.assertMutable();
+		return batch(() => {
+			this.mutating = true;
+			try {
+				return commit();
+			} finally {
+				// Reactions run as the batch exits and may start a new transaction.
+				this.mutating = false;
+			}
+		});
+	}
+
+	private normalize(value: T): T {
+		if (!(value instanceof Model))
+			throw new TypeError("r-state-tree: child arrays require Model instances");
+		return getAdministration(value)!.proxy as T;
+	}
+
+	private update(added: T[], removed: T[], commit: () => void): void {
+		const removedSet = new Set(removed.map((item) => getSource(item)));
+		const addedSet = new Set<T>();
+		for (const item of added) {
+			const source = getSource(item);
+			if (
+				addedSet.has(source) ||
+				(this.members.has(source) && !removedSet.has(source))
+			) {
+				throw new Error(
+					"r-state-tree: child arrays cannot contain duplicate models"
+				);
+			}
+			addedSet.add(source);
+		}
+		if (this.change) this.change(added, removed, commit);
+		else commit();
+		for (const item of removedSet) this.members.delete(item);
+		for (const item of addedSet) this.members.add(item);
+	}
 
 	setArrayLength(): never {
 		throw new TypeError(
@@ -134,60 +129,65 @@ export class ChildModelsAdministration<T> extends ArrayAdministration<T> {
 	}
 
 	set(index: number, newValue: T): boolean {
-		if (index > this.source.length)
-			throw new RangeError("r-state-tree: child arrays cannot contain holes");
-		newValue = (getAdministration(newValue as object)?.proxy as T) ?? newValue;
-		if (index === this.source.length) {
-			this.spliceWithArray(index, 0, [newValue]);
-			return true;
-		}
-		return batch(() => {
-			const oldValue = this.source[index];
-			const result = super.set(index, newValue);
-
-			const sourceValue = getSource(newValue);
-			if (oldValue !== sourceValue) {
-				try {
-					notifyArrayUpdate(this.proxy, index, oldValue, sourceValue);
-				} catch (error) {
-					super.set(
-						index,
-						(getAdministration(oldValue as object)?.proxy as T) ?? oldValue
-					);
-					throw error;
-				}
+		return this.transaction(() => {
+			if (index > this.source.length)
+				throw new RangeError("r-state-tree: child arrays cannot contain holes");
+			newValue = this.normalize(newValue);
+			if (index === this.source.length) {
+				this.spliceNormalized(index, 0, [newValue]);
+			} else if (getSource(newValue) !== this.source[index]) {
+				this.update([newValue], [this.proxy[index]], () => {
+					if (!super.set(index, newValue))
+						throw new TypeError("r-state-tree: cannot write child array index");
+				});
 			}
-			return result;
+			return true;
 		});
 	}
 
-	spliceWithArray(
-		index: number,
-		deleteCount?: number | undefined,
-		newItems?: T[] | undefined
-	): T[] {
+	spliceWithArray(index: number, deleteCount?: number, newItems?: T[]): T[] {
 		const argumentCount = arguments.length;
-		return batch(() => {
-			// Keep the normalized index for rollback after a length-changing splice.
+		return this.transaction(() => {
+			const length = this.source.length;
 			const start = Math.trunc(+index) || 0;
-			index =
-				start < 0
-					? Math.max(this.source.length + start, 0)
-					: Math.min(start, this.source.length);
-			const deleted =
+			index = start < 0 ? Math.max(length + start, 0) : Math.min(start, length);
+			deleteCount =
 				argumentCount === 1
-					? super.spliceWithArray(index)
-					: super.spliceWithArray(index, deleteCount, newItems);
-			if (deleted.length || newItems?.length) {
-				try {
-					notifySpliceArray(this.proxy, index, newItems ?? [], deleted);
-				} catch (error) {
-					super.spliceWithArray(index, newItems?.length ?? 0, deleted);
-					throw error;
-				}
-			}
-
-			return deleted;
+					? length - index
+					: Math.min(
+							Math.max(Math.trunc(+(deleteCount as number)) || 0, 0),
+							length - index
+						);
+			const added = Array.from(newItems ?? [], (item) => this.normalize(item));
+			return this.spliceNormalized(index, deleteCount, added);
 		});
+	}
+
+	private spliceNormalized(
+		index: number,
+		deleteCount: number,
+		added: T[]
+	): T[] {
+		const removed: T[] = [];
+		for (let i = 0; i < deleteCount; i++) removed.push(this.proxy[index + i]);
+		if (deleteCount || added.length) {
+			this.update(added, removed, () =>
+				super.spliceWithArray(index, deleteCount, added)
+			);
+		}
+		return removed;
+	}
+
+	spliceItemsIntoValues(
+		index: number,
+		deleteCount: number,
+		newItems: T[]
+	): T[] {
+		return Array.prototype.splice.call(
+			this.source,
+			index,
+			deleteCount,
+			...newItems
+		) as T[];
 	}
 }
