@@ -10,6 +10,10 @@ import {
 } from "../src/index";
 import { createInspector } from "../devtools/src/devtools";
 import { getStoreAdm } from "../src/store/StoreAdministration";
+import type { ReadonlySignal } from "@preact/signals-core";
+import { Signal } from "@preact/signals-core";
+import { effect, signal } from "../src/observables";
+import { withRetainedChildren } from "../src/observables/internal/retainedRead";
 
 function setup<T extends Store>(Type: new (...args: any[]) => T) {
 	const root = mount(createStore(Type));
@@ -29,6 +33,228 @@ function setup<T extends Store>(Type: new (...args: any[]) => T) {
 function field(value: any, name: string): any {
 	return value.fields.find((entry: any) => entry.name === name).value;
 }
+
+const signalReaders: [string, (memo: ReadonlySignal<number>) => number][] = [
+	["value", (memo) => memo.value],
+	["peek", (memo) => memo.peek()],
+	["valueOf", (memo) => memo.valueOf()],
+	["toString", (memo) => Number(memo.toString())],
+	["toJSON", (memo) => memo.toJSON()],
+	["numeric coercion", (memo) => Number(memo)],
+	["string coercion", (memo) => Number(String(memo))],
+	["JSON serialization", (memo) => Number(JSON.stringify(memo))],
+];
+
+describe.each(signalReaders)("public computed %s", (_name, read) => {
+	test.each([
+		[false, false],
+		[false, true],
+		[true, false],
+		[true, true],
+	])(
+		"cold inspection does not poison ordinary reads (Context: %s, initialize first: %s)",
+		(viaContext, initializeFirst) => {
+			const Context = createContext<number>();
+			let factories = 0;
+			let memo: ReadonlySignal<number>;
+			class Leaf extends Store {
+				value = 42;
+			}
+			class Root extends Store {
+				static types = { lazy: child, current: computed };
+				get lazy() {
+					factories++;
+					return createStore(Leaf);
+				}
+				[Context.provide]() {
+					return this.lazy.value;
+				}
+				get current() {
+					return read(memo);
+				}
+			}
+			const f = setup(Root);
+			memo = computed(() =>
+				viaContext ? Context.consume(f.root)! : f.root.lazy.value
+			);
+			try {
+				expect(field(f.inspect(), "current")).toMatchObject({ kind: "error" });
+				expect(
+					getStoreAdm(f.root).peekInspectionChild("lazy").initialized
+				).toBe(false);
+				expect(factories).toBe(0);
+				if (initializeFirst) expect(f.root.lazy.value).toBe(42);
+				expect(f.root.current).toBe(42);
+				expect(memo.value).toBe(42);
+				expect(f.root.lazy.value).toBe(42);
+				expect(Context.consume(f.root)).toBe(42);
+				expect(factories).toBe(1);
+				f.root.lazy.value = 43;
+				expect(memo.value).toBe(43);
+				expect(read(memo)).toBe(43);
+				// peek intentionally does not track the enclosing declared computed.
+				expect(f.root.current).toBe(_name === "peek" ? 42 : 43);
+			} finally {
+				f.dispose();
+			}
+		}
+	);
+
+	test.each([false, true])(
+		"warm inspection bypasses the application cache without reconciling children (Context: %s)",
+		(viaContext) => {
+			const Context = createContext<number>();
+			let factories = 0,
+				computations = 0;
+			let memo: ReadonlySignal<number>;
+			class Leaf extends Store {
+				value = 42;
+			}
+			class Root extends Store {
+				static types = { lazy: child, current: computed };
+				get lazy() {
+					factories++;
+					return createStore(Leaf);
+				}
+				[Context.provide]() {
+					return this.lazy.value;
+				}
+				get current() {
+					return read(memo);
+				}
+			}
+			const f = setup(Root);
+			memo = computed(() => {
+				computations++;
+				return viaContext ? Context.consume(f.root)! : f.root.lazy.value;
+			});
+			const seen: number[] = [];
+			const stop = memo.subscribe((value) => {
+				seen.push(value);
+			});
+			try {
+				expect(memo.value).toBe(42);
+				const before = computations;
+				expect(field(f.inspect(), "current")).toBe(42);
+				expect(computations).toBe(before + 1);
+				expect(factories).toBe(1);
+				expect(memo.value).toBe(42);
+				expect(computations).toBe(before + 1);
+				expect(seen).toEqual([42]);
+				f.root.lazy.value = 43;
+				expect(seen).toEqual([42, 43]);
+				expect(memo.peek()).toBe(43);
+				expect(read(memo)).toBe(43);
+			} finally {
+				stop();
+				f.dispose();
+			}
+		}
+	);
+});
+
+test("public computed preserves native signal identity, cached object identity, read-only API and peek tracking", () => {
+	const input = signal(1);
+	let runs = 0;
+	const memo: ReadonlySignal<{ value: number }> = computed(() => {
+		runs++;
+		return { value: input.value };
+	});
+	expect(memo).toBeInstanceOf(Signal);
+	expect(memo.brand).toBe(input.brand);
+	const cached = memo.value;
+	expect(memo.peek()).toBe(cached);
+	expect(memo.valueOf()).toBe(cached);
+	expect(memo.toJSON()).toBe(cached);
+	expect(runs).toBe(1);
+	const inspected = withRetainedChildren(() => memo.value);
+	expect(inspected).toEqual(cached);
+	expect(inspected).not.toBe(cached);
+	expect(memo.value).toBe(cached);
+	expect(runs).toBe(2);
+	expect(Reflect.set(memo, "value", { value: 99 })).toBe(false);
+	const tracked: number[] = [],
+		peeked: number[] = [];
+	const stopTracked = effect(() => {
+		tracked.push(memo.value.value);
+	});
+	const stopPeeked = effect(() => {
+		peeked.push(memo.peek().value);
+	});
+	try {
+		input.value = 2;
+		expect(tracked).toEqual([1, 2]);
+		expect(peeked).toEqual([1]);
+		expect(memo.value).not.toBe(cached);
+		expect(memo.value.value).toBe(2);
+	} finally {
+		stopTracked();
+		stopPeeked();
+	}
+});
+
+test.each([false, true])(
+	"dirty prewarmed public computed cannot initialize a newly selected lazy child during inspection (Context: %s)",
+	(viaContext) => {
+		const Context = createContext<number>();
+		let factories = 0;
+		let memo: ReadonlySignal<number>;
+		class Leaf extends Store {
+			value = 42;
+		}
+		class Root extends Store {
+			static types = { lazy: child, current: computed };
+			useLazy = false;
+			get lazy() {
+				factories++;
+				return createStore(Leaf);
+			}
+			[Context.provide]() {
+				return this.lazy.value;
+			}
+			get current() {
+				return memo.value;
+			}
+		}
+		const f = setup(Root);
+		memo = computed(() =>
+			f.root.useLazy
+				? viaContext
+					? Context.consume(f.root)!
+					: f.root.lazy.value
+				: 0
+		);
+		try {
+			expect(memo.value).toBe(0);
+			f.root.useLazy = true;
+			expect(field(f.inspect(), "current")).toMatchObject({ kind: "error" });
+			expect(factories).toBe(0);
+			expect(getStoreAdm(f.root).peekInspectionChild("lazy").initialized).toBe(
+				false
+			);
+			expect(f.root.current).toBe(42);
+			expect(memo.value).toBe(42);
+			f.root.lazy.value = 43;
+			expect(memo.value).toBe(43);
+			expect(f.root.current).toBe(43);
+		} finally {
+			f.dispose();
+		}
+	}
+);
+
+test("restricted public computed cycles restore the read guard and do not poison normal caches", () => {
+	let cycle = true;
+	const memo: ReadonlySignal<number> = computed(() =>
+		cycle ? memo.value : 42
+	);
+	expect(() => withRetainedChildren(() => memo.value)).toThrow(
+		"Cycle detected"
+	);
+	cycle = false;
+	expect(withRetainedChildren(() => memo.peek())).toBe(42);
+	expect(memo.value).toBe(42);
+});
 
 test.each([false, true])(
 	"restricted Context failure does not poison ordinary consume or explicit initialization (initialize first: %s)",

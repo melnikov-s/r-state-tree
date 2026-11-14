@@ -232,6 +232,27 @@ function internalCreateComputed<T>(fn: () => T) {
 		} as any
 	);
 
+	// Keep the native signal object and ordinary Preact tracking/cache behavior.
+	// peek(), coercions and subscribe() also read through this value accessor.
+	const cachedValue = Object.getOwnPropertyDescriptor(
+		Object.getPrototypeOf(c),
+		"value"
+	)!.get!;
+	let readingRetained = false;
+	Object.defineProperty(c, "value", {
+		get() {
+			if (!retainedChildRead) return cachedValue.call(this);
+			// Restricted results/errors must never enter the application signal cache.
+			if (readingRetained) throw new Error("Cycle detected");
+			readingRetained = true;
+			try {
+				return fn();
+			} finally {
+				readingRetained = false;
+			}
+		},
+	});
+
 	return { c, version };
 }
 
@@ -245,9 +266,7 @@ export function createComputed<T>(
 	return {
 		node: c,
 		get() {
-			// Inspection has different child-read semantics. Neither reuse an application
-			// cache nor retain a restricted value/error in any internal computed cache.
-			return retainedChildRead ? bound() : c.value;
+			return c.value;
 		},
 		clear: () => {
 			untracked(() => {
