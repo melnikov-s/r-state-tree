@@ -874,6 +874,21 @@ describe("model identifiers", () => {
 		}
 	);
 
+	test("undefined identifiers initialize an own field before assignment", () => {
+		class Item extends Model {
+			@id id?: number;
+		}
+
+		const item = Item.create();
+		expect(Object.hasOwn(item, "id")).toBe(true);
+		expect(item.id).toBeUndefined();
+		expect(toSnapshot(item)).toEqual({ id: undefined });
+
+		item.id = 1;
+		expect(item.id).toBe(1);
+		expect(toSnapshot(item)).toEqual({ id: 1 });
+	});
+
 	test("identifiers can be assigned by a named factory", () => {
 		class M extends Model {
 			@id id!: any;

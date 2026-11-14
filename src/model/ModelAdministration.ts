@@ -301,6 +301,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private setId(name: string, v: IdType): boolean {
 		const id = getIdentifier(this.proxy);
 
+		// Undefined IDs still need the backing field initialized.
+		if (id !== undefined && id === v) {
+			return true;
+		}
+
 		if (id != null && v == null) {
 			throw new Error(
 				"r-state-tree can't clear an id once it has already been set."
