@@ -157,11 +157,11 @@ The test fixtures import this checkout's `src/index` rather than a built package
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm exec vitest run tests/lint.test.ts
+pnpm exec vitest run tests/lint.test
 pnpm run test:types
 pnpm run build
-pnpm exec oxlint --type-aware lint tests/lint.test.ts
-pnpm exec oxfmt --check lint tests/lint.test.ts
+pnpm exec oxlint --type-aware lint tests/lint.test*.ts tests/helpers/lint.ts
+pnpm exec oxfmt --check lint tests/lint.test*.ts tests/helpers/lint.ts
 ```
 
-The regression fixtures live in `tests/lint.test.ts`. They invoke the **actual Oxlint CLI** against temporary TypeScript fixtures and temporary isolated configurations, checking diagnostic counts/rules/ranges. An all-rule invocation asserts five diagnostics and exit code 1 for invalid code, and no diagnostics with exit code 0 for valid code. Intentional warmup via a discarded read is reported too; meaningful consumed reads remain unflagged. A helper call or unused local can conceal eager initialization from this narrow check; absence of a diagnostic does not endorse that design. Async-policy scope fixtures include both deliberately unsafe and legitimate continuations; they assert that no speculative async diagnostic is shipped, **not** that those continuations are safe. No project/editor/tsconfig settings are changed.
+The regression fixtures live in the focused `tests/lint.test*.ts` suites, with shared CLI setup in `tests/helpers/lint.ts`. They invoke the **actual Oxlint CLI** against temporary TypeScript fixtures and temporary isolated configurations, checking diagnostic counts/rules/ranges. An all-rule invocation asserts five diagnostics and exit code 1 for invalid code, and no diagnostics with exit code 0 for valid code. Intentional warmup via a discarded read is reported too; meaningful consumed reads remain unflagged. A helper call or unused local can conceal eager initialization from this narrow check; absence of a diagnostic does not endorse that design. Async-policy scope fixtures include both deliberately unsafe and legitimate continuations; they assert that no speculative async diagnostic is shipped, **not** that those continuations are safe. No project/editor/tsconfig settings are changed.

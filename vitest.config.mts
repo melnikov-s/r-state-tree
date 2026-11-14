@@ -28,7 +28,8 @@ export default defineConfig({
 	test: {
 		globals: true,
 		environment: "node",
-		include: ["tests/**/*.test.ts"],
+		// Focused suites use <subject>.test<Type>.ts; helpers stay undiscovered.
+		include: ["tests/**/*.test.ts", "tests/**/*.test[A-Z]*.ts"],
 		setupFiles: ["@tsmetadata/polyfill", "./tests/setup.ts"],
 		coverage: {
 			provider: "v8",
