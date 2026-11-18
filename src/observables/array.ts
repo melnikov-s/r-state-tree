@@ -531,6 +531,11 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 		);
 	}
 
+	private reportIndexChanged(index: number): void {
+		const node = this.valuesMap.get(index);
+		if (node) node.reportChanged(this._getEffectiveValue(index));
+	}
+
 	onArrayChanged(lengthChanged = false, index?: number, count?: number): void {
 		batch(() => {
 			if (lengthChanged) {
@@ -538,6 +543,10 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 			}
 			if (index == null) {
 				this.atom.reportChanged();
+			} else if (count === 1 && Number.isInteger(index)) {
+				// An indexed write need not enumerate unrelated tracked indices.
+				// Non-integer bounds (e.g. from fill) still use the range check.
+				this.reportIndexChanged(index);
 			} else if (count !== undefined && count > 0) {
 				// Optimization: Do NOT iterate the full range [index, index+count).
 				// That would be O(N) where N is array length (e.g. 2^32).
@@ -552,10 +561,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 				for (const key of observedKeys) {
 					// Check if key is in the affected range
 					if (typeof key === "number" && key >= index && key < end) {
-						const node = this.valuesMap.get(key);
-						if (node) {
-							node.reportChanged(this._getEffectiveValue(key));
-						}
+						this.reportIndexChanged(key);
 					}
 				}
 			}
