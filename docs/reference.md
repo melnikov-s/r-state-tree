@@ -421,16 +421,27 @@ todo.title = "Learn r-state-tree";
 stop();
 ```
 
-### Failed snapshot application
+### Snapshot isolation and failed application
 
-For Models, `applySnapshot()` batches loading and the existing rollback together.
-Snapshot/diff subscribers do not receive failed intermediate snapshots or a
-redundant notification when rollback restores the previous snapshot. Reactive
-effects are delayed until application or rollback finishes. Subscriber errors
-propagate after commitment without triggering rollback.
+`Model.create(snapshot)` and `applySnapshot(model, snapshot)` do not adopt
+incoming arrays or plain objects as live state. A snapshot can be reused to
+create independent Models. Treat `toSnapshot()` output as read-only: it can be
+cached, and is not deeply frozen.
 
-This is notification isolation, not an identity-preserving transaction. Existing
-attachment behavior and rollback limitations are unchanged.
+For Models, `applySnapshot()` batches loading and rollback together. If loading
+fails, it undoes its state and child-slot writes, including ID and reference
+changes, and throws the original error. Snapshot and diff subscribers do not
+receive failed intermediate values or a redundant notification for restored
+state. Reactive effects run after loading or rollback finishes. Subscriber errors
+after a successful application propagate without triggering rollback.
+
+Rollback is not a general transaction: it does not guarantee the identity of
+replaced containers (such as child array proxies), and cannot undo arbitrary
+side effects of constructors, accessors or custom runtime code. If custom
+runtime behavior prevents a write from being restored, the original load error
+still takes precedence. Store hydration clones incoming data, but does not use
+Model rollback; applying a snapshot to a mounted Store can reconcile its live
+children during the load.
 
 ### Snapshot data contract
 

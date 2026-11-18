@@ -58,14 +58,14 @@ function bucket(
 	return ids;
 }
 
-export function setIdentifier(model: Model, id: IdType): void {
+export function setIdentifier(model: Model, id: IdType | undefined): void {
 	const previousId = idMap.get(model);
 	if (previousId === id) return;
 	const Type = getModelType(model);
 	const ancestors: Model[] = [];
 	let node = model.parent;
 	while (node) {
-		assertAvailable(node, [[Type, id, model]]);
+		if (id !== undefined) assertAvailable(node, [[Type, id, model]]);
 		ancestors.push(node);
 		node = node.parent;
 	}
@@ -73,9 +73,10 @@ export function setIdentifier(model: Model, id: IdType): void {
 		const ids = bucket(ancestor, Type);
 		if (previousId != null && ids.get(previousId) === model)
 			ids.delete(previousId);
-		ids.set(id, model);
+		if (id !== undefined) ids.set(id, model);
 	}
-	idMap.set(model, id);
+	if (id !== undefined) idMap.set(model, id);
+	else idMap.delete(model);
 }
 
 export function getIdentifier(model: Model): IdType | undefined {

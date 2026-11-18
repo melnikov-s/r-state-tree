@@ -744,10 +744,6 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		});
 	}
 
-	recordSnapshotRollback(): void {
-		snapshotRollbackVersion++;
-	}
-
 	onSnapshotChange(onChange: SnapshotChange<any>): () => void {
 		let rollbackVersion = snapshotRollbackVersion;
 		return reaction(
@@ -762,7 +758,51 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		);
 	}
 
-	loadSnapshot(snapshot: Snapshot<any>): void {
+	applySnapshot(snapshot: Snapshot<any>): void {
+		const undo: (() => void)[] = [];
+		let rejection: { error: unknown } | undefined;
+		try {
+			batch(() => {
+				try {
+					this.loadSnapshot(snapshot, undo);
+				} catch (error) {
+					rejection = { error };
+					untracked(() => {
+						// Reverse writes so later slots release any IDs the earlier
+						// slots need back. Restore through the usual write paths.
+						for (let i = undo.length - 1; i >= 0; i--) {
+							try {
+								undo[i]();
+							} catch {
+								// Custom runtime behavior can make restoration fail.
+								// Keep restoring independent fields, and keep the cause.
+							}
+						}
+					});
+					snapshotRollbackVersion++;
+					throw error;
+				}
+			});
+		} catch (error) {
+			// A failed load takes precedence over any error while flushing the
+			// batch. A subscriber failure on success is not a load failure.
+			throw rejection ? rejection.error : error;
+		}
+	}
+
+	loadSnapshot(snapshot: Snapshot<any>, undo?: (() => void)[]): void {
+		const assign = (
+			key: string,
+			value: unknown,
+			previous = this.proxy[key]
+		) => {
+			this.proxy[key] = value;
+			if (undo && !Object.is(previous, value)) {
+				undo.push(() => {
+					this.proxy[key] = previous;
+				});
+			}
+		};
 		const ensureChildTypes = (key: string): true => {
 			const childType = this.getCfgChildType(key);
 			if (!childType) {
@@ -791,13 +831,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 								break;
 							}
 							const currentValue = this.proxy[key];
-							const changeTracker = { changed: false };
+							const changeTracker = { changed: false, undo, copyInput: true };
 							const hydratedValue = hydrateSnapshotValue(
 								currentValue,
 								value,
 								changeTracker
 							);
-							this.proxy[key] = hydratedValue;
+							assign(key, hydratedValue, currentValue);
 							if (
 								changeTracker.changed &&
 								Object.is(currentValue, hydratedValue)
@@ -812,6 +852,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							);
 							break;
 						case ModelCfgTypes.modelRef:
+							if (undo) {
+								const previous = this.source[key];
+								undo.push(() => this.writeReference(key, previous));
+							}
 							if (Array.isArray(value)) {
 								if ((value as unknown[])?.[0] instanceof Model) {
 									this.proxy[key] = value;
@@ -833,11 +877,20 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							}
 							break;
 						case ModelCfgTypes.id:
+							if (undo) {
+								const previous = this.proxy[key];
+								const previousId = getIdentifier(this.proxy);
+								undo.push(() => {
+									// Public writes still cannot clear an established ID.
+									setIdentifier(this.proxy, previousId);
+									this.write(key, previous);
+								});
+							}
 							this.proxy[key] = value;
 							break;
 						case CommonCfgTypes.child:
 							if (value == null) {
-								this.proxy[key] = null;
+								assign(key, null);
 								break;
 							}
 
@@ -858,8 +911,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 									}
 									if (snapshotId != null) snapshotIds.add(snapshotId);
 								}
-								this.proxy[key] = (value as Snapshot[])?.map(
-									(snapshot, index) => {
+								assign(
+									key,
+									(value as Snapshot[]).map((snapshot, index) => {
 										snapshot = snapshot ?? {};
 										let model: Model;
 										if (snapshot instanceof Model) {
@@ -879,7 +933,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 												foundModel!.parent === this.proxy &&
 												adm?.parentName === key
 											) {
-												adm.loadSnapshot(snapshot);
+												adm.loadSnapshot(snapshot, undo);
 												model = foundModel!;
 											} else {
 												model = Ctor.create(snapshot);
@@ -887,7 +941,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 										}
 
 										return model;
-									}
+									})
 								);
 								break;
 							} else if (value instanceof Model) {
@@ -906,14 +960,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 									id === getIdentifier(this.proxy[key])
 								) {
 									const adm = getModelAdm(this.proxy[key]);
-									adm.loadSnapshot(value as Snapshot);
+									adm.loadSnapshot(value as Snapshot, undo);
 									model = this.proxy[key];
 								} else {
 									model = (childType as typeof Model).create(value as Snapshot);
 								}
 							}
 
-							this.proxy[key] = model;
+							assign(key, model);
 							break;
 						default:
 							console.warn(
@@ -938,9 +992,5 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		}
 
 		return this.computedSnapshot.get() as Snapshot<any>;
-	}
-
-	getSnapshotForRollback(): Snapshot<any> {
-		return this.toJSON();
 	}
 }

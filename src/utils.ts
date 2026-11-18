@@ -141,6 +141,9 @@ export function clone<T>(val: T, path: string = ""): T {
  */
 export type HydrationChangeTracker = {
 	changed: boolean;
+	undo?: (() => void)[];
+	// Model hydration borrows its input; Store passes an already-owned clone.
+	copyInput?: boolean;
 };
 
 export function hydrateSnapshotValue(
@@ -148,12 +151,16 @@ export function hydrateSnapshotValue(
 	snapshotValue: unknown,
 	changeTracker: HydrationChangeTracker = { changed: false }
 ): unknown {
+	const { undo } = changeTracker;
 	if (currentValue instanceof Signal) {
-		currentValue.value = hydrateSnapshotValue(
-			currentValue.value,
-			snapshotValue,
-			changeTracker
-		);
+		const previous = currentValue.value;
+		const next = hydrateSnapshotValue(previous, snapshotValue, changeTracker);
+		if (!Object.is(previous, next)) {
+			undo?.push(() => {
+				currentValue.value = previous;
+			});
+		}
+		currentValue.value = next;
 		return currentValue;
 	}
 
@@ -166,8 +173,10 @@ export function hydrateSnapshotValue(
 				)}`
 			);
 		}
-		if (currentValue.getTime() !== date.getTime()) {
+		const previous = currentValue.getTime();
+		if (previous !== date.getTime()) {
 			changeTracker.changed = true;
+			undo?.push(() => currentValue.setTime(previous));
 			currentValue.setTime(date.getTime());
 		}
 		return currentValue;
@@ -190,6 +199,9 @@ export function hydrateSnapshotValue(
 			currentItems.length !== nextItems.length ||
 			nextItems.some((item, index) => !Object.is(currentItems[index], item));
 		if (structureChanged) {
+			undo?.push(() => {
+				currentValue.splice(0, currentValue.length, ...currentItems);
+			});
 			currentValue.splice(0, currentValue.length, ...nextItems);
 		}
 		return currentValue;
@@ -204,23 +216,39 @@ export function hydrateSnapshotValue(
 				currentRecord,
 				key
 			);
+			const previous = hasOwnKey ? currentRecord[key] : undefined;
 			const hydratedValue = hydrateSnapshotValue(
-				hasOwnKey ? currentRecord[key] : undefined,
+				previous,
 				snapshotRecord[key],
 				changeTracker
 			);
 			if (hasOwnKey) {
+				if (!Object.is(previous, hydratedValue)) {
+					undo?.push(() => {
+						currentRecord[key] = previous;
+					});
+				}
 				currentRecord[key] = hydratedValue;
 			} else {
 				changeTracker.changed = true;
 				defineOwnDataProperty(currentRecord, key, hydratedValue);
+				undo?.push(() => {
+					delete currentRecord[key];
+				});
 			}
 		});
 
 		Object.keys(currentRecord).forEach((key) => {
 			if (!Object.prototype.hasOwnProperty.call(snapshotRecord, key)) {
 				changeTracker.changed = true;
+				const descriptor =
+					undo && Object.getOwnPropertyDescriptor(currentRecord, key);
 				delete currentRecord[key];
+				if (descriptor) {
+					undo.push(() =>
+						Object.defineProperty(currentRecord, key, descriptor)
+					);
+				}
 			}
 		});
 
@@ -230,7 +258,12 @@ export function hydrateSnapshotValue(
 	if (!Object.is(currentValue, snapshotValue)) {
 		changeTracker.changed = true;
 	}
-	return snapshotValue;
+	// Matched shapes are hydrated recursively. Copy only a branch that would
+	// otherwise be inserted verbatim, such as a record replacing null.
+	return changeTracker.copyInput &&
+		(Array.isArray(snapshotValue) || isPlainObject(snapshotValue))
+		? cloneHydrationTarget(snapshotValue)
+		: snapshotValue;
 }
 
 function cloneHydrationTarget(value: unknown): unknown {
