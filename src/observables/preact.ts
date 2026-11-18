@@ -12,6 +12,7 @@ import { computedType } from "../types.js";
 import { retainedChildRead } from "./internal/retainedRead.js";
 
 import { ObjectAdministration } from "./object.js";
+import { getPropertyDescriptor, getPropertyType } from "./internal/utils.js";
 import {
 	getAdministration,
 	getInternalNode,
@@ -322,37 +323,82 @@ export function reportObserved<T extends object>(obj: T): T {
 
 const signalMap: WeakMap<Signal, Signal> = new WeakMap();
 
-export function getSignal<T extends object>(
+type Writable<T> = { -readonly [K in keyof T]: T[K] };
+type SignalFor<T, K extends keyof T> =
+	(<U>() => U extends Pick<T, K> ? 1 : 2) extends <U>() => U extends Writable<
+		Pick<T, K>
+	>
+		? 1
+		: 2
+		? Signal<T[K]>
+		: ReadonlySignal<T[K]>;
+
+export function getSignal<T extends object, K extends keyof T = keyof T>(
 	obj: T,
-	key: keyof T
-): Signal<T[keyof T]> {
-	const node = getInternalNode(obj, key);
-
-	if (node instanceof Signal) {
-		let signal = signalMap.get(node);
-		if (!signal) {
-			signal = new Signal();
-			Object.defineProperties(signal, {
-				value: {
-					get() {
-						return obj[key];
-					},
-					set(v) {
-						return (obj[key] = v);
-					},
-				},
-				peek: {
-					value() {
-						return source(obj)[key];
-					},
-				},
-			});
-
-			signalMap.set(node, signal);
-		}
-
-		return signal!;
+	key: K
+): SignalFor<T, K>;
+export function getSignal<T extends object, K extends keyof T>(
+	obj: T,
+	key: K
+): ReadonlySignal<T[K]> {
+	const adm = getAdministration(obj);
+	if (!adm || adm.proxy !== obj) {
+		throw new TypeError(
+			"r-state-tree: getSignal expected an observable object"
+		);
 	}
 
-	return node;
+	const name = typeof key === "number" ? String(key) : key;
+	const descriptor = getPropertyDescriptor(adm.source, name);
+	const writableField = !descriptor || descriptor.writable;
+	let node: unknown;
+	if (adm instanceof ObjectAdministration) {
+		const type = getPropertyType(name, adm.source);
+		if (type === "computed" && descriptor?.get && !descriptor.set) {
+			const computedNode = getInternalNode(obj, name);
+			// Preact computed signals are Signal instances too. Don't add a setter.
+			if (computedNode instanceof Signal) return computedNode;
+		} else if (type === "observable" && writableField) {
+			// The backend treats an empty getNode key as a request for the object atom.
+			node =
+				name === ""
+					? adm.valuesMap.getOrCreate(name, descriptor?.value).node
+					: getInternalNode(obj, name);
+		}
+	} else if (Array.isArray(obj) && writableField && typeof name === "string") {
+		const index = Number(name) >>> 0;
+		if (name === "length") node = getInternalNode(obj, name);
+		else if (String(index) === name && index < 0xffffffff) {
+			node = getInternalNode(obj, index);
+		}
+	}
+
+	if (!(node instanceof Signal)) {
+		throw new TypeError(
+			`r-state-tree: getSignal(${String(key)}) expected an observable field or a getter-only computed`
+		);
+	}
+
+	let signal = signalMap.get(node);
+	if (!signal) {
+		signal = new Signal();
+		Object.defineProperties(signal, {
+			value: {
+				get() {
+					return obj[key];
+				},
+				set(v) {
+					obj[key] = v;
+				},
+			},
+			peek: {
+				value() {
+					return source(obj)[key];
+				},
+			},
+		});
+		signalMap.set(node, signal);
+	}
+
+	return signal;
 }
