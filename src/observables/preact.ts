@@ -12,7 +12,7 @@ import { computedType } from "../types.js";
 import { retainedChildRead } from "./internal/retainedRead.js";
 
 import { ObjectAdministration } from "./object.js";
-import { getPropertyDescriptor, getPropertyType } from "./internal/utils.js";
+import { getPropertyDescriptor } from "./internal/utils.js";
 import {
 	getAdministration,
 	getInternalNode,
@@ -353,7 +353,7 @@ export function getSignal<T extends object, K extends keyof T>(
 	const writableField = !descriptor || descriptor.writable;
 	let node: unknown;
 	if (adm instanceof ObjectAdministration) {
-		const type = getPropertyType(name, adm.source);
+		const type = adm.getType(name);
 		if (type === "computed" && descriptor?.get && !descriptor.set) {
 			const computedNode = getInternalNode(obj, name);
 			// Preact computed signals are Signal instances too. Don't add a setter.
@@ -393,7 +393,7 @@ export function getSignal<T extends object, K extends keyof T>(
 			},
 			peek: {
 				value() {
-					return source(obj)[key];
+					return untracked(() => obj[key]);
 				},
 			},
 		});

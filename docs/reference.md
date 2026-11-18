@@ -1184,7 +1184,7 @@ completion, error, or cancellation—not immediately after creating the stream.
 
 r-state-tree is built on `@preact/signals-core`. You can interoperate with signals directly:
 
-- `getSignal(obj, key)` returns a per-property `Signal<T[K]>` for writable observable data fields, array indices, and array `length`. Writing to the signal writes through to the observable. A TypeScript `readonly` property exposes a `ReadonlySignal<T[K]>` type.
+- `getSignal(obj, key)` returns a per-property `Signal<T[K]>` for writable observable data fields, array indices, and array `length`. Writing to the signal writes through to the observable. `peek()` reads the same field value without subscribing; for a Model reference it returns the resolved Model, not the stored ID. A TypeScript `readonly` property exposes a `ReadonlySignal<T[K]>` type.
 - Getter-only class computeds (configured with `@computed` or `static types`) return their native readonly signal. Ordinary getters, accessors with setters, methods, and other unsupported properties throw at lookup. TypeScript cannot identify which getters are configured, so eligibility is checked at runtime.
 - Re-exported utilities: `signal`, `computed`, `effect`, `batch`, `untracked`, and types `Signal`, `ReadonlySignal`.
 

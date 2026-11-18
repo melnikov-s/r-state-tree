@@ -169,7 +169,8 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return computedNode.get();
 	}
 
-	private getType(key: keyof T): PropertyType | null {
+	/** @internal Shared classification for proxy reads and field signals. */
+	getType(key: keyof T): PropertyType | null {
 		const cached = this.types.get(key);
 		if (cached !== undefined) return cached;
 

@@ -1,8 +1,12 @@
 import { expect, expectTypeOf, test } from "vitest";
 import {
+	child,
 	computed,
 	effect,
 	getSignal,
+	id,
+	Model,
+	modelRef,
 	observable,
 	Observable,
 	type ReadonlySignal,
@@ -45,6 +49,43 @@ test("field signals keep each key's type and write through the observable", () =
 		]);
 	} finally {
 		stop();
+	}
+});
+
+test("peek resolves Model references without subscribing or exposing their stored IDs", () => {
+	class Person extends Model {
+		@id id = "";
+	}
+	class Team extends Model {
+		@child(Person) people: Person[] = [];
+		@modelRef(Person) lead?: Person;
+		@modelRef(Person) selected: Person[] = [];
+	}
+	const team = Team.create({
+		people: [{ id: "a" }, { id: "b" }],
+		lead: { id: "a" },
+		selected: [{ id: "a" }],
+	});
+	const lead = getSignal(team, "lead");
+	const selected = getSignal(team, "selected");
+	let runs = 0;
+	const stop = effect(() => {
+		lead.peek();
+		selected.peek();
+		runs++;
+	});
+	try {
+		expect(lead.peek()).toBe(team.people[0]);
+		expect(selected.peek()).toBe(team.selected);
+		team.lead = team.people[1];
+		team.selected = [team.people[1]];
+		expect(runs).toBe(1);
+		expect(lead.peek()).toBe(lead.value);
+		expect(selected.peek()).toBe(selected.value);
+		expect(selected.peek()[0]).toBe(team.people[1]);
+	} finally {
+		stop();
+		team[Symbol.dispose]();
 	}
 });
 
