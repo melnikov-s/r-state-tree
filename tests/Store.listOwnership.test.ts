@@ -2,6 +2,7 @@ import {
 	applySnapshot,
 	child,
 	createStore,
+	effect,
 	mount,
 	signal,
 	snapshot as snapshotField,
@@ -10,6 +11,21 @@ import {
 } from "../src/index";
 
 const savedLabel = (label: string) => ({ state: { label } });
+
+function captureFailure(run: () => unknown): unknown {
+	try {
+		run();
+	} catch (error) {
+		return error;
+	}
+	throw new Error("Expected reconciliation to fail");
+}
+
+function underlyingFailures(error: unknown): unknown[] {
+	return error instanceof AggregateError
+		? error.errors.flatMap(underlyingFailures)
+		: [error];
+}
 
 class Label extends Store {
 	@snapshotField label = "default";
@@ -115,10 +131,11 @@ describe("Store child list matching", () => {
 
 	test("retains the pending list when construction fails and hydrates on retry", () => {
 		let throwOnConstruction = true;
+		const failure = new Error("cannot construct yet");
 		class Added extends Label {
 			constructor(props: Added["props"]) {
 				super(props);
-				if (throwOnConstruction) throw new Error("cannot construct yet");
+				if (throwOnConstruction) throw failure;
 			}
 		}
 		class Root extends Store {
@@ -134,7 +151,8 @@ describe("Store child list matching", () => {
 			state: { add: true },
 			children: { tabs: [savedLabel("first"), savedLabel("second")] },
 		};
-		expect(() => applySnapshot(root, snapshot)).toThrow("cannot construct yet");
+		const error = captureFailure(() => applySnapshot(root, snapshot));
+		expect(underlyingFailures(error)[0]).toBe(failure);
 		expect(toSnapshot(root)).toEqual(snapshot);
 		expect(original?.label).toBe("default");
 		throwOnConstruction = false;
@@ -216,4 +234,188 @@ describe("Store child list matching", () => {
 			expect(filterSlots).toBeLessThanOrEqual(size);
 		}
 	);
+});
+
+describe("Store child list ownership", () => {
+	test("finishes retiring the old list and mounts the replacement after a cleanup throws", () => {
+		const keys = signal(["a", "b"]);
+		const failure = new Error("a cleanup failed");
+		const started: string[] = [];
+		const retired: string[] = [];
+		class Tab extends Store {
+			constructor(props: Tab["props"]) {
+				super(props);
+				this.effect(() => {
+					const key = String(this.key);
+					started.push(key);
+					return () => {
+						retired.push(key);
+						if (key === "a") throw failure;
+					};
+				});
+			}
+		}
+		class Root extends Store {
+			@child get tabs() {
+				return keys.value.map((key) => createStore(Tab, { key }));
+			}
+		}
+		const root = mount(createStore(Root));
+		const original = root.tabs;
+		const error = captureFailure(() => {
+			keys.value = ["c"];
+		});
+
+		expect(underlyingFailures(error)).toEqual([failure]);
+		expect(retired).toEqual(["a", "b"]);
+		expect(original.map((tab) => tab.signal.aborted)).toEqual([true, true]);
+		expect(started).toEqual(["a", "b", "c"]);
+		const [replacement] = root.tabs;
+		expect(replacement.key).toBe("c");
+		root[Symbol.dispose]();
+		expect(retired).toEqual(["a", "b", "c"]);
+	});
+
+	test.each([false, true])(
+		"reports all failures in order and keeps the replacement owned (list: %s)",
+		(list) => {
+			const replacement = signal(false);
+			const cleanupA = new Error("a cleanup failed");
+			const cleanupB = new Error("b cleanup failed");
+			const startC = new Error("c activation failed");
+			const started: string[] = [];
+			const retired: string[] = [];
+			class Tab extends Store {
+				constructor(props: Tab["props"]) {
+					super(props);
+					this.effect(() => {
+						const key = String(this.key);
+						started.push(key);
+						return () => {
+							retired.push(key);
+							if (key === "a") throw cleanupA;
+							if (key === "b") throw cleanupB;
+						};
+					});
+					this.effect(() => {
+						if (this.key === "c") throw startC;
+					});
+				}
+			}
+			class Root extends Store {
+				@child get tabs() {
+					const keys = replacement.value ? ["c", "d"] : ["a", "b"];
+					return list
+						? keys.map((key) => createStore(Tab, { key }))
+						: createStore(Tab, { key: keys[0] });
+				}
+			}
+			const root = mount(createStore(Root));
+			void root.tabs;
+			const error = captureFailure(() => {
+				replacement.value = true;
+			});
+
+			expect(error).toBeInstanceOf(AggregateError);
+			expect(underlyingFailures(error)).toEqual(
+				list ? [cleanupA, cleanupB, startC] : [cleanupA, startC]
+			);
+			expect(retired).toEqual(list ? ["a", "b"] : ["a"]);
+			expect(started).toEqual(list ? ["a", "b", "c", "d"] : ["a", "c"]);
+			const current = root.tabs;
+			expect((Array.isArray(current) ? current[0] : current).key).toBe("c");
+			root[Symbol.dispose]();
+			expect(retired).toEqual(list ? ["a", "b", "c", "d"] : ["a", "c"]);
+		}
+	);
+
+	test("finishes initial list activation after a child throws and does not retry published children", () => {
+		const failure = new Error("a activation failed");
+		const started: string[] = [];
+		const retired: string[] = [];
+		class Tab extends Label {
+			constructor(props: Tab["props"]) {
+				super(props);
+				this.effect(() => {
+					const key = String(this.key);
+					started.push(key);
+					if (key === "a") throw failure;
+					return () => {
+						retired.push(key);
+					};
+				});
+			}
+		}
+		class Root extends Store {
+			@child get tabs() {
+				return ["a", "b"].map((key) => createStore(Tab, { key }));
+			}
+		}
+		const root = mount(createStore(Root));
+		expect(toSnapshot(root)).toBeUndefined();
+
+		expect(captureFailure(() => root.tabs)).toBe(failure);
+		expect(started).toEqual(["a", "b"]);
+		expect(toSnapshot(root)).toEqual({
+			children: {
+				tabs: ["a", "b"].map((key) => ({ key, ...savedLabel("default") })),
+			},
+		});
+		expect(root.tabs.map((tab) => tab.key)).toEqual(["a", "b"]);
+		expect(started).toEqual(["a", "b"]);
+		root[Symbol.dispose]();
+		expect(retired).toEqual(["b"]);
+	});
+
+	test("does not mask a cleanup failure with a reaction flushed by applySnapshot", () => {
+		const cleanupFailure = new Error("cleanup failed");
+		const reactionFailure = new Error("reaction failed");
+		class Tab extends Store {
+			constructor(props: Tab["props"]) {
+				super(props);
+				this.effect(() => () => {
+					throw cleanupFailure;
+				});
+			}
+		}
+		class Root extends Store {
+			@snapshotField hide = false;
+			@child get tabs() {
+				return this.hide ? [] : [createStore(Tab)];
+			}
+		}
+		const root = mount(createStore(Root));
+		const [tab] = root.tabs;
+		const stop = effect(() => {
+			if (root.hide) throw reactionFailure;
+		});
+		const error = captureFailure(() =>
+			applySnapshot(root, { state: { hide: true } })
+		);
+
+		expect(underlyingFailures(error)).toEqual([
+			cleanupFailure,
+			reactionFailure,
+		]);
+		expect(tab.signal.aborted).toBe(true);
+		expect(root.tabs).toEqual([]);
+		stop();
+		root[Symbol.dispose]();
+	});
+
+	test("does not allow a caller to remove an owned child from the published array", () => {
+		class Root extends Store {
+			@child get tabs() {
+				return [createStore(Label)];
+			}
+		}
+		const root = mount(createStore(Root));
+		const tabs = root.tabs;
+		const [tab] = tabs;
+		expect(() => root.tabs.pop()).toThrow(TypeError);
+		expect(root.tabs).toBe(tabs);
+		expect(tabs).toEqual([tab]);
+		root[Symbol.dispose]();
+		expect(tab.signal.aborted).toBe(true);
+	});
 });
