@@ -28,15 +28,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 	static proxyTraps: ProxyHandler<object> = {
 		has(target, name) {
-			const adm = getAdministration(target);
-
-			if (
-				isPropertyKey(name) &&
-				(!(name in Object.prototype) ||
-					Object.prototype.hasOwnProperty.call(adm.source, name))
-			)
-				return adm.has(name);
-			return Reflect.has(adm.source, name);
+			return getAdministration(target).has(name);
 		},
 
 		get(target, name) {
@@ -96,6 +88,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				return Reflect.defineProperty(adm.source, name, descriptor);
 			}
 
+			const hadOwn = Object.hasOwn(adm.source, name);
 			const previous = debugEnabled
 				? Object.getOwnPropertyDescriptor(adm.source, name)?.value
 				: undefined;
@@ -110,25 +103,12 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				);
 
 			if (result) {
-				// We must trigger reactivity for the property update.
-				// Since we don't know exactly what changed (value vs config), we:
-				// 1. Invalidate tracking for this property (type cache) so it is re-evaluated
-				// 2. Report a value change to any listeners
-				// 3. Report keys/has change if it was a new property
-
 				batch(() => {
 					adm.types.delete(name);
-
-					// If it was a new property or status changed, notify map/keys
-					// We can't cheaply know if it was new without checking before, but generic "flushChange" and key updates are safe.
 					adm.flushChange();
 					adm.keysAtom.reportChanged();
-					adm.hasMap.reportChanged(name);
+					if (!hadOwn) adm.hasMap.reportChanged(name);
 
-					// If it's a value change, we should notify the value listeners.
-					// We read the new value from source to report it.
-					// If it's a value change, we should notify the value listeners.
-					// We read the new value from source to report it.
 					if ("value" in descriptor) {
 						if (isObservable(descriptor.value)) {
 							adm.explicitObservables.add(name);
@@ -137,8 +117,10 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 						}
 						adm.valuesMap.reportChanged(name, descriptor.value);
 					} else {
-						// For accessor changes or meta-only changes, also report generic change
-						adm.valuesMap.reportChanged(name, undefined); // Signal a potential change
+						// Re-read accessors only in the observer, not while defining them.
+						const valueNode = adm.valuesMap.get(name);
+						valueNode?.reportChanged(undefined);
+						valueNode?.invalidate();
 					}
 				});
 			}
@@ -188,14 +170,14 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	}
 
 	private getType(key: keyof T): PropertyType | null {
-		let type = this.types.get(key);
+		const cached = this.types.get(key);
+		if (cached !== undefined) return cached;
 
-		if (type === undefined && !this.types.has(key)) {
-			type = getPropertyType(key, this.source);
-			this.types.set(key, type);
-		}
-
-		return type as PropertyType | null;
+		const descriptor = getPropertyDescriptor(this.source, key);
+		const type = getPropertyType(key, this.source, descriptor);
+		// A miss still tracks in the bounded node maps, but needs no type entry.
+		if (descriptor) this.types.set(key, type);
+		return type;
 	}
 
 	reportChanged(): void {
@@ -302,7 +284,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			});
 		}
 
-		const had = key in this.source;
+		const hadOwn = Object.hasOwn(this.source, key);
 		const oldValue: T[keyof T] = this.get(key);
 		const targetValue = getSource(newValue);
 
@@ -324,7 +306,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		}
 
 		const changed =
-			!had ||
+			!hadOwn ||
 			(!isObservable(oldValue) && oldExplicit !== newExplicit) ||
 			(isObservable(oldValue)
 				? oldValue !== newValue
@@ -339,11 +321,12 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				this.isWriting = false;
 			}
 
+			const added = !hadOwn && Object.hasOwn(this.source, key);
 			if (debugEnabled)
-				debugWrite(this.source, key, had ? "set" : "add", oldValue, newValue);
+				debugWrite(this.source, key, added ? "add" : "set", oldValue, newValue);
 			batch(() => {
 				this.flushChange();
-				if (!had) {
+				if (added) {
 					this.keysAtom.reportChanged();
 					this.hasMap.reportChanged(key);
 				}
@@ -357,31 +340,30 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 	has(key: keyof T): boolean {
 		this.atom.reportObserved();
-
-		if (this.atom.observing) {
-			this.hasMap.reportObserved(key);
-		}
-
-		return key in this.source;
+		// Lazy computeds need a dependency even before they have subscribers.
+		this.hasMap.reportObserved(key);
+		return Reflect.has(this.source, key);
 	}
 
 	remove(key: keyof T): boolean {
-		if (!(key in this.source)) return true;
-
+		const hadOwn = Object.hasOwn(this.source, key);
 		const previous = debugEnabled
 			? Object.getOwnPropertyDescriptor(this.source, key)?.value
 			: undefined;
 		const result = Reflect.deleteProperty(this.source, key);
-		if (result) {
+		if (result && hadOwn) {
+			this.types.delete(key);
+			this.explicitObservables.delete(key);
 			if (debugEnabled)
 				debugWrite(this.source, key, "delete", previous, undefined);
 			batch(() => {
 				this.flushChange();
-				this.valuesMap.reportChanged(key, undefined);
+				const valueNode = this.valuesMap.get(key);
+				valueNode?.reportChanged(undefined);
+				// Even an undefined key can reveal an inherited value. Keep live nodes attached.
+				valueNode?.invalidate();
 				this.keysAtom.reportChanged();
 				this.hasMap.reportChanged(key);
-
-				this.valuesMap.delete(key);
 			});
 		}
 		return result;

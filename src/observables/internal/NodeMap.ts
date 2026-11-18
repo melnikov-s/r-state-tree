@@ -21,7 +21,7 @@ abstract class NodeMap<
 
 	protected abstract createNode(initialValue?: unknown): CachedNode<GraphNode>;
 
-	get(key: unknown): GraphNode | undefined {
+	get(key: unknown): CachedNode<GraphNode> | undefined {
 		return isNonPrimitive(key) ? this.weakMap?.get(key) : this.map?.get(key);
 	}
 
