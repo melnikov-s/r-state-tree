@@ -11,6 +11,7 @@ import {
 } from "../observables/index.js";
 import type { ComputedNode, AtomNode } from "../observables/index.js";
 import { debugWrite, debugEnabled } from "../observables/internal/debug.js";
+import { getPropertyDescriptor } from "../observables/internal/utils.js";
 import Model from "../model/Model.js";
 import type {
 	ModelConfiguration,
@@ -143,6 +144,14 @@ function validateModelChildValue(
 	);
 }
 
+function isManagedField(type: ModelCfgTypes | CommonCfgTypes | undefined) {
+	return (
+		type === CommonCfgTypes.child ||
+		type === ModelCfgTypes.id ||
+		type === ModelCfgTypes.modelRef
+	);
+}
+
 export class ModelAdministration extends PreactObjectAdministration<any> {
 	private getCfgType(
 		name: PropertyKey
@@ -179,12 +188,21 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						);
 				}
 			},
-			set(target, name, value) {
+			set(target, name, value, receiver) {
 				const adm = getAdministration(target) as ModelAdministration;
 				adm.assertUsable();
+				const type = adm.getCfgType(name);
+				if (isManagedField(type)) {
+					if (receiver !== adm.proxy) {
+						throw new TypeError(
+							`r-state-tree: cannot write managed model field '${String(name)}' on a different receiver`
+						);
+					}
+					if (!adm.canWriteManagedField(name)) return false;
+				}
 				adm.writeInProgress.add(name);
 				try {
-					switch (adm.getCfgType(name)) {
+					switch (type) {
 						case ModelCfgTypes.modelRef: {
 							Array.isArray(value)
 								? adm.setModelRefs(name, value)
@@ -193,13 +211,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						}
 						case CommonCfgTypes.child: {
 							validateModelChildValue(value, name);
-							if (Array.isArray(value)) {
-								adm.setModels(name, value);
-								return true;
-							} else {
-								adm.setModel(name, value ?? (null as Model | null));
-								break;
-							}
+							return Array.isArray(value)
+								? adm.setModels(name, value)
+								: adm.setModel(name, value);
 						}
 						case ModelCfgTypes.id: {
 							return adm.setId(name as string, value as IdType);
@@ -217,17 +231,23 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 			defineProperty(target, name, desc) {
 				const adm = getAdministration(target) as ModelAdministration;
-				// if we don't check for writeInProgress we will blow the stack
-				// as Reflect.set will eventually trigger defineProperty proxy handler
-				if (desc && "value" in desc && !adm.writeInProgress.has(name)) {
-					switch (adm.getCfgType(name)) {
-						case ModelCfgTypes.modelRef:
-						case CommonCfgTypes.child:
-						case ModelCfgTypes.id: {
-							adm.proxy[name] = desc.value;
-							return true;
-						}
+				// Reflect.set reenters this trap while writing the backing field.
+				// A later reentrant reaction is not an internal write.
+				if (
+					!(adm.isWriting && adm.writeInProgress.has(name)) &&
+					isManagedField(adm.getCfgType(name))
+				) {
+					if (
+						!("value" in desc) ||
+						desc.configurable === false ||
+						desc.writable === false ||
+						desc.enumerable === false
+					) {
+						throw new TypeError(
+							`r-state-tree: managed model field '${String(name)}' only supports ordinary data writes`
+						);
 					}
+					return Reflect.set(adm.proxy, name, desc.value);
 				}
 
 				const recording = debugEnabled && !adm.writeInProgress.has(name);
@@ -244,6 +264,24 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						"value" in desc ? desc.value : undefined
 					);
 				return result;
+			},
+
+			deleteProperty(target, name) {
+				const adm = getAdministration(target) as ModelAdministration;
+				switch (adm.getCfgType(name)) {
+					case CommonCfgTypes.child:
+						return adm.removeChildField(name);
+					case ModelCfgTypes.id:
+					case ModelCfgTypes.modelRef:
+						throw new TypeError(
+							`r-state-tree: cannot delete managed model field '${String(name)}'`
+						);
+					default:
+						return PreactObjectAdministration.proxyTraps.deleteProperty!(
+							target,
+							name
+						);
+				}
 			},
 		} as ProxyHandler<object>
 	);
@@ -342,40 +380,48 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		});
 	}
 
-	private setModel(name: PropertyKey, newModel: Model | null): void {
-		validateModelChildValue(newModel, name);
-		const currentValue = this.proxy[name];
-
-		if (currentValue === newModel) {
-			return;
+	private canWriteManagedField(name: PropertyKey): boolean {
+		const own = Object.getOwnPropertyDescriptor(this.source, name);
+		if (own) return own.writable === true;
+		if (getPropertyDescriptor(this.source, name)) {
+			throw new TypeError(
+				`r-state-tree: managed model field '${String(name)}' cannot be inherited from a prototype`
+			);
 		}
+		return Object.isExtensible(this.source);
+	}
 
-		this.activeModels.add(name);
+	private setModel(
+		name: PropertyKey,
+		value: Model | null | undefined
+	): boolean {
+		const model = value ? (getModelAdm(value).proxy as Model) : value;
+		return this.changeChildField(name, model, () => this.write(name, model));
+	}
 
-		// Handle switching from array to single: clean up the array first
-		if (Array.isArray(currentValue)) {
-			const oldModels = currentValue as Model[];
-			oldModels.forEach((child) => getModelAdm(child).detach());
-			// Unsub from model trace if it exists
-			this.modelsTraceUnsub.get(name)?.();
-			this.modelsTraceUnsub.delete(name);
-		} else if (currentValue) {
-			// Handle normal single model replacement
-			getModelAdm(currentValue).detach();
+	private removeChildField(name: PropertyKey): boolean {
+		this.assertUsable();
+		const own = Object.getOwnPropertyDescriptor(this.source, name);
+		if (!own) return true;
+		if (!own.configurable) return false;
+		const prototype = Object.getPrototypeOf(this.source);
+		if (
+			!("value" in own) ||
+			(prototype && getPropertyDescriptor(prototype, name))
+		) {
+			throw new TypeError(
+				`r-state-tree: cannot delete managed model field '${String(name)}' with an accessor or prototype definition`
+			);
 		}
-
-		if (newModel) {
-			const adm = getModelAdm(newModel);
-			adm.attach(this, name);
-		}
+		return this.changeChildField(name, undefined, () => this.remove(name));
 	}
 
 	private changeModels(
 		name: PropertyKey,
 		added: Model[],
 		removed: Model[],
-		commit: () => void
-	): void {
+		commit: () => void | boolean
+	): boolean {
 		this.assertUsable();
 		const removedSet = new Set(removed.map((model) => getModelAdm(model)));
 		const addedSet = new Set(added.map((model) => getModelAdm(model)));
@@ -403,51 +449,62 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			attaching.map((adm) => adm.proxy),
 			detaching.map((adm) => adm.proxy)
 		);
-		commit();
+		if (commit() === false) return false;
 		for (const adm of detaching) adm.detach();
 		for (const adm of attaching) adm.attach(this, name);
+		return true;
 	}
 
-	private setModels(name: PropertyKey, newModelsSource: Model[]): void {
-		validateModelChildValue(newModelsSource, name);
-		const currentValue = this.proxy[name];
-		if (currentValue === newModelsSource) return;
-		if (Array.isArray(currentValue)) {
+	private changeChildField(
+		name: PropertyKey,
+		value: Model | Model[] | null | undefined,
+		commit: () => boolean
+	): boolean {
+		const current = this.proxy[name] as Model | Model[] | null | undefined;
+		if (Array.isArray(current)) {
 			(
-				getAdministration(currentValue) as ChildModelsAdministration<Model>
+				getAdministration(current) as ChildModelsAdministration<Model>
 			).assertMutable();
 		}
+		// Ownership follows the indexed members, not a caller's custom iterator.
+		const children = (field: typeof value) =>
+			Array.isArray(field)
+				? Array.from({ length: field.length }, (_, index) => field[index])
+				: field
+					? [field]
+					: [];
+		return batch(() => {
+			if (!this.changeModels(name, children(value), children(current), commit))
+				return false;
+			this.modelsTraceUnsub.get(name)?.();
+			this.modelsTraceUnsub.delete(name);
+			if (value) this.activeModels.add(name);
+			else this.activeModels.delete(name);
+			if (Array.isArray(value)) {
+				const adm = getAdministration(
+					value
+				) as ChildModelsAdministration<Model>;
+				adm.change = (added, removed, commit) => {
+					this.changeModels(name, added, removed, commit);
+				};
+				this.modelsTraceUnsub.set(name, () => {
+					adm.change = undefined;
+				});
+			}
+			return true;
+		});
+	}
+
+	private setModels(name: PropertyKey, newModelsSource: Model[]): boolean {
+		if (this.proxy[name] === newModelsSource) return true;
 		const newModels = createObservableWithCustomAdministration(
 			[] as Model[],
 			ChildModelsAdministration
 		);
 		newModels.push(...newModelsSource);
-		const adm = getAdministration(
-			newModels
-		) as ChildModelsAdministration<Model>;
-		const removed = Array.isArray(currentValue)
-			? Array.from(currentValue as Model[])
-			: currentValue
-				? [currentValue as Model]
-				: [];
-
-		batch(() => {
-			this.changeModels(name, Array.from(newModels), removed, () => {
-				PreactObjectAdministration.proxyTraps.set!(
-					this.source,
-					name as string,
-					newModels,
-					this.proxy
-				);
-			});
-			this.activeModels.add(name);
-			this.modelsTraceUnsub.get(name)?.();
-			adm.change = (added, removed, commit) =>
-				this.changeModels(name, added, removed, commit);
-			this.modelsTraceUnsub.set(name, () => {
-				adm.change = undefined;
-			});
-		});
+		return this.changeChildField(name, newModels, () =>
+			this.write(name, newModels)
+		);
 	}
 
 	private getModelRef(name: PropertyKey): Model | undefined {
