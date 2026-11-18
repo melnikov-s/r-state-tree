@@ -1,3 +1,7 @@
+import { Model, child, id, onSnapshot, toSnapshot } from "../src/index";
+import { getModelAdm } from "../src/model/ModelAdministration";
+import { getAdministration } from "../src/observables/internal/lookup";
+import { ChildModelsAdministration } from "../src/model/ChildModelsAdministration";
 import { getDiff } from "../src/utils";
 import { CommonCfgTypes, ModelCfgTypes } from "../src/types";
 import type { ModelConfiguration } from "../src/types";
@@ -121,6 +125,46 @@ test("missing identifier metadata is cached without making ID-less diffs partial
 	}
 	expect(ownKeys).toHaveBeenCalledTimes(1);
 });
+
+test.each([100, 1000])(
+	"snapshotting %i children skips per-index reads and keeps unchanged snapshots",
+	(size) => {
+		class Item extends Model {
+			@id id = 0;
+			value = 0;
+		}
+		class Root extends Model {
+			@child(Item) items: Item[] = [];
+		}
+		const root = Root.create({
+			items: Array.from({ length: size }, (_, id) => ({ id })),
+		});
+		const first = root.items[0];
+		const second = root.items[1];
+		const items = root.items;
+		const lookup = vi.spyOn(
+			getAdministration(items) as ChildModelsAdministration<Item>,
+			"get"
+		);
+		const firstSnapshot = vi.spyOn(getModelAdm(first), "getSnapshot");
+		const listener = vi.fn();
+
+		second.value++;
+		expect(firstSnapshot).not.toHaveBeenCalled(); // no snapshot listener yet
+		const stop = onSnapshot(root, listener);
+		const before = toSnapshot(root);
+		lookup.mockClear();
+		second.value++;
+		const after = toSnapshot(root);
+		stop();
+
+		expect(listener).toHaveBeenCalledExactlyOnceWith(after, root);
+		expect(after.items![0]).toBe(before.items![0]);
+		expect(after.items![1]).toStrictEqual({ id: 1, value: 2 });
+		expect(before.items![1]).toStrictEqual({ id: 1, value: 1 });
+		expect(lookup.mock.calls).toHaveLength(0);
+	}
+);
 
 test("different configurations with the same ID do not take the aligned shortcut", () => {
 	const oldConfig = { oldKey: { type: ModelCfgTypes.id } };

@@ -498,7 +498,9 @@ class M extends Model {
 
 ### Snapshot invalidation rules
 
-Snapshots are **memoized computeds**. Once a snapshot is observed (via `onSnapshot`, `onSnapshotDiff`, or `toSnapshot`), subsequent calls return the cached value unless a reactive dependency changes.
+Snapshots are **memoized computeds**. With no observer, a write does not eagerly rebuild the root snapshot; `toSnapshot` reads the cache and recomputes invalidated portions on demand.
+
+A root subscription (`onSnapshot` or `onSnapshotDiff`) observes the snapshot and reads it when reactive dependencies change. Debouncing what your callback does (such as serializing or writing to disk) does not debounce snapshot recomputation or diff generation. Use `batch` to group synchronous edits so subscribers read the final state once, or observe a smaller subtree when you do not need the whole root. Unchanged child snapshots are reused, but an edit inside a child array still visits the array's entries to produce the next snapshot. If that array appears in a diff, each direction also lists the target membership and order, so even a one-child edit takes work proportional to the array length.
 
 During normal application updates, the snapshot cache is invalidated by:
 
@@ -1243,7 +1245,7 @@ The lookup searches descendants of the current tree root, excluding the tree roo
 
 ### Snapshot diffs
 
-Use `onSnapshotDiff` to receive compact undo/redo payloads. Unchanged fields are omitted. Children are matched by their configured `@id` (or static `id` configuration), not by array position:
+Use `onSnapshotDiff` to receive compact undo/redo payloads. Unchanged fields are omitted, and changes that leave the snapshot values equal do not call the listener. A changed ordinary collection field is included as a whole value. Children are matched by their configured `@id` (or static `id` configuration), not by array position:
 
 - Surviving children carry their identifier plus changed fields; unchanged array children carry only their identifier. Arrays describe the target membership and order.
 - Children absent from the other state carry complete snapshots, so undo can recreate a deleted child without losing persisted data. The same applies to inserted and replaced children.
@@ -1261,21 +1263,33 @@ const diff = {
 Record and apply these payloads with the existing snapshot API:
 
 ```ts
-const history: SnapshotDiff[] = [];
+import { Model, applySnapshot, batch, onSnapshotDiff } from "r-state-tree";
+import type { SnapshotDiff } from "r-state-tree";
 
-const off = onSnapshotDiff(todo, (diff) => {
-	history.push(diff);
+class Todo extends Model {
+	title = "Old title";
+	completed = false;
+}
+
+const todo = Todo.create();
+const history: SnapshotDiff<Todo>[] = [];
+const stop = onSnapshotDiff(todo, (diff) => history.push(diff));
+
+batch(() => {
+	todo.title = "New title";
+	todo.completed = true;
 });
 
-todo.title = "New title";
-todo.completed = true;
-
-// Undo
-applySnapshot(todo, history[history.length - 1].undo);
-
-// Redo
-applySnapshot(todo, history[history.length - 1].redo);
+// Keep the same entry for both directions. Stop recording before replaying.
+const edit = history[history.length - 1];
+stop();
+if (edit) {
+	applySnapshot(todo, edit.undo); // "Old title", false
+	applySnapshot(todo, edit.redo); // "New title", true
+}
 ```
+
+`applySnapshot` can notify active listeners. A recorder that stays subscribed must skip replay notifications so undo and redo do not create new history entries.
 
 ## Common pitfalls
 

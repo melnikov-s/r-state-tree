@@ -9,23 +9,37 @@ import { performance } from "node:perf_hooks";
 
 // Run from the repository root. Compare current source with an optional
 // DIFF_BENCH_BASELINE=<git revision> in isolated bundles, never rewriting source.
-// DIFF_BENCH_VERIFY_ONLY=1 runs the diff regression suite on each version.
+// DIFF_BENCH_VERIFY_ONLY=1 requires each supplied version to pass the current
+// public diff regression suite (a pre-fix baseline is expected to fail).
 // DIFF_BENCH_SIZES, DIFF_BENCH_SAMPLES, and DIFF_BENCH_SAMPLE_MS control
 // the workload sizes and sampling, not the production code.
 const root = process.cwd();
-const utilsPath = resolve("src/utils.ts");
+const files = [
+	"src/utils.ts",
+	"src/api.ts",
+	"src/model/ModelAdministration.ts",
+];
+const utilsPath = resolve(files[0]);
 const baseline = process.env.DIFF_BENCH_BASELINE;
-const candidates: Record<string, string> = {
-	current: await readFile(utilsPath, "utf8"),
-	...(baseline
-		? {
-				baseline: execFileSync("git", ["show", `${baseline}:src/utils.ts`], {
-					encoding: "utf8",
-					maxBuffer: 2 * 1024 * 1024,
-				}),
-			}
-		: {}),
+const candidates: Record<string, Map<string, string>> = {
+	current: new Map(
+		await Promise.all(
+			files.map(
+				async (file) => [resolve(file), await readFile(file, "utf8")] as const
+			)
+		)
+	),
 };
+if (baseline) {
+	candidates.baseline = new Map(
+		files.map((file) => [
+			resolve(file),
+			execFileSync("git", ["show", `${baseline}:${file}`], {
+				encoding: "utf8",
+			}),
+		])
+	);
+}
 
 if (process.env.DIFF_BENCH_VERIFY_ONLY === "1") {
 	const { startVitest } = await import("vitest/node");
@@ -44,10 +58,9 @@ if (process.env.DIFF_BENCH_VERIFY_ONLY === "1") {
 						name: `verify-${name}`,
 						enforce: "pre",
 						transform(_code, id) {
-							if (id.split("?")[0] === utilsPath) {
-								transformed++;
-								return contents;
-							}
+							const code = contents.get(id.split("?")[0]);
+							if (code !== undefined) transformed++;
+							return code;
 						},
 					},
 				],
@@ -73,7 +86,6 @@ const source = `
 import assert from "node:assert/strict";
 import { Model, child, id, toSnapshot, onSnapshot, onSnapshotDiff, applySnapshot } from ${JSON.stringify(resolve("src/index.ts"))};
 import { getDiff } from ${JSON.stringify(utilsPath)};
-import { getConfigurationFromSnapshot } from ${JSON.stringify(resolve("src/model/ModelAdministration.ts"))};
 import { childType, idType } from ${JSON.stringify(resolve("src/types.ts"))};
 const configs = new WeakMap();
 const lookup = snapshot => configs.get(snapshot);
@@ -128,8 +140,12 @@ class Root${fields} extends Model {
 `
 	)
 	.join("\n")}
+class CollectionRoot extends Root8 {
+ tags = Array.from({ length: 128 }, (_, i) => "tag" + i);
+ details = { values: Array.from({ length: 128 }, (_, i) => ({ count: i })) };
+}
 export function prepareRuntime(n, fields, observer, operation = "edit") {
- const Root = fields === 64 ? Root64 : Root8;
+ const Root = operation === "scalar-collections" ? CollectionRoot : fields === 64 ? Root64 : Root8;
  const root = Root.create({ items: Array.from({ length: n }, (_, index) => ({ id: index, value: 10 })) });
  const children = Array.from(root.items);
  let callbacks = 0;
@@ -141,10 +157,34 @@ export function prepareRuntime(n, fields, observer, operation = "edit") {
   run(iterations) {
    const before = callbacks;
    for (let i = 0; i < iterations; i++) {
-    if (operation === "scalar") root.scalar++;
-    else { const item = children[(cursor++ * 97) % n]; item.value++; }
+    if (operation === "edit") { const item = children[(cursor++ * 97) % n]; item.value++; }
+    else root.scalar++;
    }
-   if (observer !== "none") assert.equal(callbacks - before, iterations);
+   assert.equal(callbacks - before, observer === "none" ? 0 : iterations);
+  },
+  verify(current) {
+   const snapshot = toSnapshot(root);
+   if (observer === "snapshot") assert.strictEqual(sink, snapshot);
+   if (operation === "edit") {
+    const index = ((cursor - 1) * 97) % n;
+    const value = children[index].value;
+    assert.strictEqual(snapshot.items[index].value, value);
+    if (observer === "diff") {
+     const expected = value => ({ items: children.map((_, id) => id === index ? { id, value } : { id }) });
+     assert.deepStrictEqual(sink, { undo: expected(value - 1), redo: expected(value) });
+    }
+   } else {
+    assert.strictEqual(snapshot.scalar, root.scalar);
+    if (observer === "diff") {
+     assert.strictEqual(sink.undo.scalar, root.scalar - 1);
+     assert.strictEqual(sink.redo.scalar, root.scalar);
+     if (current || operation === "scalar") {
+      assert.deepStrictEqual(sink, { undo: { scalar: root.scalar - 1 }, redo: { scalar: root.scalar } });
+     }
+    }
+   }
+   // Optional payload size measurement is outside all timed samples.
+   return observer === "diff" ? Buffer.byteLength(JSON.stringify(sink)) : null;
   },
   dispose() { stop(); },
  };
@@ -193,7 +233,7 @@ type Harness = {
 		fields: number,
 		observer: string,
 		operation?: string
-	): Workload;
+	): Workload & { verify(current: boolean): number | null };
 };
 const require = createRequire(import.meta.url);
 const harnesses: Record<string, Harness> = {};
@@ -211,10 +251,12 @@ for (const [name, contents] of Object.entries(candidates)) {
 			{
 				name: "snapshot-diff-version",
 				setup(build) {
-					build.onLoad({ filter: /\/src\/utils\.ts$/ }, () => ({
-						contents,
-						loader: "ts",
-					}));
+					build.onLoad({ filter: /\/src\/.*\.ts$/ }, ({ path }) => {
+						const code = contents.get(path);
+						return code === undefined
+							? undefined
+							: { contents: code, loader: "ts" };
+					});
 				},
 			},
 		],
@@ -232,7 +274,7 @@ const environment = {
 	nodeEnv: process.env.NODE_ENV ?? "unset",
 	baseline: baseline ?? null,
 	productionSourceDirty: Boolean(
-		execFileSync("git", ["diff", "HEAD", "--name-only", "--", "src/utils.ts"], {
+		execFileSync("git", ["diff", "HEAD", "--name-only", "--", ...files], {
 			encoding: "utf8",
 		}).trim()
 	),
@@ -281,12 +323,13 @@ type Result = {
 	observer: string;
 	microseconds: Record<string, number>;
 	sampleMicroseconds: Record<string, number[]>;
+	payloadBytes?: Record<string, number>;
 };
 const results: Result[] = [];
 // Runtime variants each get their own process and one live Model tree. Keeping
 // multiple 10k-Model trees alive together distorts GC costs and JIT specialization.
 const runtimeWorker = `
-const [bundle, n, fields, observer, operation, samples, targetMs] = process.argv.slice(1);
+const [bundle, n, fields, observer, operation, samples, targetMs, candidate] = process.argv.slice(1);
 const workload = require(bundle).prepareRuntime(+n, +fields, observer, operation);
 if (global.gc) global.gc();
 function elapsed(iterations) {
@@ -301,8 +344,9 @@ while (iterations < 65536) {
 elapsed(iterations);
 const timings = [];
 for (let sample = 0; sample < +samples; sample++) timings.push(elapsed(iterations) * 1000 / iterations);
+const payloadBytes = workload.verify(candidate === "current");
 workload.dispose();
-console.log(JSON.stringify(timings));
+console.log(JSON.stringify({ timings, payloadBytes }));
 `;
 function recordResult(
 	mode: string,
@@ -310,7 +354,8 @@ function recordResult(
 	n: number,
 	fields: number,
 	observer: string,
-	timings: Record<string, number[]>
+	timings: Record<string, number[]>,
+	payloadBytes?: Record<string, number>
 ) {
 	const result = {
 		mode,
@@ -322,6 +367,7 @@ function recordResult(
 			Object.keys(timings).map((name) => [name, median(timings[name])])
 		),
 		sampleMicroseconds: timings,
+		payloadBytes,
 	};
 	results.push(result);
 	const { sampleMicroseconds: _samples, ...summary } = result;
@@ -337,28 +383,42 @@ async function measure(
 ) {
 	if (mode === "runtime") {
 		const timings: Record<string, number[]> = {};
+		const payloadBytes: Record<string, number> = {};
 		for (let offset = 0; offset < names.length; offset++) {
 			const name = names[(results.length + offset) % names.length];
-			timings[name] = JSON.parse(
-				execFileSync(
-					process.execPath,
-					[
-						"--expose-gc",
-						"--eval",
-						runtimeWorker,
-						bundlePaths[name],
-						String(n),
-						String(fields),
-						observer,
-						operation,
-						String(samples),
-						String(targetMs),
-					],
-					{ encoding: "utf8" }
-				)
-			);
+			const sample: { timings: number[]; payloadBytes: number | null } =
+				JSON.parse(
+					execFileSync(
+						process.execPath,
+						[
+							"--expose-gc",
+							"--eval",
+							runtimeWorker,
+							bundlePaths[name],
+							String(n),
+							String(fields),
+							observer,
+							operation,
+							String(samples),
+							String(targetMs),
+							name,
+						],
+						{ encoding: "utf8" }
+					)
+				);
+			timings[name] = sample.timings;
+			if (sample.payloadBytes !== null)
+				payloadBytes[name] = sample.payloadBytes;
 		}
-		recordResult(mode, operation, n, fields, observer, timings);
+		recordResult(
+			mode,
+			operation,
+			n,
+			fields,
+			observer,
+			timings,
+			observer === "diff" ? payloadBytes : undefined
+		);
 		return;
 	}
 	const workloads = Object.fromEntries(
@@ -412,12 +472,20 @@ for (const n of sizes) {
 		await measure("diff", operation, n, 8, "diff", Object.keys(harnesses));
 	}
 	for (const fields of [8, 64]) {
-		await measure("runtime", "edit", n, fields, "diff", Object.keys(harnesses));
-		for (const observer of ["none", "snapshot"]) {
-			await measure("runtime", "edit", n, fields, observer, ["current"]);
+		for (const observer of ["none", "snapshot", "diff"]) {
+			await measure(
+				"runtime",
+				"edit",
+				n,
+				fields,
+				observer,
+				Object.keys(harnesses)
+			);
 		}
 	}
-	await measure("runtime", "scalar", n, 8, "diff", Object.keys(harnesses));
+	for (const operation of ["scalar", "scalar-collections"]) {
+		await measure("runtime", operation, n, 8, "diff", Object.keys(harnesses));
+	}
 }
 const output = resolve("node_modules/.cache/snapshot-diff-results.json");
 await writeFile(

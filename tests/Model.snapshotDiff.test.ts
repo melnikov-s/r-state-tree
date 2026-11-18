@@ -1,9 +1,13 @@
 import {
 	Model,
 	applySnapshot,
+	batch,
 	child,
 	id,
+	modelRef,
+	observable,
 	onSnapshotDiff,
+	signal,
 	toSnapshot,
 } from "../src/index";
 import type { Snapshot, SnapshotDiff } from "../src/index";
@@ -202,6 +206,127 @@ describe.each([true, false])(
 		});
 	}
 );
+
+test("repeating a cleared model ref produces no diff; a subsequent change still does", () => {
+	class Item extends Model {
+		@id id = 1;
+	}
+	class Root extends Model {
+		@child(Item) items: Item[] = [Item.create()];
+		@modelRef(Item) selected: Item | undefined = undefined;
+	}
+	const root = Root.create();
+	const listener = vi.fn();
+	const stop = onSnapshotDiff(root, listener);
+
+	root.selected = undefined;
+	expect(listener).not.toHaveBeenCalled();
+
+	root.selected = root.items[0];
+	expect(listener).toHaveBeenCalledExactlyOnceWith(
+		{ undo: { selected: null }, redo: { selected: { id: 1 } } },
+		root
+	);
+	stop();
+});
+
+test("child edits omit unchanged ordinary snapshot values, including Date and Signal contents", () => {
+	class Item extends Model {
+		@id id = 1;
+		count = 0;
+		tags = ["saved"];
+		details = { values: [NaN, undefined], date: new Date(0) };
+		settings = signal(observable({ enabled: false }));
+	}
+	class Root extends Model {
+		@child(Item) items: Item[] = [Item.create()];
+	}
+	const root = Root.create();
+	const item = root.items[0];
+	const history: SnapshotDiff<Root>[] = [];
+	const stop = onSnapshotDiff(root, (diff) => history.push(diff));
+
+	item.count = 1;
+	item.settings.value.enabled = true;
+	stop();
+
+	expect(history).toStrictEqual([
+		{
+			undo: { items: [{ id: 1, count: 0 }] },
+			redo: { items: [{ id: 1, count: 1 }] },
+		},
+		{
+			undo: { items: [{ id: 1, settings: { enabled: false } }] },
+			redo: { items: [{ id: 1, settings: { enabled: true } }] },
+		},
+	]);
+	const edit = history[history.length - 1];
+	applySnapshot(root, edit.undo);
+	expect(item.settings.value.enabled).toBe(false);
+	applySnapshot(root, edit.redo);
+	expect(item.settings.value.enabled).toBe(true);
+	expect(history).toHaveLength(2);
+});
+
+test.each([true, false])(
+	"an equal child snapshot does not produce a diff (identified: %s)",
+	(identified) => {
+		class Item extends Model {
+			static types: NonNullable<typeof Model.types> = identified
+				? { key: id }
+				: {};
+			key = 1;
+			count = 0;
+			data = { numbers: [1, 2] };
+		}
+		class Root extends Model {
+			@child(Item) items: Item[] = [Item.create()];
+			@child(Item) selected = Item.create({ key: 2 });
+		}
+		const root = Root.create();
+		const diff = vi.fn();
+		const stop = onSnapshotDiff(root, diff);
+
+		root.items[0].data = { numbers: [1, 2] };
+		root.items = Array.from(root.items);
+		root.selected.data = { numbers: [1, 2] };
+		expect(diff).not.toHaveBeenCalled();
+
+		root.items[0].count++;
+		expect(diff).toHaveBeenCalledOnce();
+		expect(diff.mock.calls[0][0].redo).not.toHaveProperty("selected");
+		stop();
+	}
+);
+
+test("a recorded batch replays both ways without appending to history", () => {
+	class Todo extends Model {
+		title = "Old title";
+		completed = false;
+	}
+	const todo = Todo.create();
+	const history: SnapshotDiff<Todo>[] = [];
+	const stop = onSnapshotDiff(todo, (diff) => history.push(diff));
+
+	batch(() => {
+		todo.title = "New title";
+		todo.completed = true;
+	});
+	const edit = history[history.length - 1];
+	stop();
+
+	applySnapshot(todo, edit.undo);
+	expect(toSnapshot(todo)).toStrictEqual({
+		title: "Old title",
+		completed: false,
+	});
+	applySnapshot(todo, edit.redo);
+	expect(toSnapshot(todo)).toStrictEqual({
+		title: "New title",
+		completed: true,
+	});
+	expect(history).toHaveLength(1);
+});
 
 test("undoing an in-place deletion restores the removed child's persisted value", () => {
 	class Item extends Model {

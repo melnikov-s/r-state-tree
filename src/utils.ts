@@ -385,6 +385,33 @@ function getIdentifiedChildDiff(
 		: { ...getDiff(previous, next, getConfig), [identity.key]: identity.id };
 }
 
+// Ordinary collection values are cloned each time their Model is snapshotted.
+// Compare those values after a reference miss, without walking cached subtrees.
+function equalSnapshotValues(
+	left: unknown,
+	right: unknown,
+	getConfig?: SnapshotConfigLookup
+): boolean {
+	if (Object.is(left, right)) return true;
+	if (!left || !right || typeof left !== "object" || typeof right !== "object")
+		return false;
+	if (Array.isArray(left) !== Array.isArray(right)) return false;
+	if (Array.isArray(left) && left.length !== (right as unknown[]).length)
+		return false;
+	if (getConfig && getConfig(left) !== getConfig(right)) return false;
+	const keys = Object.keys(left);
+	if (keys.length !== Object.keys(right).length) return false;
+	const lhs = left as Record<string, unknown>;
+	const rhs = right as Record<string, unknown>;
+	return keys.every(
+		(key) =>
+			Object.hasOwn(rhs, key) &&
+			equalSnapshotValues(lhs[key], rhs[key], getConfig)
+	);
+}
+
+const unchangedChild = Symbol();
+
 function getChildDiff(
 	previous: unknown,
 	next: unknown,
@@ -394,10 +421,14 @@ function getChildDiff(
 		let previousByConfig:
 			| Map<ModelConfiguration<unknown>, Map<IdType, object>>
 			| undefined;
-		return next.map((snapshot: object, index: number) => {
+		let changed = previous.length !== next.length;
+		const items = next.map((snapshot: object, index: number) => {
 			const identity = getSnapshotIdentity(snapshot, getConfig);
-			if (!identity) return snapshot;
 			const positional = previous[index];
+			if (!identity) {
+				changed ||= !equalSnapshotValues(positional, snapshot, getConfig);
+				return snapshot;
+			}
 			if (positional === snapshot) return { [identity.key]: identity.id };
 
 			if (!previousByConfig) {
@@ -407,15 +438,13 @@ function getChildDiff(
 					positional && getSnapshotIdentity(positional, getConfig);
 				if (
 					positionalIdentity?.config === identity.config &&
-					positionalIdentity.id === identity.id
+					Object.is(positionalIdentity.id, identity.id)
 				) {
-					return getIdentifiedChildDiff(
-						positional,
-						snapshot,
-						identity,
-						getConfig
-					);
+					const fields = getDiff(positional, snapshot, getConfig);
+					changed ||= fields !== null;
+					return { ...fields, [identity.key]: identity.id };
 				}
+				changed = true;
 				previousByConfig = new Map();
 				for (const oldSnapshot of previous) {
 					const oldIdentity = getSnapshotIdentity(oldSnapshot, getConfig);
@@ -433,6 +462,7 @@ function getChildDiff(
 				? getIdentifiedChildDiff(match, snapshot, identity, getConfig)
 				: snapshot;
 		});
+		return changed ? items : unchangedChild;
 	}
 
 	if (isPlainObject(previous) && isPlainObject(next)) {
@@ -441,10 +471,19 @@ function getChildDiff(
 		if (
 			identity &&
 			previousIdentity?.config === identity.config &&
-			previousIdentity.id === identity.id
+			Object.is(previousIdentity.id, identity.id)
 		) {
-			return getIdentifiedChildDiff(previous, next, identity, getConfig);
+			const fields = getDiff(previous, next, getConfig);
+			return fields
+				? { ...fields, [identity.key]: identity.id }
+				: unchangedChild;
 		}
+		if (
+			!identity &&
+			!previousIdentity &&
+			equalSnapshotValues(previous, next, getConfig)
+		)
+			return unchangedChild;
 	}
 
 	// Missing/changed identity, null, or a single/array transition may require
@@ -455,26 +494,32 @@ function getChildDiff(
 /**
  * Match children by configured identifier, never by array position. Children
  * present on both sides carry only their id and changed fields; children that
- * may need recreation carry full snapshots. Ordinary fields remain shallow.
+ * may need recreation carry full snapshots. Changed ordinary fields are
+ * included in full, not recursively patched.
  */
 export function getDiff<T extends object>(
 	o1: T,
 	o2: T,
 	getConfig: SnapshotConfigLookup
 ): Partial<T> | null {
+	if (o1 === o2) return null;
 	const config = getConfig(o2);
-	const diff: Record<string, unknown> = {};
+	let diff: Record<string, unknown> | null = null;
 	const obj1 = o1 as Record<string, unknown>;
 	const obj2 = o2 as Record<string, unknown>;
 
 	for (const key of Object.keys(obj2)) {
-		if (!Object.is(obj1[key], obj2[key])) {
-			diff[key] =
-				getConfigType(config?.[key]) === CommonCfgTypes.child
-					? getChildDiff(obj1[key], obj2[key], getConfig)
-					: obj2[key];
+		const previous = obj1[key];
+		const next = obj2[key];
+		if (Object.is(previous, next)) continue;
+		if (getConfigType(config?.[key]) === CommonCfgTypes.child) {
+			const childDiff = getChildDiff(previous, next, getConfig);
+			if (childDiff !== unchangedChild)
+				defineOwnDataProperty((diff ??= {}), key, childDiff);
+		} else if (!equalSnapshotValues(previous, next)) {
+			defineOwnDataProperty((diff ??= {}), key, next);
 		}
 	}
 
-	return Object.keys(diff).length > 0 ? (diff as Partial<T>) : null;
+	return diff as Partial<T> | null;
 }

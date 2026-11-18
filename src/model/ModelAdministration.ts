@@ -709,11 +709,27 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							this.snapshotMap.set(
 								key,
 								createComputed(() => {
-									return getSource(
-										(this.proxy[key] ?? []).map((model: Model) =>
-											getModelAdm(model).getSnapshot()
-										)
-									);
+									const value = this.proxy[key];
+									if (!Array.isArray(value)) return [];
+									const array = getAdministration(value);
+									if (!(array instanceof ChildModelsAdministration)) {
+										return getSource(
+											value.map((model: Model) =>
+												getModelAdm(model).getSnapshot()
+											)
+										);
+									}
+									// The child array reports every structural write to this
+									// dependency; only the individual Model snapshots need
+									// tracking, not each proxy index read.
+									array.reportObserved();
+									array.atom.reportObserved(); // also track explicit reportChanged()
+									const items = array.source;
+									const snapshots = new Array(items.length);
+									for (let i = 0; i < items.length; i++) {
+										snapshots[i] = getModelAdm(items[i]).getSnapshot();
+									}
+									return snapshots;
 								})
 							);
 						}

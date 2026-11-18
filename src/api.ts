@@ -80,16 +80,15 @@ export function onSnapshotDiff<T extends Model>(
 	model: T,
 	callback: (snapshotDiff: SnapshotDiff<T>, model: T) => void
 ): () => void {
-	let prev = getModelAdm(model).getSnapshot();
+	const adm = getModelAdm(model);
+	let prev: Snapshot<T> = adm.getSnapshot();
 
-	return getModelAdm(model).onSnapshotChange(function (next, model) {
-		const diff = {
-			undo: getDiff(next, prev, getConfigurationFromSnapshot)!,
-			redo: getDiff(prev, next, getConfigurationFromSnapshot)!,
-		};
-
-		callback(diff as any, model);
+	return adm.onSnapshotChange((next: Snapshot<T>, value) => {
+		const undo = getDiff(next, prev, getConfigurationFromSnapshot);
+		const redo = getDiff(prev, next, getConfigurationFromSnapshot);
 		prev = next;
+		if (!undo && !redo) return;
+		callback({ undo: undo ?? {}, redo: redo ?? {} }, value as T);
 	});
 }
 
