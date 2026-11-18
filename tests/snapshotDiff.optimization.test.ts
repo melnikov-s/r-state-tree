@@ -1,7 +1,7 @@
 import { Model, child, id, onSnapshot, toSnapshot } from "../src/index";
 import { getModelAdm } from "../src/model/ModelAdministration";
 import { getAdministration } from "../src/observables/internal/lookup";
-import { ChildModelsAdministration } from "../src/model/ChildModelsAdministration";
+import type { ChildModelsAdministration } from "../src/model/ChildModelsAdministration";
 import { getDiff } from "../src/utils";
 import { CommonCfgTypes, ModelCfgTypes } from "../src/types";
 import type { ModelConfiguration } from "../src/types";
