@@ -16,7 +16,7 @@ import { mkdtemp, writeFile, chmod, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInspector } from "../devtools/src/inspection/runtime";
-import { Store, createStore, mount } from "../src/index";
+import { Store, computed, createStore, mount } from "../src/index";
 
 async function setup(timeoutMs = 100) {
 	const relay = await createInspectionRelay({ timeoutMs });
@@ -320,10 +320,13 @@ test("MCP tools use shared validation and relay, and relay descriptors are owner
 	}
 });
 
-test("MCP field writes and async method calls reach the shared runtime, with errors and opt-in enforced", async () => {
+test("MCP inspection and controls reach the shared runtime, with errors and opt-in enforced", async () => {
 	const { relay, hello } = await setup(500);
 	class Counter extends Store {
 		count = 1;
+		@computed get double() {
+			return this.count * 2;
+		}
 		async add(n: number) {
 			await Promise.resolve();
 			this.count += n;
@@ -362,6 +365,23 @@ test("MCP field writes and async method calls reach the shared runtime, with err
 		await server.connect(a);
 		await client.connect(b);
 		const tools = (await client.listTools()).tools;
+		expect(tools.find((t) => t.name === "rst_inspect")).toMatchObject({
+			inputSchema: { properties: { evaluateComputeds: { default: false } } },
+		});
+		for (const [options, expected] of [
+			[{}, expect.objectContaining({ kind: "deferred" })],
+			[{ evaluateComputeds: true }, 2],
+		] as const) {
+			const view = await client.callTool({
+				name: "rst_inspect",
+				arguments: { tabId: "controlled", rootId, ...options },
+			});
+			expect(view.isError).toBe(false);
+			const [{ text }] = view.content as { text: string }[];
+			expect(JSON.parse(text).value.fields).toContainEqual(
+				expect.objectContaining({ name: "double", value: expected })
+			);
+		}
 		for (const name of ["rst_set_field", "rst_call_method"])
 			expect(tools.find((t) => t.name === name)?.annotations).toMatchObject({
 				readOnlyHint: false,

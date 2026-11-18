@@ -314,7 +314,12 @@ export function createInspector(options: InspectorOptions = {}) {
 				activityVisible
 			)
 		: undefined;
-	const read = (value: object, field: Field, path: string[]): unknown => {
+	const read = (
+		value: object,
+		field: Field,
+		path: string[],
+		evaluateComputeds?: boolean
+	): unknown => {
 		if (hidden(path)) throw new Error("Redacted selection");
 		const adm = administration(value);
 		if (adm instanceof StoreAdministration && field.type === "child") {
@@ -326,6 +331,8 @@ export function createInspector(options: InspectorOptions = {}) {
 		if (field.getter) {
 			if (!objectAdm || field.type !== "computed")
 				throw new Error("Undeclared accessor is not inspectable");
+			if (evaluateComputeds !== true)
+				throw new Error("Computed selection not evaluated");
 			return withRetainedChildren(() =>
 				Reflect.get(objectAdm.proxy, field.key)
 			);
@@ -336,7 +343,7 @@ export function createInspector(options: InspectorOptions = {}) {
 		rootId: string,
 		path: string[],
 		paths?: Map<object, string[]>,
-		evaluateComputeds = true
+		evaluateComputeds?: boolean
 	) {
 		const root = roots.get(rootId);
 		if (!root) throw new Error("Unknown root; list roots again");
@@ -357,16 +364,7 @@ export function createInspector(options: InspectorOptions = {}) {
 				throw new Error("Disposed runtime");
 			const field = fields(value).find((f) => f.key === path[i]);
 			if (!field) throw new Error("Unknown field");
-			if (
-				!evaluateComputeds &&
-				field.getter &&
-				!(
-					administration(value) instanceof StoreAdministration &&
-					field.type === "child"
-				)
-			)
-				throw new Error("Computed selection not evaluated");
-			value = read(value, field, path.slice(0, i + 1));
+			value = read(value, field, path.slice(0, i + 1), evaluateComputeds);
 			if (value && typeof value === "object")
 				paths?.set(getSource(value), path.slice(0, i + 1));
 		}
@@ -426,7 +424,7 @@ export function createInspector(options: InspectorOptions = {}) {
 					const keyHidden = hidden(path.concat("key"));
 					const keyField = fields(value).find((field) => field.key === "key");
 					const deferKey =
-						budget.evaluateComputeds === false ||
+						budget.evaluateComputeds !== true ||
 						(keyField?.getter && keyField.type !== "computed");
 					if (!keyHidden && deferKey) budget.remaining--;
 					result.key = keyHidden
@@ -563,7 +561,7 @@ export function createInspector(options: InspectorOptions = {}) {
 						controlDescriptors.get(field.key)
 					);
 				if (
-					(budget.evaluateComputeds === false || field.type !== "computed") &&
+					(budget.evaluateComputeds !== true || field.type !== "computed") &&
 					field.getter &&
 					!(adm instanceof StoreAdministration && field.type === "child")
 				) {
@@ -571,7 +569,7 @@ export function createInspector(options: InspectorOptions = {}) {
 					entry.value = marker("deferred", "Computed value not evaluated");
 					continue;
 				}
-				const child = read(value, field, nextPath);
+				const child = read(value, field, nextPath, budget.evaluateComputeds);
 				entry.value = inspect(
 					child,
 					nextPath,
@@ -1141,7 +1139,7 @@ export function createInspector(options: InspectorOptions = {}) {
 					request.rootId,
 					request.path ?? [],
 					budget.paths,
-					request.evaluateComputeds
+					budget.evaluateComputeds
 				),
 				request.path ?? [],
 				request.depth ?? 2,

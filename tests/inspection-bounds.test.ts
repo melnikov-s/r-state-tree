@@ -106,15 +106,17 @@ test("declared computed key errors are bounded and disposed Stores do not evalua
 	const root = mount(createStore(Root));
 	const inspector = createInspector();
 	const { rootId } = inspector.registerRoot("root", root);
-	const result = inspector.query({ op: "inspect", rootId }) as any;
+	const inspect = (evaluateComputeds?: boolean) =>
+		inspector.query({ op: "inspect", rootId, evaluateComputeds }) as any;
+	expect(inspect().key.kind).toBe("deferred");
+	expect(reads).toBe(0);
+	const result = inspect(true);
 	expect(result.key.kind).toBe("error");
 	expect(result.fields.find((f: any) => f.name === "value").value).toBe(7);
 	expect(JSON.stringify(result)).not.toContain("SECRET KEY ERROR");
 	root[Symbol.dispose]();
 	const before = reads;
-	expect(inspector.query({ op: "inspect", rootId })).toMatchObject({
-		status: "disposed",
-	});
+	expect(inspect(true)).toMatchObject({ status: "disposed" });
 	expect(reads).toBe(before);
 	inspector.dispose();
 });
@@ -140,7 +142,13 @@ test("declared Observable computeds are live; ordinary observable-object getters
 	const inspector = createInspector();
 	const { rootId } = inspector.registerRoot("root", root);
 	const inspect = (path: string[]) =>
-		inspector.query({ op: "inspect", rootId, path, depth: 2 }) as any;
+		inspector.query({
+			op: "inspect",
+			rootId,
+			path,
+			depth: 2,
+			evaluateComputeds: true,
+		}) as any;
 	expect(
 		inspect(["data"]).fields.find((f: any) => f.name === "double").value
 	).toBe(4);

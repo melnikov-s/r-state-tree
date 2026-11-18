@@ -67,7 +67,7 @@ export type InspectionRequest =
 	| { op: "clearOperations" }
 	| {
 			op: "inspect";
-			/** false gives a structure-only projection without evaluating ordinary getters. */
+			/** true opts into declared computed evaluation; defaults to structure-only. */
 			evaluateComputeds?: boolean;
 			rootId: string;
 			path?: string[];

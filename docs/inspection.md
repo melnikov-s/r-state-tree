@@ -2,7 +2,7 @@
 
 The inspector UI lives **only in a browser DevTools extension**, never in the application. There are no overlays, floating buttons, embedded panels, or fallback page UI. The old `mountInspectorPanel` and `InspectorPanelOptions` exports have been removed; remove those imports and mounts when migrating.
 
-The extension and MCP share a bounded **live runtime** protocol. MCP works with the extension absent or its panel closed. Both need a running development app with explicitly registered roots; neither scans arbitrary browser/application memory or automates arbitrary applications. Inspection is read-only by default, apart from explicit child initialization and application effects from declared computeds or explicit Context reads. Writes and method calls require a separate app-side opt-in.
+The extension and MCP share a bounded **live runtime** protocol. MCP works with the extension absent or its panel closed. Both need a running development app with explicitly registered roots; neither scans arbitrary browser/application memory or automates arbitrary applications. Inspection defaults to a structure-only view. Explicit computed evaluation, child initialization, and Context reads can execute application code. Writes and method calls require a separate app-side opt-in.
 
 ## Browser scope and installation
 
@@ -66,7 +66,9 @@ Register only roots you intend to expose. IDs are opaque, instance-local capabil
 
 Select a registered root to see current Store/Model identity, lifecycle, parent/key, fields, declared ownership vs references, method names and available development signatures. **Inspect** navigates literal field segments; **Up** returns to the parent. Props and callbacks are inspected by navigating into `props`. Field values and application labels are always rendered as text, not HTML.
 
-**Reconnect / refresh** reads a new snapshot, not a subscription. The extension defaults to structure-only reads. **Evaluate computeds** explicitly evaluates only declared `@computed`/`static types` computeds; undeclared accessors remain **Not evaluated**. Computeds execute app code and may throw or mutate state; inspection is not a sandbox or atomic snapshot. During synchronous computed inspection, Store child reads use retained storage only: they cannot initialize or reconcile a child. An indirect uninitialized-child read yields a safe evaluation error rather than initializing it. Restricted computed reads do not populate normal application caches, including nested computeds. This synchronous guard cannot prevent app code from scheduling later asynchronous side effects; declared computeds must still be trusted application code.
+**Reconnect / refresh** reads a new snapshot, not a subscription. The extension and MCP default to structure-only reads: Store keys and computed getters are deferred, but data and already-realized children are visible. **Evaluate computeds** (MCP: `evaluateComputeds: true`) opts into declared `@computed`/`static types` computeds; undeclared accessors remain **Not evaluated**. During synchronous computed inspection, Store child reads use retained storage only: they cannot initialize or reconcile a child. An indirect uninitialized-child read yields an evaluation error rather than initializing the child.
+
+Restricted reads bypass RStateTree's own computed caches, including nested RStateTree computeds. They do not isolate native `@preact/signals-core` computeds, other third-party caches, or user memoization. Opting in can cache a restricted result or error in those systems and affect later application reads. Computeds execute trusted app code that may throw, mutate state or schedule later asynchronous side effects; inspection is not a sandbox or atomic snapshot.
 
 Lazy Store children say **Not initialized** until **Initialize** is clicked (or the app itself realizes them). Initialization is explicit, one selected field/level per extension action, and preserves normal lifecycle and keyed identity. A failed initializer may have partial effects; the extension reports failure and does not retry. Explicit Context reads and opted-in methods/setters execute normal app code, including any child creation that application code performs.
 
@@ -109,7 +111,7 @@ The executable is stdio MCP, not a Vite HTTP MCP endpoint. The relay record is a
 
 - `rst_list_tabs` → `{value:{tabs:[{tabId,title,url}]}}`.
 - `rst_list_roots({tabId?})` → registered `{rootId,name,kind}` roots and controls availability.
-- `rst_inspect({tabId?,rootId,path?,depth?,maxEntries?,evaluateComputeds?})` → live bounded state. Declared computeds evaluate unless `evaluateComputeds: false`; ordinary undeclared accessors never evaluate.
+- `rst_inspect({tabId?,rootId,path?,depth?,maxEntries?,evaluateComputeds?})` → live bounded state. Pass `evaluateComputeds: true` to evaluate declared computeds or traverse them in `path`; omitted or false is structure-only. Other operations resolve paths without evaluating computeds, and Context/method return values are inspected structure-only.
 - `rst_initialize_child({tabId?,rootId,path?,field,levels?,maxInitializations?})` → initialization counts, truncation, safe errors.
 - `rst_set_field({tabId?,rootId,path?,field,value})` and `rst_call_method({tabId?,rootId,path?,method,args?,depth?,maxEntries?})` → explicitly enabled controls only.
 - `rst_inspect_context({tabId?,rootId,path?,contextId,depth?,maxEntries?})` → explicit Context consumption. IDs come from the selected Store's inspection.
@@ -176,7 +178,7 @@ Default redaction hides password/secret/token/authorization/cookie/credential-li
 
 ## Repository layout and verification
 
-Core and React live in `src/`; inspector runtime/bridge, Vite transforms/relay, virtual client types and MCP live in `devtools/src/`; the independent static extension lives in `devtools/extension/`. Core never imports devtools. Core contains disabled debug hooks and a synchronous retained-child read scope; restricted computed reads bypass normal computed caches so inspector errors cannot poison app reads. The former in-page UI implementation has been removed. Graph utilities remain internal, not a mountable UI or extension feature.
+Core and React live in `src/`; inspector runtime/bridge, Vite transforms/relay, virtual client types and MCP live in `devtools/src/`; the independent static extension lives in `devtools/extension/`. Core never imports devtools. Core contains disabled debug hooks and a synchronous retained-child read scope; restricted computed reads bypass caches owned by RStateTree. The former in-page UI implementation has been removed. Graph utilities remain internal, not a mountable UI or extension feature.
 
 This is one npm package. JS entry filenames remain in `dist/`; declarations emit under `dist/src/` and `dist/devtools/src/` with public type export paths pointing there. Run `pnpm build`, `pnpm test`, `pnpm lint`, and `pnpm test:inspector:e2e`. The browser suite checks a real MV3 DevTools panel in Chromium and no-extension MCP in Chromium/Firefox/WebKit. Install browser binaries with `pnpm exec playwright install chromium firefox webkit`. The extension test uses full Chromium (`channel: 'chromium'`), not the extension-less headless shell, and drives Chrome DevTools targets over test-only CDP; there is no product CDP/evaluation endpoint.
 

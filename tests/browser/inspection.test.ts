@@ -39,11 +39,13 @@ test("MCP discovers and reads updates without any extension; selects real instan
 		const tabId = (await tool("rst_list_tabs")).value.tabs[0].tabId;
 		const rootId = (await tool("rst_list_roots", { tabId })).value.roots[0]
 			.rootId;
-		const inspect = async () =>
-			(await tool("rst_inspect", { tabId, rootId, depth: 3 })).value;
+		const inspect = async (options = {}) =>
+			(await tool("rst_inspect", { tabId, rootId, depth: 3, ...options }))
+				.value;
 		let state = await inspect();
 		expect(field(state, "count")).toBe(1);
-		expect(field(state, "double")).toBe(2);
+		expect(field(state, "double").kind).toBe("deferred");
+		expect(field(await inspect({ evaluateComputeds: true }), "double")).toBe(2);
 		expect(field(state, "lazy").kind).toBe("uninitialized");
 		expect(JSON.stringify(state)).not.toContain(
 			"fixture-secret-never-transport"
@@ -53,7 +55,7 @@ test("MCP discovers and reads updates without any extension; selects real instan
 		).toHaveCount(0);
 		await page.getByRole("button", { name: "Increment app state" }).click();
 		await expect(page.locator("#count")).toHaveText("2");
-		state = await inspect();
+		state = await inspect({ evaluateComputeds: true });
 		expect(field(state, "count")).toBe(2);
 		expect(field(state, "double")).toBe(4);
 		expect(field(state, "lazy").kind).toBe("uninitialized");
@@ -82,7 +84,7 @@ test("MCP discovers and reads updates without any extension; selects real instan
 			(await tool("rst_initialize_child", { tabId, rootId, field: "lazy" }))
 				.value.initialized
 		).toBe(1);
-		state = await inspect();
+		state = await inspect({ evaluateComputeds: true });
 		expect(field(state, "lazy").kind).toBe("Store");
 		expect(field(state, "lazy").key).toBe("selected");
 		expect(field(state, "mountedChildren")).toBe(1);

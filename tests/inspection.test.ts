@@ -105,6 +105,7 @@ test("explicit initialization preserves mount/disposal effects, keyed identity, 
 		rootId,
 		path: ["branch", "leaves"],
 		depth: 3,
+		evaluateComputeds: true,
 	});
 	expect(field(before, "0").value.key).toBe("a");
 	inspector.query({
@@ -153,24 +154,22 @@ test("only declared computeds evaluate; indirect child initialization is blocked
 	const root = mount(createStore(Root));
 	const inspector = createInspector();
 	const { rootId } = inspector.registerRoot("root", root);
-	const result = inspector.query({ op: "inspect", rootId });
+	const inspect = (path: string[] = []) =>
+		inspector.query({ op: "inspect", rootId, path, evaluateComputeds: true });
+	const result = inspect();
 	expect(field(result, "double").value).toBe(6);
 	expect(runs).toBe(1);
 	expect(field(result, "error").value.kind).toBe("error");
 	expect(field(result, "indirect").value.kind).toBe("error");
 	expect(field(result, "arbitrary").value.kind).toBe("deferred");
-	expect(() =>
-		inspector.query({ op: "inspect", rootId, path: ["arbitrary"] })
-	).toThrow("Undeclared accessor");
+	expect(() => inspect(["arbitrary"])).toThrow("Undeclared accessor");
 	expect(getStoreAdm(root).peekInspectionChild("lazy").initialized).toBe(false);
 	// Normal application execution still initializes the child, with no cached inspector error.
 	expect(root.indirect).toBe(9);
 	expect(getStoreAdm(root).peekInspectionChild("lazy").initialized).toBe(true);
 	expect(JSON.stringify(result)).not.toContain("SECRET ERROR PAYLOAD");
 	root.count = 4;
-	expect(
-		field(inspector.query({ op: "inspect", rootId }), "double").value
-	).toBe(8);
+	expect(field(inspect(), "double").value).toBe(8);
 	root[Symbol.dispose]();
 	inspector.dispose();
 });
@@ -198,15 +197,15 @@ test("declared computed reads use already-realized children without rerunning fa
 	const inspector = createInspector();
 	const { rootId } = inspector.registerRoot("Root", root);
 	try {
-		const before = inspector.query({ op: "inspect", rootId });
+		const inspect = (path: string[] = []) =>
+			inspector.query({ op: "inspect", rootId, path, evaluateComputeds: true });
+		const before = inspect();
 		expect(field(before, "selected").value.kind).toBe("error");
 		expect(asObject(before).key.kind).toBe("deferred");
 		expect(factories).toBe(0);
 		inspector.query({ op: "initialize", rootId, field: "leaf" });
 		expect(factories).toBe(1);
-		expect(inspector.query({ op: "inspect", rootId, path: ["selected"] })).toBe(
-			5
-		);
+		expect(inspect(["selected"])).toBe(5);
 		expect(factories).toBe(1);
 		const captured = computations;
 		expect(root.selected).toBe(5);

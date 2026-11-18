@@ -34,7 +34,7 @@ const properties = {
 		items: { type: "string", maxLength: 256 },
 		maxItems: 16,
 		description:
-			"Field segments from the registered root, including array indices. Child fields use retained storage; synchronous declared-computed inspection cannot initialize or reconcile Store children and bypasses normal application caches, including nested computeds.",
+			"Field segments from the registered root, including array indices. Child fields use retained storage. Traversing a computed requires rst_inspect with evaluateComputeds:true.",
 	},
 };
 const bounds = {
@@ -80,13 +80,13 @@ const tools = [
 	{
 		name: "rst_inspect",
 		description:
-			"Inspect a bounded live tree/subtree. By default evaluates only declared computeds; undeclared accessors never evaluate. Synchronous computed inspection uses retained Store child storage without initialization or reconciliation and bypasses normal application caches, including nested computeds. Uninitialized-child reads yield safe evaluation errors. Computeds execute arbitrary trusted app code and may throw or mutate state; the synchronous child guard cannot prevent later asynchronous side effects. Set evaluateComputeds:false for a structure-only view without computed/key evaluation. No sandbox, atomic snapshot, history or replay.",
+			"Inspect a bounded live tree/subtree. Defaults to structure-only, without computed or key evaluation. Set evaluateComputeds:true to evaluate declared computeds; undeclared accessors never evaluate. Synchronous Store child reads use retained storage without initialization or reconciliation. RStateTree computed caches are bypassed, but native Signals and other app caches may retain values or errors from inspection. Computeds execute trusted app code and may throw, mutate state, or schedule side effects. No sandbox, atomic snapshot, history or replay.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				...properties,
 				...bounds,
-				evaluateComputeds: { type: "boolean", default: true },
+				evaluateComputeds: { type: "boolean", default: false },
 			},
 			required: ["rootId"],
 			additionalProperties: false,

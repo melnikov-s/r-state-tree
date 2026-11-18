@@ -11,7 +11,7 @@ import {
 import { createInspector } from "../devtools/src/devtools";
 import { getStoreAdm } from "../src/store/StoreAdministration";
 import type { ReadonlySignal } from "@preact/signals-core";
-import { Signal } from "@preact/signals-core";
+import { computed as nativeComputed, Signal } from "@preact/signals-core";
 import { effect, signal } from "../src/observables";
 import { withRetainedChildren } from "../src/observables/internal/retainedRead";
 
@@ -22,7 +22,13 @@ function setup<T extends Store>(Type: new (...args: any[]) => T) {
 	return {
 		root,
 		inspect: (path: string[] = []): any =>
-			inspector.query({ op: "inspect", rootId, path, depth: 4 }),
+			inspector.query({
+				op: "inspect",
+				rootId,
+				path,
+				depth: 4,
+				evaluateComputeds: true,
+			}),
 		dispose() {
 			inspector.dispose();
 			root[Symbol.dispose]();
@@ -33,6 +39,87 @@ function setup<T extends Store>(Type: new (...args: any[]) => T) {
 function field(value: any, name: string): any {
 	return value.fields.find((entry: any) => entry.name === name).value;
 }
+
+function nativeComputedFixture() {
+	let factories = 0;
+	let runs = 0;
+	class Leaf extends Store {
+		value = 42;
+	}
+	class Root extends Store {
+		static types = { lazy: child, current: computed };
+		get lazy() {
+			factories++;
+			return createStore(Leaf);
+		}
+		get current() {
+			return wrapped.value;
+		}
+	}
+	const root = mount(createStore(Root));
+	const native = nativeComputed(() => {
+		runs++;
+		return root.lazy.value;
+	});
+	const wrapped = computed(() => native.value);
+	const inspector = createInspector();
+	const { rootId } = inspector.registerRoot("root", root);
+	return {
+		root,
+		native,
+		inspect: (options: { path?: string[]; evaluateComputeds?: boolean } = {}) =>
+			inspector.query({ op: "inspect", rootId, ...options }),
+		counts: () => ({ factories, runs }),
+		dispose() {
+			inspector.dispose();
+			root[Symbol.dispose]();
+		},
+	};
+}
+
+test.each([{}, { evaluateComputeds: false }])(
+	"structure-only inspection preserves normal reads through a native computed (%j)",
+	(options) => {
+		const f = nativeComputedFixture();
+		try {
+			const result = f.inspect(options);
+			const duringInspection = f.counts();
+			// On the old default, native Signals caches the retained-child error.
+			expect(f.root.current).toBe(42);
+			expect(f.native.value).toBe(42);
+			expect(duringInspection).toEqual({ factories: 0, runs: 0 });
+			expect(field(result, "lazy")).toMatchObject({ kind: "uninitialized" });
+			expect(field(result, "current")).toMatchObject({ kind: "deferred" });
+			expect(f.counts()).toEqual({ factories: 1, runs: 1 });
+		} finally {
+			f.dispose();
+		}
+	}
+);
+
+test("selecting a computed path does not implicitly opt into evaluation", () => {
+	const f = nativeComputedFixture();
+	try {
+		expect(() => f.inspect({ path: ["current"] })).toThrow(
+			"Computed selection not evaluated"
+		);
+		expect(f.counts()).toEqual({ factories: 0, runs: 0 });
+		expect(f.root.current).toBe(42);
+	} finally {
+		f.dispose();
+	}
+});
+
+test("opt-in inspection through a native computed does not initialize a lazy child", () => {
+	const f = nativeComputedFixture();
+	try {
+		const result = f.inspect({ evaluateComputeds: true });
+		expect(field(result, "current")).toMatchObject({ kind: "error" });
+		expect(f.counts()).toEqual({ factories: 0, runs: 1 });
+	} finally {
+		f.dispose();
+	}
+});
 
 const signalReaders: [string, (memo: ReadonlySignal<number>) => number][] = [
 	["value", (memo) => memo.value],
