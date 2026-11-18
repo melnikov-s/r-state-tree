@@ -297,92 +297,45 @@ export class StoreAdministration<
 			: { initialized: false };
 	}
 
-	private findPendingChildSnapshot(
-		name: PropertyKey,
-		key: string | number | undefined
-	): { snapshot: StoreChildSnapshot | null; commit: () => void } | undefined {
+	private getPendingChildSnapshot(name: PropertyKey) {
 		const propertyName = String(name);
-		if (
-			!Object.prototype.hasOwnProperty.call(
-				this.pendingChildSnapshots,
-				propertyName
-			)
-		) {
-			return undefined;
-		}
-		const pending = this.pendingChildSnapshots[propertyName];
+		return Object.prototype.hasOwnProperty.call(
+			this.pendingChildSnapshots,
+			propertyName
+		)
+			? this.pendingChildSnapshots[propertyName]
+			: undefined;
+	}
+
+	private matchPendingChildSnapshots(name: PropertyKey) {
+		const pending = this.getPendingChildSnapshot(name);
 		if (!pending) return undefined;
 
-		let snapshot: StoreChildSnapshot | null | undefined;
-		if (Array.isArray(pending)) {
-			const matchIndex =
-				key !== undefined
-					? pending.findIndex((item) => item?.key === key)
-					: pending.findIndex(
-							(item) => item === null || item.key === undefined
-						);
-			if (matchIndex >= 0) snapshot = pending[matchIndex];
-		} else if (
-			pending &&
-			(pending.key === key || (pending.key === undefined && key === undefined))
-		) {
-			snapshot = pending;
+		const keyed = new Map<string | number, StoreChildSnapshot>();
+		const positional: (StoreChildSnapshot | null)[] = [];
+		for (const snapshot of Array.isArray(pending) ? pending : [pending]) {
+			if (snapshot === undefined) continue;
+			if (snapshot?.key === undefined) {
+				positional.push(snapshot);
+			} else if (!keyed.has(snapshot.key)) {
+				keyed.set(snapshot.key, snapshot);
+			}
 		}
 
-		if (snapshot === undefined) return undefined;
-
-		return {
-			snapshot,
-			commit: () => {
-				const current = this.pendingChildSnapshots[propertyName];
-				if (Array.isArray(current)) {
-					const matchIndex = current.indexOf(snapshot!);
-					if (matchIndex < 0) return;
-					const remaining = current.filter((_, i) => i !== matchIndex);
-					if (remaining.length) {
-						this.pendingChildSnapshots[propertyName] = remaining;
-					} else {
-						delete this.pendingChildSnapshots[propertyName];
-					}
-				} else if (current === snapshot) {
-					delete this.pendingChildSnapshots[propertyName];
-				}
-			},
-		};
-	}
-
-	private hydrateChildStoreFromPendingSnapshot(
-		store: Store,
-		name: PropertyKey
-	): void {
-		const pending = this.findPendingChildSnapshot(name, store.key);
-		if (!pending) return;
-		if (pending.snapshot) getStoreAdm(store).loadSnapshot(pending.snapshot);
-		pending.commit();
-	}
-
-	private createChildStore(element: StoreElement, name: PropertyKey): Store {
-		const child = allowNewStore(() => new element.Type(element.props));
-		try {
-			this.hydrateChildStoreFromPendingSnapshot(child, name);
-			return child;
-		} catch (error) {
-			getStoreAdm(child).dispose(true);
-			throw error;
-		}
+		// Assign once in target order, including null snapshot slots for empty
+		// unkeyed stores. The retained input is not changed until the plan succeeds.
+		let position = 0;
+		return (key: string | number | undefined) =>
+			key === undefined ? positional[position++] : keyed.get(key);
 	}
 
 	private finishPendingChildSnapshots(name: PropertyKey): void {
-		const stores = this.childStoreDataMap.get(name)!.value.get();
-		if (Array.isArray(stores)) {
-			stores.forEach((store) => {
-				this.hydrateChildStoreFromPendingSnapshot(store, name);
-			});
-		} else if (stores) {
-			this.hydrateChildStoreFromPendingSnapshot(stores, name);
+		if (this.getPendingChildSnapshot(name) !== undefined) {
+			delete this.pendingChildSnapshots[String(name)];
+			if (this.childStoreDataMap.get(name)?.initialized) {
+				this.snapshotStructureAtom.reportChanged();
+			}
 		}
-
-		delete this.pendingChildSnapshots[String(name)];
 	}
 
 	private validateStoreChildValue(value: unknown, name: PropertyKey): void {
@@ -396,160 +349,121 @@ export class StoreAdministration<
 	private setStoreList(
 		name: PropertyKey,
 		elements: Array<StoreElement | null>
-	): Store[] {
+	): void {
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		const oldStores = untracked(() => childStoreData.value.get()) as Store[];
-		const stores: Store[] = [];
-		const propertyName = String(name);
-		const hadPendingSnapshots = Object.prototype.hasOwnProperty.call(
-			this.pendingChildSnapshots,
-			propertyName
+		const previous = untracked(() => childStoreData.value.get());
+		const oldStores = Array.isArray(previous) ? previous : [];
+		const removedStores = new Set(
+			Array.isArray(previous) ? previous : previous ? [previous] : []
 		);
-		const pendingSnapshotsBefore = this.pendingChildSnapshots[propertyName];
-		const rollbackPendingSnapshots = (): void => {
-			if (hadPendingSnapshots) {
-				this.pendingChildSnapshots[propertyName] = pendingSnapshotsBefore;
-			} else {
-				delete this.pendingChildSnapshots[propertyName];
-			}
-		};
-		let keyedIndexChanged = false;
-
-		if (!oldStores) {
-			try {
-				elements.forEach((e) => {
-					if (e) {
-						const childStore = this.createChildStore(e, name);
-
-						stores.push(childStore);
-					}
-				});
-
-				childStoreData.value.set(stores);
-				if (this.isMounted) {
-					stores.forEach((s) => getStoreAdm(s).mount(this, name));
-				}
-			} catch (error) {
-				childStoreData.value.set(null);
-				stores.forEach((store) => getStoreAdm(store).dispose(true));
-				rollbackPendingSnapshots();
-				throw error;
-			}
-
-			return stores;
+		const newStores: Store[] = [];
+		const stores: Store[] = [];
+		const propsUpdates: Array<{
+			store: Store;
+			props: Props;
+			snapshot: StoreChildSnapshot | null | undefined;
+		}> = [];
+		const keyed = new Map<string | number, Store>();
+		for (const store of oldStores) {
+			if (store.key !== undefined) keyed.set(store.key, store);
 		}
 
-		const newStores: Set<Store> = new Set();
-		const removedStores: Set<Store> = new Set(oldStores);
-		const propsUpdates: Array<{ store: Store; props: Props }> = [];
-		type KeyValue = { store: Store; index: number };
-
-		const keyMap = oldStores.reduce<Map<unknown, KeyValue>>(
-			(map, store, index) => {
-				if (store.key !== undefined) {
-					map.set(store.key, { store, index });
-				}
-
-				return map;
-			},
-			new Map()
-		);
-
-		const addStore = (element: NonNullable<StoreElement>): void => {
-			const childStore = this.createChildStore(element, name);
-			newStores.add(childStore);
-
-			stores.push(childStore);
-		};
-
-		const updateStore = (
-			element: NonNullable<StoreElement>,
-			store: Store
-		): void => {
-			removedStores.delete(store);
-			propsUpdates.push({ store, props: element.props });
-			stores.push(store);
-		};
-
+		const matchSnapshot = this.matchPendingChildSnapshots(name);
 		try {
-			elements.forEach((e, index) => {
-				if (e) {
-					const { Type, key } = e;
-					const old = oldStores[index];
-
-					if (key === undefined && (!old || old.key === undefined)) {
-						if (old instanceof Type) {
-							updateStore(e, old);
-						} else {
-							addStore(e);
-						}
-					} else if (key !== undefined) {
-						const keyedStore = keyMap.get(key)?.store;
-						if (keyedStore && keyedStore instanceof Type) {
-							updateStore(e, keyedStore);
-							if (keyMap.get(key)!.index !== index) {
-								keyedIndexChanged = true;
-							}
-						} else {
-							addStore(e);
-						}
-					}
+			for (const element of elements) {
+				if (!element) continue;
+				const { key, props, Type } = element;
+				// Descriptors without a child do not occupy a realized position.
+				const old =
+					key === undefined ? oldStores[stores.length] : keyed.get(key);
+				const snapshot = matchSnapshot?.(key);
+				if (
+					(key !== undefined || old?.key === undefined) &&
+					old instanceof Type
+				) {
+					removedStores.delete(old);
+					propsUpdates.push({ store: old, props, snapshot });
+					stores.push(old);
+				} else {
+					const store = allowNewStore(() => new Type(props));
+					newStores.push(store);
+					if (snapshot) getStoreAdm(store).loadSnapshot(snapshot);
+					stores.push(store);
 				}
-			});
+			}
+
+			for (const { store, props, snapshot } of propsUpdates) {
+				updateProps(store.props, props);
+				if (snapshot) getStoreAdm(store).loadSnapshot(snapshot);
+			}
 		} catch (error) {
 			newStores.forEach((store) => getStoreAdm(store).dispose(true));
-			rollbackPendingSnapshots();
 			throw error;
 		}
 
-		propsUpdates.forEach(({ store, props }) => updateProps(store.props, props));
-
-		if (newStores.size || removedStores.size || keyedIndexChanged) {
-			batch(() => childStoreData.value.set(stores));
+		this.finishPendingChildSnapshots(name);
+		if (
+			previous !== oldStores ||
+			stores.length !== oldStores.length ||
+			stores.some((store, index) => store !== oldStores[index])
+		) {
+			childStoreData.value.set(stores);
 		}
 
-		removedStores.forEach((s) => getStoreAdm(s).dispose(true));
+		removedStores.forEach((store) => getStoreAdm(store).dispose(true));
 		if (this.isMounted) {
-			newStores.forEach((s) => getStoreAdm(s).mount(this, name));
+			newStores.forEach((store) => getStoreAdm(store).mount(this, name));
 		}
-
-		return stores;
 	}
 
 	private setSingleStore(
 		name: PropertyKey,
 		element: StoreElement | null
-	): Store | null {
+	): void {
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		const oldStore = untracked(() =>
-			childStoreData.value.get()
-		) as Store | null;
-		const { key, Type, props } = element || {};
-
-		if (!element) {
-			batch(() => childStoreData.value.set(null));
-			oldStore && getStoreAdm(oldStore).dispose(true);
-			return null;
-		} else if (
-			!oldStore ||
-			oldStore.props.key !== key ||
-			!(oldStore instanceof Type!)
+		const previous = untracked(() => childStoreData.value.get());
+		const oldStore = Array.isArray(previous) ? null : previous;
+		const matchSnapshot = this.matchPendingChildSnapshots(name);
+		if (
+			element &&
+			oldStore?.key === element.key &&
+			oldStore instanceof element.Type
 		) {
-			// Construction must succeed before retiring the currently valid child.
-			const childStore = this.createChildStore(element, name);
-			batch(() => {
-				childStoreData.value.set(childStore);
-				try {
-					if (oldStore) getStoreAdm(oldStore).dispose(true);
-				} finally {
-					// The replacement is now owned, even if the old cleanup fails.
-					if (this.isMounted) getStoreAdm(childStore).mount(this, name);
-				}
-			});
-			return childStore;
-		} else {
-			batch(() => updateProps(oldStore.props, props!));
-			return oldStore;
+			updateProps(oldStore.props, element.props);
+			const snapshot = matchSnapshot?.(element.key);
+			if (snapshot) getStoreAdm(oldStore).loadSnapshot(snapshot);
+			this.finishPendingChildSnapshots(name);
+			return;
+		}
+
+		// Construction must succeed before retiring the currently valid child.
+		let replacement: Store | null = null;
+		if (element) {
+			const { Type, props, key } = element;
+			replacement = allowNewStore(() => new Type(props));
+			try {
+				const snapshot = matchSnapshot?.(key);
+				if (snapshot) getStoreAdm(replacement).loadSnapshot(snapshot);
+			} catch (error) {
+				getStoreAdm(replacement).dispose(true);
+				throw error;
+			}
+		}
+
+		this.finishPendingChildSnapshots(name);
+		childStoreData.value.set(replacement);
+		try {
+			for (const store of Array.isArray(previous)
+				? previous
+				: previous
+					? [previous]
+					: []) {
+				getStoreAdm(store).dispose(true);
+			}
+		} finally {
+			// The replacement is now owned, even if the old cleanup fails.
+			if (replacement && this.isMounted)
+				getStoreAdm(replacement).mount(this, name);
 		}
 	}
 
@@ -561,19 +475,20 @@ export class StoreAdministration<
 			? this.peekInspectionChild(name).value
 			: undefined;
 		this.validateStoreChildValue(storeElement, name);
-		Array.isArray(storeElement)
-			? this.setStoreList(name, storeElement)
-			: this.setSingleStore(name, storeElement as StoreElement | null);
-		this.finishPendingChildSnapshots(name);
-		const childStoreData = this.childStoreDataMap.get(name)!;
-		// Only cache successful reconciliation so failed attempts remain retryable.
-		childStoreData.reconciledElement = storeElement;
-		childStoreData.initialized = true;
-		if (debugEnabled) {
-			const after = this.peekInspectionChild(name).value;
-			if (before !== after)
-				debugWrite(this.source, name, "child", before, after);
-		}
+		batch(() => {
+			Array.isArray(storeElement)
+				? this.setStoreList(name, storeElement)
+				: this.setSingleStore(name, storeElement);
+			const childStoreData = this.childStoreDataMap.get(name)!;
+			// Only cache successful reconciliation so failed attempts remain retryable.
+			childStoreData.reconciledElement = storeElement;
+			childStoreData.initialized = true;
+			if (debugEnabled) {
+				const after = this.peekInspectionChild(name).value;
+				if (before !== after)
+					debugWrite(this.source, name, "child", before, after);
+			}
+		});
 	}
 
 	private updateStore(name: PropertyKey, forceReconcile = false): void {
@@ -587,7 +502,8 @@ export class StoreAdministration<
 		if (
 			forceReconcile ||
 			!initialized ||
-			!Object.is(childStoreData.reconciledElement, storeElement)
+			!Object.is(childStoreData.reconciledElement, storeElement) ||
+			this.getPendingChildSnapshot(name) !== undefined
 		) {
 			this.reconcileStore(name, storeElement);
 			if (!initialized) this.snapshotStructureAtom.reportChanged();
@@ -658,6 +574,7 @@ export class StoreAdministration<
 			batch(() => {
 				let hasInPlaceStateChange = false;
 				this.pendingChildSnapshots = clone(children, "children");
+				this.snapshotStructureAtom.reportChanged();
 				Object.keys(state).forEach((key) => {
 					if (
 						getConfigType(this.configuration[key]) !== StoreCfgTypes.snapshot
@@ -688,7 +605,6 @@ export class StoreAdministration<
 				Array.from(this.childStoreDataMap.keys()).forEach((name) => {
 					this.updateStore(name, true);
 				});
-				this.snapshotStructureAtom.reportChanged();
 			});
 		});
 	}
@@ -715,30 +631,24 @@ export class StoreAdministration<
 			const stores = value.get();
 			const key = String(name);
 			realizedNames.add(key);
-			const pending = Object.prototype.hasOwnProperty.call(
-				this.pendingChildSnapshots,
-				key
-			)
-				? this.pendingChildSnapshots[key]
-				: undefined;
+			const pending = this.getPendingChildSnapshot(name);
 			let snapshot:
 				| StoreChildSnapshot
 				| (StoreChildSnapshot | null)[]
 				| undefined;
-			if (Array.isArray(stores)) {
+			if (pending !== undefined) {
+				// If hydration has not succeeded, save the pending input rather
+				// than merging it with the old realized children.
+				if (pending) snapshot = clone(pending, `children.${key}`);
+			} else if (Array.isArray(stores)) {
 				const snapshots: (StoreChildSnapshot | null)[] = [];
 				for (const store of stores) {
 					const child = this.snapshotChild(store);
 					if (child || store.key === undefined) snapshots.push(child ?? null);
 				}
-				if (Array.isArray(pending)) {
-					snapshots.push(...clone(pending, `children.${key}`));
-				}
 				if (snapshots.some((child) => child !== null)) snapshot = snapshots;
 			} else if (stores) {
 				snapshot = this.snapshotChild(stores);
-			} else if (pending) {
-				snapshot = clone(pending, `children.${key}`);
 			}
 			if (snapshot) (children ??= {})[key] = snapshot;
 		});
