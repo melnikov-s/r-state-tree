@@ -3,6 +3,7 @@ import type {
 	StoreProps,
 	StoreConfiguration,
 	Configuration,
+	StoreElement,
 } from "../types.js";
 import {
 	getStoreAdm,
@@ -39,6 +40,26 @@ type UpdateStoreProps<T extends Record<string, any>> = Partial<T> &
 
 type PropsOfStore<T extends Store<any>> = T extends Store<infer P> ? P : never;
 
+const storeElements = new WeakSet<object>();
+
+export function isStoreElement(value: unknown): value is StoreElement {
+	if (typeof value !== "object" || value === null) return false;
+	if (storeElements.has(value)) return true;
+
+	// Keep accepting structural descriptors, but do not duck-type Store or
+	// Model instances (or invoke an accessor named Type on an unrelated object).
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) return false;
+	const Type = Object.getOwnPropertyDescriptor(value, "Type")?.value;
+	const props = Object.getOwnPropertyDescriptor(value, "props")?.value;
+	return (
+		typeof Type === "function" &&
+		(Type === Store || Type.prototype instanceof Store) &&
+		typeof props === "object" &&
+		props !== null
+	);
+}
+
 export function createStore<
 	K extends Store<any>,
 	T extends Record<string, any> = K extends Store<infer P> ? P : never,
@@ -49,11 +70,13 @@ export function createStore<
 		: [props: CreateStoreProps<T>]
 ): K {
 	const props = args[0];
-	return {
+	const element = {
 		Type,
 		props: props ?? {},
 		key: props && props.key,
-	} as unknown as K;
+	};
+	storeElements.add(element);
+	return element as unknown as K;
 }
 
 export function updateStore<K extends Store<any>>(

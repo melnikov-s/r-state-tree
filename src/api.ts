@@ -1,20 +1,18 @@
-import type {
-	StoreElement,
-	Snapshot,
-	SnapshotDiff,
-	IdType,
-	StoreSnapshot,
-} from "./types.js";
+import type { Snapshot, SnapshotDiff, IdType, StoreSnapshot } from "./types.js";
 import { getDiff } from "./utils.js";
-import Store from "./store/Store.js";
-import { allowNewStore } from "./store/Store.js";
-import { getStoreAdm } from "./store/StoreAdministration.js";
+import Store, { allowNewStore, isStoreElement } from "./store/Store.js";
+import {
+	getStoreAdm,
+	StoreAdministration,
+} from "./store/StoreAdministration.js";
 import type Model from "./model/Model.js";
 import {
 	getModelAdm,
 	getConfigurationFromSnapshot,
+	ModelAdministration,
 } from "./model/ModelAdministration.js";
 import { getModelById } from "./model/idMap.js";
+import { getAdministration } from "./observables/index.js";
 
 export function findModelById<T extends Model>(
 	root: Model,
@@ -28,10 +26,17 @@ export function mount<T extends Store>(
 	container: T,
 	options?: { snapshot?: StoreSnapshot }
 ): T {
+	if (!isStoreElement(container)) {
+		throw new TypeError("r-state-tree: mount expected a Store descriptor");
+	}
+
+	const element = container;
 	return allowNewStore(() => {
-		const element = container as unknown as StoreElement;
 		const s = new element.Type(element.props);
 		const adm = getStoreAdm(s);
+		if (!(adm instanceof StoreAdministration)) {
+			throw new TypeError("r-state-tree: mount expected a Store descriptor");
+		}
 		try {
 			// Prefer an explicit mount-time snapshot; otherwise consume one stashed
 			// earlier by applySnapshot on the not-yet-instantiated element.
@@ -104,23 +109,27 @@ export function applySnapshot(
 	value: Model | Store,
 	snapshot: Snapshot | StoreSnapshot | undefined
 ): Model | Store {
-	if (value instanceof Store) {
+	const adm = getAdministration(value);
+	if (adm instanceof StoreAdministration) {
 		// Store instance: applies in place. Unmounted stores are quiescent
 		// (effects/reactions start only at mount), and mounted stores reconcile
 		// through the same machinery as any reactive child/props update.
-		getStoreAdm(value).loadSnapshot(snapshot as StoreSnapshot | undefined);
+		adm.loadSnapshot(snapshot as StoreSnapshot | undefined);
 		return value;
 	}
 
-	const element = value as unknown as Partial<StoreElement> | null;
-	if (element && typeof element.Type === "function") {
-		// Not yet instantiated (result of createStore): hold the snapshot on
-		// the element; mount() applies it before any effect or reaction starts.
-		(value as unknown as StoreElement).snapshot = snapshot as StoreSnapshot;
-		return value;
+	if (!(adm instanceof ModelAdministration)) {
+		if (isStoreElement(value)) {
+			// mount() applies the snapshot before any effect or reaction starts.
+			value.snapshot = snapshot as StoreSnapshot | undefined;
+			return value;
+		}
+		throw new TypeError(
+			"r-state-tree: applySnapshot expected a Model, Store, or Store descriptor"
+		);
 	}
 
-	getModelAdm(value).applySnapshot(snapshot as Snapshot);
+	adm.applySnapshot(snapshot as Snapshot);
 
 	return value;
 }
