@@ -696,7 +696,7 @@ class TodoModel extends Model {
 
 ### Model references
 
-Reference models by ID using `@modelRef(ModelType)` (or `modelRef(ModelType)` in `static types`). The model constructor is required because identifiers are namespaced by model type:
+Reference models by ID using `@modelRef(ModelType)` (or `modelRef(ModelType)` in `static types`). Assign a model of the exact configured class, not a subclass: identifiers are namespaced by exact runtime class.
 
 ```ts
 import { child, id, Model, modelRef } from "r-state-tree";
@@ -710,7 +710,7 @@ class ProjectModel extends Model {
 	@id id = 0;
 	@child(User) users: User[] = [];
 	@modelRef(User) owner?: User; // Single reference
-	@modelRef(User) assignees: User[] = []; // Array of references
+	@modelRef(User) assignees: readonly User[] = []; // Read-only resolved membership
 
 	assignOwner(userId: number) {
 		// Find user by ID and set as owner
@@ -729,8 +729,64 @@ const project = ProjectModel.create({
 });
 
 project.owner?.name; // "Alice"
+project.assignees = [project.users[0], project.users[1]]; // Replace all assignees
 project[Symbol.dispose]();
 ```
+
+A reference array is a read-only list of the models that currently resolve in
+the tree. Its elements are the actual live models; only the array is frozen.
+In-place membership changes such as `push`, `splice` and index writes no longer
+work. Repeated reads reuse the list while its dependencies are unchanged.
+
+If you used in-place edits on a reference array, use whole-field assignment
+when you intend to replace **all** assignees. Unresolved IDs are omitted from the
+resolved list, but stay in snapshots and can resolve later. Building a
+replacement from the resolved list will drop any omitted IDs.
+
+#### Mutable membership with explicit IDs
+
+For in-place edits, keep the IDs in an ordinary observable array and resolve
+each ID explicitly with `findModelById`. Adding Ada doesn't remove the ID of an
+assignee who isn't attached yet:
+
+```ts
+import { child, findModelById, id, Model, observable } from "r-state-tree";
+
+class User extends Model {
+	@id id = "";
+}
+
+class Task extends Model {
+	assigneeIds = observable<string[]>([]);
+}
+
+class Project extends Model {
+	@child(User) users: User[] = [];
+	@child(Task) task = Task.create();
+}
+
+const project = Project.create({
+	users: [{ id: "ada" }],
+	task: { assigneeIds: ["missing"] },
+});
+const { task } = project;
+const ada = findModelById(task, User, "ada");
+if (ada) task.assigneeIds.push(ada.id);
+// "missing" is still stored, though findModelById(task, User, "missing") is undefined.
+```
+
+These are different JSON shapes for `JSON.stringify(toSnapshot(task))`:
+
+- `@modelRef(User) assignees`: `{"assignees":[{"id":"missing"},{"id":"ada"}]}`
+- Observable `assigneeIds`: `{"assigneeIds":["missing","ada"]}`
+
+Existing reference snapshots and hydration keep their original shape. If you
+switch a persisted field to explicit IDs, migrate the saved data before
+loading it with the new model. Read IDs from the saved reference objects (not
+the resolved list) and write them in order under the new field name, including
+any unresolved IDs.
+
+#### Switching between single values and arrays
 
 Both `@child` and `@modelRef` support runtime type switching between single values and arrays:
 

@@ -297,7 +297,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private _parent: ModelAdministration | null = null;
 	private parentAtom: AtomNode = createAtom();
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
-	referencedModels!: Map<PropertyKey, ComputedNode<Model[]>>;
+	referencedModels!: Map<PropertyKey, ComputedNode<readonly Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
 	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
 	private writeInProgress: Set<PropertyKey> = new Set();
@@ -525,7 +525,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			: undefined;
 	}
 
-	private getModelRefs(name: PropertyKey): Model[] {
+	private getModelRefs(name: PropertyKey): readonly Model[] {
 		const a = this.getReferencedAtom(name);
 
 		let c = this.referencedModels?.get(name);
@@ -536,11 +536,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				a.reportObserved();
 				const Type = this.getRequiredModelRefType(name);
 				const root = this.root.proxy;
-				const models = (this.source[name] || [])
-					.map((id: IdType) => getModelById(root, Type, id))
-					.filter((m: Model | undefined) => !!m);
+				const ids = this.source[name] as IdType | IdType[] | undefined;
+				const models = (Array.isArray(ids) ? ids : [])
+					.map((id) => getModelById(root, Type, id))
+					.filter((model) => model !== undefined);
 
-				return models;
+				// Membership comes from the stored IDs. Freeze only the resolved list.
+				return Object.freeze(models);
 			});
 
 			this.referencedModels.set(name, c);
