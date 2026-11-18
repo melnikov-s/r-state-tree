@@ -47,7 +47,6 @@ export interface SignalNode<T> {
 export interface ComputedNode<T> {
 	get(): T;
 	node?: ReadonlySignal<T>;
-	clear: () => void;
 }
 
 export interface ListenerNode {
@@ -229,7 +228,7 @@ function internalCreateComputed<T>(fn: () => T) {
 				// Mark as dirty when unobserved. This is silent because there are no subscribers.
 				version.value++;
 			},
-		} as any
+		}
 	);
 
 	// Keep the native signal object and ordinary Preact tracking/cache behavior.
@@ -242,7 +241,7 @@ function internalCreateComputed<T>(fn: () => T) {
 	Object.defineProperty(c, "value", {
 		get() {
 			if (!retainedChildRead) return cachedValue.call(this);
-			// Restricted results/errors must never enter the application signal cache.
+			// Don't cache restricted results/errors on this RStateTree computed.
 			if (readingRetained) throw new Error("Cycle detected");
 			readingRetained = true;
 			try {
@@ -253,7 +252,7 @@ function internalCreateComputed<T>(fn: () => T) {
 		},
 	});
 
-	return { c, version };
+	return c;
 }
 
 export function createComputed<T>(
@@ -261,19 +260,12 @@ export function createComputed<T>(
 	context: unknown = null
 ): ComputedNode<T> {
 	const bound = context ? fn.bind(context) : fn;
-	const { c } = internalCreateComputed(bound);
+	const c = internalCreateComputed(bound);
 
 	return {
 		node: c,
 		get() {
 			return c.value;
-		},
-		clear: () => {
-			untracked(() => {
-				// Option A: Strictly silent cache drop via internal properties.
-				(c as any)._value = undefined;
-				(c as any)._globalVersion = -1;
-			});
 		},
 	};
 }
@@ -303,7 +295,7 @@ export function computed(value: any, context?: any): any {
 	}
 
 	// Otherwise, it's the regular computed function (value is actually the fn)
-	return internalCreateComputed(value).c;
+	return internalCreateComputed(value);
 }
 
 // Allow using `computed` in `static types` without introducing import cycles.

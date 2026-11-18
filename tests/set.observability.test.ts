@@ -6,7 +6,6 @@ import {
 	createStore,
 	Store,
 } from "../src";
-import { createComputed } from "../src/observables";
 
 const set = <T>(obj: Set<T> = new Set()) => {
 	return observable(obj);
@@ -248,25 +247,5 @@ describe("Computed Reactivity Bugs", () => {
 		});
 		expect(seen2[0]).toBe(true);
 		dispose2();
-	});
-
-	test("clear() drops cache silently (does not notify subscribers)", () => {
-		const s = observable({ v: 1 });
-		const cc = createComputed(() => s.v);
-
-		let runs = 0;
-		effect(() => {
-			cc.get();
-			runs++;
-		});
-
-		expect(runs).toBe(1);
-
-		// clear() should not trigger the effect
-		cc.clear();
-		expect(runs).toBe(1);
-
-		s.v = 2;
-		expect(runs).toBe(2);
 	});
 });

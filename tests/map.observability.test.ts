@@ -8,7 +8,6 @@ import {
 	createStore,
 	Store,
 } from "../src";
-import { createComputed } from "../src/observables";
 
 const map = <K = any, V = any>(obj: Map<K, V> = new Map()): Map<K, V> => {
 	return observable(obj) as Map<K, V>;
@@ -485,27 +484,5 @@ describe("Computed Reactivity Bugs", () => {
 		});
 		expect(seen2[0]).toBe(123);
 		dispose2();
-	});
-
-	test("clear() drops cache silently (does not notify subscribers)", () => {
-		const s = observable({ v: 1 });
-		const cc = createComputed(() => s.v);
-
-		let runs = 0;
-		effect(() => {
-			cc.get();
-			runs++;
-		});
-
-		expect(runs).toBe(1);
-
-		// clear() should not trigger the effect
-		cc.clear();
-		expect(runs).toBe(1);
-
-		// But reading again should re-evaluate (if we change dependency)
-		s.v = 2;
-		// s.v change triggers the effect, which calls cc.get(), which recomputes
-		expect(runs).toBe(2);
 	});
 });

@@ -909,6 +909,7 @@ export class StoreAdministration<
 		try {
 			errors = this.disposeResources();
 		} finally {
+			// disposeResources stops Store-owned observers. Drop the Store's cache references.
 			this.childStoreDataMap.clear();
 			this.contextCache.clear();
 			this.computedSnapshot = undefined;
@@ -932,7 +933,7 @@ export class StoreAdministration<
 		}
 		try {
 			batch(() => {
-				this.childStoreDataMap.forEach(({ value, computed, listener }) => {
+				this.childStoreDataMap.forEach(({ value, listener }) => {
 					try {
 						listener?.dispose();
 					} catch (error) {
@@ -955,24 +956,7 @@ export class StoreAdministration<
 					} catch (error) {
 						errors.push(error);
 					}
-					try {
-						computed.clear();
-					} catch (error) {
-						errors.push(error);
-					}
 				});
-				this.contextCache.forEach((computed) => {
-					try {
-						computed.clear();
-					} catch (error) {
-						errors.push(error);
-					}
-				});
-				try {
-					this.computedSnapshot?.clear();
-				} catch (error) {
-					errors.push(error);
-				}
 				this.reactiveRegistrations.forEach((registration) => {
 					registration.disposed = true;
 					const stop = registration.stop;
