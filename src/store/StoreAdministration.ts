@@ -157,7 +157,7 @@ type ChildStoreData = {
 	reconciledElement?: StoreElement | null | StoreElement[];
 	value: SignalNode<Store | null | Store[]>;
 	computed: ComputedNode<StoreElement | null | StoreElement[]>;
-	listener: ListenerNode;
+	listener?: ListenerNode;
 };
 
 type ReactiveRegistration = {
@@ -580,13 +580,17 @@ export class StoreAdministration<
 		// Abort handlers and child cleanups can mutate dependencies before listeners stop.
 		if (this.disposalState !== "active") return;
 		const childStoreData = this.childStoreDataMap.get(name)!;
-		const storeElement = childStoreData.computed.get();
+		const storeElement = childStoreData.listener
+			? childStoreData.computed.get()
+			: this.trackStoreGetter(name, childStoreData);
+		const initialized = childStoreData.initialized;
 		if (
 			forceReconcile ||
-			!childStoreData.initialized ||
+			!initialized ||
 			!Object.is(childStoreData.reconciledElement, storeElement)
 		) {
 			this.reconcileStore(name, storeElement);
+			if (!initialized) this.snapshotStructureAtom.reportChanged();
 		}
 	}
 
@@ -601,21 +605,16 @@ export class StoreAdministration<
 		return createComputed(descriptor.get, this.proxy);
 	}
 
-	private initializeStore(name: PropertyKey): Store | null {
-		const value = createSignal<null | Store | Store[]>(null);
-		const childStoreData: ChildStoreData = this.childStoreDataMap.get(name) ?? {
-			computed: this.getComputedGetter(name),
-			listener: createListener(() => this.updateStore(name)),
-			value,
-		};
-
-		this.childStoreDataMap.set(name, childStoreData);
-		const storeElement = childStoreData.listener.track(() =>
-			childStoreData.computed.get()
-		);
-		this.reconcileStore(name, storeElement);
-		this.snapshotStructureAtom.reportChanged();
-		return childStoreData.value.get() as Store | null;
+	private trackStoreGetter(name: PropertyKey, childStoreData: ChildStoreData) {
+		const listener = createListener(() => this.updateStore(name));
+		childStoreData.listener = listener;
+		try {
+			return listener.track(() => childStoreData.computed.get());
+		} catch (error) {
+			// A failed initial evaluation has no subscription to reuse on retry.
+			childStoreData.listener = undefined;
+			throw error;
+		}
 	}
 
 	private getStore(name: PropertyKey): Store | null {
@@ -633,15 +632,18 @@ export class StoreAdministration<
 			return childStoreData.value.get() as Store | null;
 		}
 
-		if (!childStoreData) {
-			untracked(() => this.initializeStore(name));
-			return this.childStoreDataMap.get(name)!.value.get() as Store | null;
-		} else {
+		const data = untracked(() => {
+			const data = childStoreData ?? {
+				computed: this.getComputedGetter(name),
+				value: createSignal<Store | Store[] | null>(null),
+			};
+			if (!childStoreData) this.childStoreDataMap.set(name, data);
 			// Refresh stale descriptors synchronously, including inside a batch before
 			// the listener runs. Unchanged descriptors need no reconciliation work.
-			untracked(() => this.updateStore(name));
-			return childStoreData.value.get() as Store | null;
-		}
+			this.updateStore(name);
+			return data;
+		});
+		return data.value.get() as Store | null;
 	}
 
 	loadSnapshot(snapshot: StoreSnapshot | undefined): void {
@@ -851,7 +853,7 @@ export class StoreAdministration<
 		}
 		const registration: ReactiveRegistration = { start, disposed: false };
 		this.reactiveRegistrations.add(registration);
-		if (this.isMounted) registration.stop = registration.start();
+		if (this.isMounted) this.startReactiveRegistration(registration);
 
 		return () => {
 			if (registration.disposed) return;
@@ -863,11 +865,17 @@ export class StoreAdministration<
 		};
 	}
 
+	private startReactiveRegistration(registration: ReactiveRegistration): void {
+		if (registration.disposed || registration.stop) return;
+		const stop = registration.start();
+		// Setup runs synchronously and can dispose the registration before it has a stopper.
+		if (registration.disposed) stop();
+		else registration.stop = stop;
+	}
+
 	private startReactiveRegistrations(): void {
 		this.reactiveRegistrations.forEach((registration) => {
-			if (!registration.disposed && !registration.stop) {
-				registration.stop = registration.start();
-			}
+			this.startReactiveRegistration(registration);
 		});
 	}
 
@@ -974,7 +982,7 @@ export class StoreAdministration<
 			batch(() => {
 				this.childStoreDataMap.forEach(({ value, computed, listener }) => {
 					try {
-						listener.dispose();
+						listener?.dispose();
 					} catch (error) {
 						errors.push(error);
 					}
