@@ -14,8 +14,7 @@
 Most examples are focused fragments that reuse earlier declarations or use
 application-specific helpers (such as `connect()`). They are not standalone
 programs. The quick-start, React quick-start, and Model references examples are
-executed by
-[`tests/documentation.test.ts`](../tests/documentation.test.ts).
+executed by `tests/documentation.test.ts` in the repository.
 
 ## Stores
 

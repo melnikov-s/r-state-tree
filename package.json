@@ -18,7 +18,10 @@
 	},
 	"files": [
 		"dist",
+		"docs/architecture.md",
 		"docs/inspection.md",
+		"docs/reference.md",
+		"docs/toolchains.md",
 		"THIRD_PARTY_NOTICES",
 		"skills",
 		"lint",

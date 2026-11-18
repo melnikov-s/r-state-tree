@@ -25,6 +25,13 @@ Runtimes need ES2022, `AbortController`, and `Symbol.dispose`; provide a disposa
 polyfill if your runtime lacks it. The library includes a `Symbol.metadata`
 polyfill, not a disposal polyfill. Core does not require React.
 
+Use one copy and module format of r-state-tree for code that shares Stores,
+Models, or observables. Node can load both the ESM and CommonJS exports in the
+same process, but they have separate constructors and runtime registries. A
+Model or Store made with `import` is not recognized by APIs such as `toSnapshot`
+loaded with `require`, or vice versa. Use a single module format across your
+integration, or pass plain data instead of live instances at the boundary.
+
 ## Quick start
 
 Create a Model for domain state and a Store for view behavior. This example is
@@ -182,12 +189,16 @@ pnpm test:package
 
 This is a clean-package smoke test using the current Node process and the
 repository's installed TypeScript and React versions. It packs the library,
-installs the tarball outside the checkout, and checks CJS/ESM imports, strict
-declarations, core without optional peers, and React SSR. No alternate runtimes
-or compilers are downloaded.
+extracts the archive with `tar` to check relative documentation file links,
+and installs the tarball outside the checkout. The consumers check CJS and ESM
+separately, the mixed-format runtime boundary, strict declarations, core without
+optional peers, and React SSR. No alternate runtimes or compilers are downloaded.
 
-Registry access is required for the clean consumer installs. Temporary consumers
-are removed; set `KEEP_PACKAGE_CONSUMERS=1` to retain them for debugging.
+Registry access is required for the clean consumer installs. After building,
+`node scripts/package-consumers.js --local` runs the archive and consumer checks
+without network or installs, using links to the checkout's installed dependencies.
+This does not test registry or npm peer resolution. Temporary consumers are removed;
+set `KEEP_PACKAGE_CONSUMERS=1` to retain them for debugging.
 `prepublishOnly` runs the unit/type tests and this smoke test before publishing.
 The declaration build uses `moduleDetection: legacy` so the virtual inspector
 module declaration remains an ambient declaration rather than an augmentation.

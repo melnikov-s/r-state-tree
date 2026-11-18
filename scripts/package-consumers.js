@@ -2,16 +2,18 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
 	cpSync,
+	existsSync,
 	mkdtempSync,
 	mkdirSync,
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
@@ -22,9 +24,10 @@ const compiler = join(
 );
 const temporary = mkdtempSync(join(tmpdir(), "r-state-tree-consumers-"));
 const fixtures = join(root, "scripts/consumer-fixtures");
+const local = process.argv.includes("--local");
 
-// Use the current toolchain, but resolve consumer imports only from the clean
-// installation. Don't inherit loader hooks or the checkout's ambient types.
+// Resolve imports from the isolated consumer directory. Don't inherit loader
+// hooks or the checkout's ambient types.
 const env = Object.fromEntries(
 	Object.entries(process.env).filter(
 		([key]) =>
@@ -51,17 +54,59 @@ function run(command, args, cwd = root) {
 	return result;
 }
 
+function checkPackedLinks(directory) {
+	// Follow relative Markdown file links from the shipped README. Fragments
+	// and external URLs are not file targets.
+	const pending = new Set([join(directory, "README.md")]);
+	for (const path of pending) {
+		const markdown = readFileSync(path, "utf8");
+		for (const [, link] of markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+			const target = link.split("#")[0];
+			if (!target || /^[a-z][a-z\d+.-]*:|^\/\//i.test(target)) continue;
+			const file = resolve(dirname(path), target);
+			assert.ok(
+				file.startsWith(directory + sep) &&
+					statSync(file, { throwIfNoEntry: false })?.isFile(),
+				`Packed ${path.slice(directory.length + 1)} links to missing ${target}`
+			);
+			if (extname(file) === ".md") pending.add(file);
+		}
+	}
+}
+
+function linkLocalDependencies(directory, packageDirectory, names) {
+	const modules = join(directory, "node_modules");
+	mkdirSync(modules);
+	cpSync(packageDirectory, join(modules, "r-state-tree"), { recursive: true });
+	for (const name of names) {
+		const source = join(root, "node_modules", name);
+		assert.ok(existsSync(source), `Missing local dependency ${name}`);
+		const target = join(modules, name);
+		mkdirSync(dirname(target), { recursive: true });
+		symlinkSync(source, target, "junction");
+	}
+}
+
 try {
 	const [packed] = JSON.parse(
 		run("npm", [
 			"pack",
 			"--json",
 			"--ignore-scripts",
+			"--offline",
 			"--pack-destination",
 			temporary,
 		]).stdout
 	);
 	const tarball = join(temporary, packed.filename);
+	const packedDirectory = join(temporary, "package");
+	run("tar", ["-xzf", tarball, "-C", temporary]);
+	checkPackedLinks(packedDirectory);
+	console.log("PASS packed README and linked documentation file targets");
+
+	const packedManifest = JSON.parse(
+		readFileSync(join(packedDirectory, "package.json"), "utf8")
+	);
 	const peers = Object.fromEntries(
 		[
 			"react",
@@ -94,17 +139,26 @@ try {
 				},
 			})
 		);
-		run(
-			"npm",
-			[
-				"install",
-				"--ignore-scripts",
-				"--strict-peer-deps",
-				"--no-audit",
-				"--no-fund",
-			],
-			directory
-		);
+		if (local) {
+			// Keep testing the exact tarball contents, but supply packages from the
+			// checkout. This does not simulate npm peer or dependency resolution.
+			linkLocalDependencies(directory, packedDirectory, [
+				...Object.keys(packedManifest.dependencies ?? {}),
+				...(name === "react" ? Object.keys(peers) : []),
+			]);
+		} else {
+			run(
+				"npm",
+				[
+					"install",
+					"--ignore-scripts",
+					"--strict-peer-deps",
+					"--no-audit",
+					"--no-fund",
+				],
+				directory
+			);
+		}
 		cpSync(fixtures, directory, { recursive: true });
 
 		if (name === "core") {
@@ -136,6 +190,16 @@ try {
 				/Makes a realized Store available to descendants/
 			);
 			run(process.execPath, ["absent-peers.cjs"], directory);
+			console.log("PASS core without optional peers");
+			const mixed = run(
+				process.execPath,
+				["--trace-warnings", "mixed.js"],
+				directory
+			);
+			assert.equal(mixed.stderr, "", "mixed runtime must not emit warnings");
+			console.log(
+				"PASS mixed: both formats load, with separate Store/Model runtimes"
+			);
 		}
 
 		for (const extension of ["cjs", "js"]) {
@@ -176,7 +240,7 @@ try {
 			run(process.execPath, [compiler, "-p", "tsconfig.json"], directory);
 		}
 		console.log(
-			`PASS ${name}: clean install, CJS, ESM, and strict declarations`
+			`PASS ${name}: ${local ? "local dependencies" : "clean install"}, CJS, ESM, and strict declarations`
 		);
 	}
 } finally {

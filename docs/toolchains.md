@@ -88,13 +88,12 @@ export default defineConfig({
 });
 ```
 
-Compare with the actual [test configuration](../vitest.config.mts), which also
-sets up the test environment. For a Vite application, integrate an equivalent
-standard-decorator transform into its own plugin chain and verify both development
-and production builds. TSX needs a TSX loader and appropriate JSX handling;
-React plugins, SSR, dependency transforms, and plugin ordering need their own
-checks. This repository does not certify those combinations merely because its
-`.ts` test transform works.
+The repository's `vitest.config.mts` also sets up the test environment. For a
+Vite application, integrate an equivalent standard-decorator transform into its
+own plugin chain and verify both development and production builds. TSX needs a
+TSX loader and appropriate JSX handling; React plugins, SSR, dependency transforms,
+and plugin ordering need their own checks. This repository does not certify those
+combinations merely because its `.ts` test transform works.
 
 To avoid that dependency on the application compiler, use `static types`:
 
