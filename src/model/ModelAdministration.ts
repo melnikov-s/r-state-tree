@@ -593,9 +593,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	private assertModelRefType(name: PropertyKey, model: Model): void {
 		const Type = this.getRequiredModelRefType(name);
-		if (!(model instanceof Type)) {
+		// The identifier index resolves references by exact class, not inheritance.
+		if (
+			!(model instanceof Type) ||
+			Object.getPrototypeOf(model).constructor !== Type
+		) {
 			throw new Error(
-				`r-state-tree: modelRef '${String(name)}' must reference ${Type.name}`
+				`r-state-tree: modelRef '${String(name)}' must reference ${Type.name} (exact model class)`
 			);
 		}
 	}

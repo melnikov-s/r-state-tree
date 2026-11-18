@@ -266,6 +266,49 @@ describe("model references", () => {
 		);
 	});
 
+	test.each(["scalar", "list"] as const)(
+		"modelRef rejects a subclass in a %s assignment before publishing its overlapping id",
+		(shape) => {
+			class Base extends Model {
+				@id id = 1;
+			}
+			class Derived extends Base {}
+			class Root extends Model {
+				@child(Base) base = Base.create();
+				@child(Base) other = Base.create({ id: 2 });
+				@child(Derived) derived = Derived.create();
+				@modelRef(Base) scalar: Base = this.other;
+				@modelRef(Base) list: Base[] = [this.other];
+				@modelRef(Derived) derivedRef: Derived = this.derived;
+			}
+
+			const root = Root.create();
+			const before = toSnapshot(root);
+			const observe = vi.fn();
+			const stop = onSnapshot(root, observe);
+			try {
+				expect(() => {
+					if (shape === "scalar") root.scalar = root.derived;
+					else root.list = [root.base, root.derived];
+				}).toThrow(
+					`modelRef '${shape}' must reference Base (exact model class)`
+				);
+				expect(root.scalar).toBe(root.other);
+				expect(root.list[0]).toBe(root.other);
+				expect(toSnapshot(root)).toBe(before);
+				expect(observe).not.toHaveBeenCalled();
+
+				root.scalar = root.base;
+				root.list = [root.base];
+				expect(root.scalar).toBe(root.base);
+				expect(root.list[0]).toBe(root.base);
+				expect(root.derivedRef).toBe(root.derived);
+			} finally {
+				stop();
+			}
+		}
+	);
+
 	test("findModelById exposes typed tree-scoped lookup", () => {
 		class User extends Model {
 			@id id = 1;
