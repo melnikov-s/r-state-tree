@@ -2,6 +2,7 @@ import { AtomMap } from "../observables/internal/NodeMap.js";
 import type { IdType } from "../types.js";
 import type Model from "./Model.js";
 import { getModelAdm } from "./ModelAdministration.js";
+import type { ModelAdministration } from "./ModelAdministration.js";
 
 export type ModelConstructor<T extends Model = Model> = new (
 	...args: any[]
@@ -32,7 +33,6 @@ class IdBucket extends Map<IdType, Model> {
 }
 
 const attachedIdMap = new WeakMap<Model, Map<ModelConstructor, IdBucket>>();
-const idMap: WeakMap<Model, IdType> = new WeakMap();
 
 function getModelType(model: Model): ModelConstructor {
 	return Object.getPrototypeOf(model).constructor as ModelConstructor;
@@ -47,7 +47,7 @@ function entriesFor(model: Model): Array<[ModelConstructor, IdType, Model]> {
 	attachedIdMap.get(model)?.forEach((ids, Type) => {
 		ids.forEach((value, id) => entries.push([Type, id, value]));
 	});
-	const id = idMap.get(model);
+	const id = getIdentifier(model);
 	if (id != null) entries.push([getModelType(model), id, model]);
 	return entries;
 }
@@ -81,29 +81,33 @@ function bucket(node: Model, Type: ModelConstructor): IdBucket {
 	return ids;
 }
 
-export function setIdentifier(model: Model, id: IdType | undefined): void {
-	const previousId = idMap.get(model);
+export function setIdentifier(
+	adm: ModelAdministration,
+	id: IdType | undefined
+): void {
+	const previousId = adm.identifier;
 	if (previousId === id) return;
-	const Type = getModelType(model);
-	const ancestors: Model[] = [];
-	let node = peekParent(model);
-	while (node) {
-		if (id !== undefined) assertAvailable(node, [[Type, id, model]]);
-		ancestors.push(node);
-		node = peekParent(node);
+	const model = adm.proxy as Model;
+	const parent = adm.peekParent()?.proxy as Model | undefined;
+	if (parent) {
+		const Type = getModelType(model);
+		const ancestors: Model[] = [];
+		for (let node: Model | null = parent; node; node = peekParent(node)) {
+			if (id !== undefined) assertAvailable(node, [[Type, id, model]]);
+			ancestors.push(node);
+		}
+		for (const ancestor of ancestors) {
+			const ids = bucket(ancestor, Type);
+			if (previousId != null && ids.get(previousId) === model)
+				ids.delete(previousId);
+			if (id !== undefined) ids.set(id, model);
+		}
 	}
-	for (const ancestor of ancestors) {
-		const ids = bucket(ancestor, Type);
-		if (previousId != null && ids.get(previousId) === model)
-			ids.delete(previousId);
-		if (id !== undefined) ids.set(id, model);
-	}
-	if (id !== undefined) idMap.set(model, id);
-	else idMap.delete(model);
+	adm.identifier = id;
 }
 
 export function getIdentifier(model: Model): IdType | undefined {
-	return idMap.get(model);
+	return getModelAdm(model)?.identifier;
 }
 
 export function getModelById<T extends Model>(
@@ -126,44 +130,82 @@ export function peekModelById<T extends Model>(
 
 /** Validate only the changed subtrees, allowing identifiers released by removals. */
 export function validateModelAttachments(
-	parent: Model,
-	added: Model[],
-	removed: Model[]
+	parent: ModelAdministration,
+	added: ModelAdministration[],
+	removed: ModelAdministration[]
 ): void {
 	if (!added.length) return;
-	const released = removed.length
-		? new Set(removed.flatMap(entriesFor).map(([, , model]) => model))
-		: undefined;
+	const released = removed.length ? new Set<Model>() : undefined;
+	for (const adm of removed) {
+		for (const [, , model] of entriesFor(adm.proxy)) released!.add(model);
+	}
 	const ancestors: Array<Map<ModelConstructor, IdBucket>> = [];
-	for (let node: Model | null = parent; node; node = peekParent(node)) {
-		const map = attachedIdMap.get(node);
+	for (
+		let node: ModelAdministration | null = parent;
+		node;
+		node = node.peekParent()
+	) {
+		const map = attachedIdMap.get(node.proxy);
 		if (map) ancestors.push(map);
 	}
 	const incoming = new Map<ModelConstructor, Map<IdType, Model>>();
-	for (const model of added) {
-		for (const [Type, id, value] of entriesFor(model)) {
-			const duplicate = incoming.get(Type)?.get(id);
-			if (duplicate && duplicate !== value) {
+	const validate = (Type: ModelConstructor, id: IdType, value: Model) => {
+		let ids = incoming.get(Type);
+		const duplicate = ids?.get(id);
+		if (duplicate && duplicate !== value) {
+			throw new Error(
+				`r-state-tree: id: ${id} is already assigned to another model`
+			);
+		}
+		for (const ancestor of ancestors) {
+			const existing = ancestor.get(Type)?.get(id);
+			if (existing && existing !== value && !released?.has(existing)) {
 				throw new Error(
 					`r-state-tree: id: ${id} is already assigned to another model`
 				);
 			}
-			for (const ancestor of ancestors) {
-				const existing = ancestor.get(Type)?.get(id);
-				if (existing && existing !== value && !released?.has(existing)) {
-					throw new Error(
-						`r-state-tree: id: ${id} is already assigned to another model`
-					);
-				}
-			}
-			let ids = incoming.get(Type);
-			if (!ids) incoming.set(Type, (ids = new Map()));
-			ids.set(id, value);
 		}
+		if (!ids) incoming.set(Type, (ids = new Map()));
+		ids.set(id, value);
+	};
+	for (const adm of added) {
+		const model = adm.proxy as Model;
+		attachedIdMap.get(model)?.forEach((ids, Type) => {
+			ids.forEach((value, id) => validate(Type, id, value));
+		});
+		const id = adm.identifier;
+		if (id != null) validate(getModelType(model), id, model);
 	}
 }
 
-export function onModelAttached(model: Model): void {
+export function onModelAttached(adm: ModelAdministration): void {
+	const model = adm.proxy as Model;
+	const parent = adm.peekParent();
+	if (!parent) return;
+	if (!attachedIdMap.has(model)) {
+		const id = adm.identifier;
+		if (id == null) return;
+		const Type = getModelType(model);
+		for (
+			let node: ModelAdministration | null = parent;
+			node;
+			node = node.peekParent()
+		) {
+			const existing = attachedIdMap.get(node.proxy)?.get(Type)?.get(id);
+			if (existing && existing !== model)
+				throw new Error(
+					`r-state-tree: id: ${id} is already assigned to another model`
+				);
+		}
+		for (
+			let node: ModelAdministration | null = parent;
+			node;
+			node = node.peekParent()
+		) {
+			bucket(node.proxy, Type).set(id, model);
+		}
+		return;
+	}
 	const entries = entriesFor(model);
 	if (!entries.length) return;
 	const ancestors: Model[] = [];

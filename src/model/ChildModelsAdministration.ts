@@ -83,6 +83,29 @@ export class ChildModelsAdministration<
 		this.change = undefined;
 	}
 
+	/** Populate private backing storage before the new array is exposed. */
+	initializeMembers(items: T[]): void {
+		let duplicate = false;
+		for (let i = 0; i < items.length; i++) {
+			const item = items[i];
+			if (!(item instanceof Model))
+				throw new TypeError(
+					"r-state-tree: child arrays require Model instances"
+				);
+			const adm = getAdministration(item);
+			const raw = adm.source as T;
+			if (this.members.has(raw)) duplicate = true;
+			this.members.add(raw);
+			this.source[i] = raw;
+			this.trackObservableSource(raw);
+			items[i] = adm.proxy as T;
+		}
+		if (duplicate)
+			throw new Error(
+				"r-state-tree: child arrays cannot contain duplicate models"
+			);
+	}
+
 	assertMutable(): void {
 		if (this.disposed)
 			throw new Error("r-state-tree: cannot use a disposed model");

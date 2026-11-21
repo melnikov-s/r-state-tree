@@ -29,9 +29,16 @@ export type PropertyType = "action" | "computed" | "observable";
 export function getPropertyType(
 	key: PropertyKey,
 	obj: object,
-	descriptor: PropertyDescriptor | undefined
+	descriptor: PropertyDescriptor | undefined,
+	ordinaryData?: true
 ): PropertyType | null {
-	// Check if this is a plain object (to apply implicit behavior)
+	if (
+		ordinaryData &&
+		(!descriptor ||
+			("value" in descriptor && typeof descriptor.value !== "function"))
+	) {
+		return "observable";
+	}
 	const plain = isPlainObject(obj);
 
 	// Methods are always actions (batched)

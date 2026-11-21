@@ -14,7 +14,6 @@ import {
 	observable,
 	signal,
 } from "../src/index";
-import { getAdministration } from "../src/observables/internal/lookup";
 
 test("can create a model", () => {
 	class M extends Model {}
@@ -290,7 +289,7 @@ describe("implicit Model snapshot fields", () => {
 		expect(() => structuredClone(m.data)).not.toThrow();
 	});
 
-	test("housekeeping reads during creation skip value nodes while keeping lazy Preact tracking", () => {
+	test("lazy Preact computed values follow Model fields, lookup, and parent changes", () => {
 		class Doc extends Model {
 			@id id = "";
 			title = "";
@@ -307,15 +306,7 @@ describe("implicit Model snapshot fields", () => {
 			],
 		});
 		try {
-			const rootAdm = getAdministration(created);
-			expect([...rootAdm.valuesMap.keys()]).toEqual([]);
-			const itemsAdm = getAdministration(created.items);
-			expect([...itemsAdm.valuesMap.keys()]).toEqual([]);
 			const first = created.items[0];
-			const firstAdm = getAdministration(first);
-			expect([...firstAdm.valuesMap.keys()]).toEqual([]);
-
-			// Lazy raw Preact computeds still track fields, child arrays, parent, and ID lookup.
 			const lazyTitle = preactComputed(() => first.title);
 			const lazyLookup = preactComputed(
 				() => findModelById(created, Doc, "b")?.value

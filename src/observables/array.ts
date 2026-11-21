@@ -54,6 +54,10 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 	 * Track a value being assigned to this array.
 	 * Detects conflicts if same source is assigned as both observable and raw.
 	 */
+	protected trackObservableSource(source: object): void {
+		this.observableSources.add(source);
+	}
+
 	private trackValue(value: unknown): void {
 		if (value && typeof value === "object") {
 			const source = getSource(value);

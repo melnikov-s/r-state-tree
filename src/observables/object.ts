@@ -17,6 +17,7 @@ import { Administration } from "./internal/Administration.js";
 import { AtomMap, SignalMap } from "./internal/NodeMap.js";
 import { debugWrite, debugEnabled } from "./internal/debug.js";
 import { retainedChildRead } from "./internal/retainedRead.js";
+import { isNonPrimitive as isComplex } from "./internal/utils.js";
 
 export class ObjectAdministration<T extends object> extends Administration<T> {
 	private _keysAtom?: AtomNode;
@@ -79,7 +80,9 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				return Reflect.defineProperty(adm.source, name, descriptor);
 			}
 
-			const hadOwn = Object.hasOwn(adm.source, name);
+			const hadOwn =
+				(adm.allowsDirectDataWrites && !adm._hasMap) ||
+				Object.hasOwn(adm.source, name);
 			const previous = debugEnabled
 				? Object.getOwnPropertyDescriptor(adm.source, name)?.value
 				: undefined;
@@ -189,13 +192,14 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	/** @internal Shared classification for proxy reads and field signals. */
 	getType(
 		key: keyof T,
-		ownDescriptor?: PropertyDescriptor
+		ownDescriptor?: PropertyDescriptor,
+		ordinaryData?: true
 	): PropertyType | null {
 		const cached = this._types?.get(key);
 		if (cached !== undefined) return cached;
 
 		const descriptor = ownDescriptor ?? getPropertyDescriptor(this.source, key);
-		const type = getPropertyType(key, this.source, descriptor);
+		const type = getPropertyType(key, this.source, descriptor, ordinaryData);
 		// A miss still tracks in the bounded node maps, but needs no type entry.
 		if (descriptor) (this._types ??= new Map()).set(key, type);
 		return type;
@@ -309,13 +313,52 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 	private explicitObservables?: Set<PropertyKey>;
 
-	write(key: keyof T, newValue: T[keyof T]): boolean {
+	/** Own scalars need no wrapping. Definitions may still be cached as computed. */
+	protected ownScalarDescriptor(key: keyof T): PropertyDescriptor | undefined {
+		if (this._types?.get(key) === "computed") return undefined;
+		const desc = Object.getOwnPropertyDescriptor(this.source, key);
+		return desc && "value" in desc && !isComplex(desc.value) ? desc : undefined;
+	}
+
+	protected hasFieldDependencies(): boolean {
+		return !!(
+			this.hasForceObservedAtom ||
+			this._valuesMap ||
+			this._keysAtom ||
+			this._hasMap
+		);
+	}
+
+	/** Try a Model-owned scalar data write without looking up a receiver or type again. */
+	protected writeOwnScalar(
+		key: keyof T,
+		value: T[keyof T],
+		desc: PropertyDescriptor
+	): boolean {
+		if (!desc.writable || debugEnabled || this.explicitObservables?.has(key))
+			return false;
+		const cachedType = this._types?.get(key);
+		if (cachedType !== undefined && cachedType !== "observable") return false;
+		// Match the equality rule of write(), including signed zero and NaN.
+		if (desc.value !== value) {
+			this.source[key] = value;
+			if (this.hasForceObservedAtom || this._valuesMap) {
+				batch(() => {
+					this.flushChange();
+					this._valuesMap?.reportChanged(key, value);
+				});
+			}
+		}
+		return true;
+	}
+
+	write(key: keyof T, newValue: T[keyof T], ordinaryData?: true): boolean {
 		// Public observable() can wrap a user Proxy. Only runtime-created
 		// backing objects may bypass the observable receiver for own data writes.
 		const ownDesc = this.allowsDirectDataWrites
 			? Object.getOwnPropertyDescriptor(this.source, key)
 			: undefined;
-		const type = this.getType(key, ownDesc);
+		const type = this.getType(key, ownDesc, ordinaryData);
 
 		if (type === null) {
 			const result = Reflect.set(this.source, key, newValue, this.proxy);
