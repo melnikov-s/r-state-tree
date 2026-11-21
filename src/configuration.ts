@@ -1,8 +1,4 @@
-import type {
-	ConfigurationType,
-	ConfigurationTypes,
-	ConfigurationValue,
-} from "./types.js";
+import type { ConfigurationType, ConfigurationTypes } from "./types.js";
 import { childType, idType, transientType, snapshotType } from "./types.js";
 import { child, id, modelRef, transient, snapshot } from "./decorators.js";
 
@@ -21,9 +17,9 @@ function hasConfigLike(value: unknown): value is ConfigLike {
 	return "type" in (value as any);
 }
 
-function normalizeEntry(entry: unknown): ConfigurationType | undefined {
+function normalizeEntry(entry: unknown): ConfigLike | undefined {
 	if (!entry) return undefined;
-	if (hasConfigLike(entry)) return entry as ConfigurationType;
+	if (hasConfigLike(entry)) return entry;
 	if (typeof entry === "function") {
 		// Allow using the exported decorators directly in `static types`.
 		// These are plain functions without a `type` property.
@@ -45,27 +41,20 @@ function normalizeEntry(entry: unknown): ConfigurationType | undefined {
 export function getConfigType(
 	entry: ConfigurationType | undefined
 ): ConfigurationTypes | undefined {
-	const normalized = normalizeEntry(entry);
-	return normalized && hasConfigLike(normalized)
-		? (normalized.type as ConfigurationTypes)
-		: undefined;
+	if (entry === undefined) return undefined;
+	return normalizeEntry(entry)?.type;
 }
 
 export function getConfigChildType(
 	entry: ConfigurationType | undefined
 ): Function | undefined {
 	const normalized = normalizeEntry(entry);
-	if (!normalized || !hasConfigLike(normalized)) return undefined;
-	if (typeof normalized === "function") {
-		return (normalized as any).childType as Function | undefined;
-	}
-	return (normalized as ConfigurationValue).childType;
+	return normalized?.childType;
 }
 
-function getParentConstructor(Ctor: Ctor | undefined): Ctor | undefined {
-	return Ctor?.prototype
-		? (Object.getPrototypeOf(Ctor.prototype)?.constructor as Ctor | undefined)
-		: undefined;
+function getParentConstructor(Ctor: Ctor): Ctor | undefined {
+	const prototype = Ctor.prototype;
+	return prototype ? Object.getPrototypeOf(prototype)?.constructor : undefined;
 }
 
 // The chain is kept derived-first so it can be checked as we walk it.
@@ -100,15 +89,11 @@ function getMetadataSymbol(): symbol | undefined {
 function getOwnMetadata(ctor: any): unknown {
 	const metadataSymbol = getMetadataSymbol();
 	if (!metadataSymbol) return undefined;
-	return Object.prototype.hasOwnProperty.call(ctor, metadataSymbol)
-		? ctor[metadataSymbol]
-		: undefined;
+	return Object.hasOwn(ctor, metadataSymbol) ? ctor[metadataSymbol] : undefined;
 }
 
 function getOwnStaticTypes(ctor: any): unknown {
-	return Object.prototype.hasOwnProperty.call(ctor, "types")
-		? ctor.types
-		: undefined;
+	return Object.hasOwn(ctor, "types") ? ctor.types : undefined;
 }
 
 function mergeInto(target: Config, source: unknown): void {

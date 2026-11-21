@@ -155,6 +155,12 @@ function isManagedField(type: ModelCfgTypes | CommonCfgTypes | undefined) {
 	);
 }
 
+function isScalarField(value: unknown): boolean {
+	return (
+		value == null || (typeof value !== "object" && typeof value !== "function")
+	);
+}
+
 // Ownership follows the indexed members, not a caller's custom iterator.
 function readChildField(field: Model | Model[] | null | undefined): Model[] {
 	if (!field) return [];
@@ -925,7 +931,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		undo?: (() => void)[],
 		previous = this.peekField(key)
 	): void {
-		const hadOwn = Object.hasOwn(this.source, key);
+		const hadOwn = undo && Object.hasOwn(this.source, key);
 		this.proxy[key] = value;
 		if (undo && !Object.is(previous, value)) {
 			undo.push(() => {
@@ -1065,6 +1071,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					break;
 				}
 				const currentValue = this.peekField(key);
+				// A scalar replacing a scalar needs no shape hydration or input copy.
+				if (isScalarField(currentValue) && isScalarField(value)) {
+					this.assignSnapshotField(key, value, undo, currentValue);
+					break;
+				}
 				const changeTracker = { changed: false, undo, copyInput: true };
 				const hydratedValue = hydrateSnapshotValue(
 					currentValue,

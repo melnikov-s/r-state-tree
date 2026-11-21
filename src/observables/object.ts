@@ -94,26 +94,35 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				);
 
 			if (result) {
-				batch(() => {
-					adm._types?.delete(name);
-					adm.flushChange();
-					adm._keysAtom?.reportChanged();
-					if (!hadOwn) adm._hasMap?.reportChanged(name);
-
-					if ("value" in descriptor) {
-						if (isObservable(descriptor.value)) {
-							(adm.explicitObservables ??= new Set()).add(name);
-						} else {
-							adm.explicitObservables?.delete(name);
-						}
-						adm._valuesMap?.reportChanged(name, descriptor.value);
+				adm._types?.delete(name);
+				if ("value" in descriptor) {
+					if (isObservable(descriptor.value)) {
+						(adm.explicitObservables ??= new Set()).add(name);
 					} else {
-						// Re-read accessors only in the observer, not while defining them.
-						const valueNode = adm._valuesMap?.get(name);
-						valueNode?.reportChanged(undefined);
-						valueNode?.invalidate();
+						adm.explicitObservables?.delete(name);
 					}
-				});
+				}
+
+				if (
+					adm.hasForceObservedAtom ||
+					adm._keysAtom ||
+					adm._hasMap ||
+					adm._valuesMap
+				) {
+					batch(() => {
+						adm.flushChange();
+						adm._keysAtom?.reportChanged();
+						if (!hadOwn) adm._hasMap?.reportChanged(name);
+						if ("value" in descriptor) {
+							adm._valuesMap?.reportChanged(name, descriptor.value);
+						} else {
+							// Re-read accessors only in the observer, not while defining them.
+							const valueNode = adm._valuesMap?.get(name);
+							valueNode?.reportChanged(undefined);
+							valueNode?.invalidate();
+						}
+					});
+				}
 			}
 			return result;
 		},
