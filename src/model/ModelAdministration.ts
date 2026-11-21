@@ -167,6 +167,8 @@ function readChildField(field: Model | Model[] | null | undefined): Model[] {
 }
 
 export class ModelAdministration extends PreactObjectAdministration<any> {
+	protected override readonly allowsDirectDataWrites = true;
+
 	private getCfgType(
 		name: PropertyKey
 	): ModelCfgTypes | CommonCfgTypes | undefined {

@@ -25,6 +25,10 @@ export class Administration<T extends object = any> {
 		return (this._atom ??= createObservedAtom());
 	}
 
+	protected get hasForceObservedAtom(): boolean {
+		return this.forceObservedAtom !== undefined;
+	}
+
 	protected flushChange(): void {
 		if (this.forceObservedAtom) {
 			this.forceObservedAtom.reportChanged();

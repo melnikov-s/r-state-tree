@@ -25,6 +25,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	computedMap!: Map<PropertyKey, ComputedNode<T[keyof T]>>;
 	private _types?: Map<PropertyKey, PropertyType | null>;
 	isWriting: boolean = false;
+	protected readonly allowsDirectDataWrites: boolean = false;
 
 	get keysAtom(): AtomNode {
 		return (this._keysAtom ??= createAtom());
@@ -177,11 +178,14 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	}
 
 	/** @internal Shared classification for proxy reads and field signals. */
-	getType(key: keyof T): PropertyType | null {
+	getType(
+		key: keyof T,
+		ownDescriptor?: PropertyDescriptor
+	): PropertyType | null {
 		const cached = this._types?.get(key);
 		if (cached !== undefined) return cached;
 
-		const descriptor = getPropertyDescriptor(this.source, key);
+		const descriptor = ownDescriptor ?? getPropertyDescriptor(this.source, key);
 		const type = getPropertyType(key, this.source, descriptor);
 		// A miss still tracks in the bounded node maps, but needs no type entry.
 		if (descriptor) (this._types ??= new Map()).set(key, type);
@@ -297,7 +301,12 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 	private explicitObservables?: Set<PropertyKey>;
 
 	write(key: keyof T, newValue: T[keyof T]): boolean {
-		const type = this.getType(key);
+		// Public observable() can wrap a user Proxy. Only runtime-created
+		// backing objects may bypass the observable receiver for own data writes.
+		const ownDesc = this.allowsDirectDataWrites
+			? Object.getOwnPropertyDescriptor(this.source, key)
+			: undefined;
+		const type = this.getType(key, ownDesc);
 
 		if (type === null) {
 			const result = Reflect.set(this.source, key, newValue, this.proxy);
@@ -316,8 +325,9 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			});
 		}
 
-		const hadOwn = Object.hasOwn(this.source, key);
-		const oldValue: T[keyof T] = this.get(key);
+		const hadOwn = ownDesc !== undefined || Object.hasOwn(this.source, key);
+		const direct = ownDesc && "value" in ownDesc;
+		const oldValue: T[keyof T] = direct ? ownDesc.value : this.get(key);
 		const targetValue = getSource(newValue);
 
 		const oldExplicit = this.explicitObservables?.has(key) ?? false;
@@ -345,25 +355,35 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 				: oldValue !== targetValue);
 
 		if (changed) {
-			this.isWriting = true;
-			try {
-				const result = this.set(key, targetValue as T[keyof T]);
-				if (!result) return false;
-			} finally {
-				this.isWriting = false;
+			if (direct) {
+				if (!Reflect.set(this.source, key, targetValue)) return false;
+			} else {
+				this.isWriting = true;
+				try {
+					const result = this.set(key, targetValue as T[keyof T]);
+					if (!result) return false;
+				} finally {
+					this.isWriting = false;
+				}
 			}
 
 			const added = !hadOwn && Object.hasOwn(this.source, key);
 			if (debugEnabled)
 				debugWrite(this.source, key, added ? "add" : "set", oldValue, newValue);
-			batch(() => {
-				this.flushChange();
-				if (added) {
-					this._keysAtom?.reportChanged();
-					this._hasMap?.reportChanged(key);
-				}
-				this._valuesMap?.reportChanged(key, newValue);
-			});
+			if (
+				this.hasForceObservedAtom ||
+				(added && (this._keysAtom || this._hasMap)) ||
+				this._valuesMap
+			) {
+				batch(() => {
+					this.flushChange();
+					if (added) {
+						this._keysAtom?.reportChanged();
+						this._hasMap?.reportChanged(key);
+					}
+					this._valuesMap?.reportChanged(key, newValue);
+				});
+			}
 			return true;
 		}
 

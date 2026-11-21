@@ -5,6 +5,23 @@ function object<T extends object>(obj: T = {} as T): Record<string, any> {
 }
 
 describe("Proxy trap invariants", () => {
+	test("wrapped proxies receive the observable as the write receiver", () => {
+		let receiverSeen: unknown;
+		const target = new Proxy(
+			{ value: 0 },
+			{
+				set(target, key, value, receiver) {
+					receiverSeen = receiver;
+					return Reflect.set(target, key, value, receiver);
+				},
+			}
+		);
+		const state = observable(target);
+		state.value = 1;
+		expect(receiverSeen).toBe(state);
+		expect(state.value).toBe(1);
+	});
+
 	test("Non-extensible object set should fail", () => {
 		const o = observable({} as any);
 		Object.preventExtensions(source(o));
@@ -279,5 +296,54 @@ describe("Regression Tests", () => {
 		expect(o.g).toBe(2);
 		expect(o.g).toBe(2);
 		expect(runs).toBe(2);
+	});
+
+	test("prototype setters, non-writable inherited data fields, and dynamic function fields keep proxy write semantics", () => {
+		let setterThis: unknown;
+		const proto = {};
+		Object.defineProperty(proto, "inheritedSetter", {
+			set(v: number) {
+				setterThis = this;
+				(this as any).a = v;
+				(this as any).b = v * 2;
+			},
+			configurable: true,
+		});
+		Object.defineProperty(proto, "readonlyProto", {
+			value: 1,
+			writable: false,
+			configurable: true,
+		});
+
+		const obj = observable({ a: 0, b: 0 } as any);
+		Object.setPrototypeOf(obj, proto);
+
+		const seen: [number, number][] = [];
+		const stop = effect(() => {
+			seen.push([obj.a, obj.b]);
+		});
+		try {
+			obj.inheritedSetter = 5;
+			expect(setterThis).toBe(obj);
+			// Setter writes ran inside a single batch (or with proxy receiver).
+			expect(seen.at(-1)).toEqual([5, 10]);
+
+			expect(Reflect.set(obj, "readonlyProto", 2)).toBe(false);
+			expect(obj.readonlyProto).toBe(1);
+
+			// Dynamic function property is cached as an action, then reclassified on data write.
+			obj.mutate = function (this: any) {
+				this.a = 7;
+				this.b = 14;
+			};
+			const countBeforeMutate = seen.length;
+			obj.mutate();
+			expect(seen.length).toBe(countBeforeMutate + 1);
+			expect(seen.at(-1)).toEqual([7, 14]);
+			obj.mutate = 42;
+			expect(obj.mutate).toBe(42);
+		} finally {
+			stop();
+		}
 	});
 });
