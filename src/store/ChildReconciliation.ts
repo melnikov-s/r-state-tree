@@ -25,7 +25,7 @@ function isStoreElement(value: unknown): value is StoreElement {
 	);
 }
 
-function validateStoreChildValue(
+export function validateStoreChildValue(
 	value: unknown,
 	propertyName: PropertyKey,
 	parentTypeName: string
@@ -334,7 +334,7 @@ function updateKeyedStores(
 	data.keyedStores = keyed.size > 0 ? keyed : undefined;
 }
 
-/** Reconcile an evaluated descriptor without observing or re-reading its getter. */
+/** Reconcile a validated descriptor without observing or re-reading its getter. */
 export function reconcileChildStores(
 	parent: StoreAdministration,
 	name: PropertyKey,
@@ -342,11 +342,6 @@ export function reconcileChildStores(
 	storeElement: ChildElements,
 	snapshots: ChildSnapshot | undefined
 ): void {
-	validateStoreChildValue(
-		storeElement,
-		name,
-		(parent.proxy.constructor as { name?: string }).name || "Store"
-	);
 	const previous = untracked(() => data.value.get());
 	const wasInitialized = data.initialized;
 	batchChildChanges((errors) => {

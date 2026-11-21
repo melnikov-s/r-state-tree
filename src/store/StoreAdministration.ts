@@ -20,6 +20,7 @@ import Store, { getStoreAdm } from "./Store.js";
 import {
 	batchChildChanges,
 	reconcileChildStores,
+	validateStoreChildValue,
 } from "./ChildReconciliation.js";
 import type { ChildSlot, ChildSnapshot } from "./ChildReconciliation.js";
 import { debugEnabled } from "../observables/internal/debug.js";
@@ -377,13 +378,19 @@ export class StoreAdministration<
 			!initialized ||
 			!Object.is(childStoreData.reconciledElement, storeElement)
 		) {
-			const snapshot = restore?.snapshot;
+			const explicitSnapshot = restore?.snapshot;
+			const snapshot =
+				explicitSnapshot === undefined
+					? this.getPendingChildSnapshot(name)
+					: explicitSnapshot;
+			validateStoreChildValue(storeElement, name, getStoreName(this));
+			// Structural descriptors can execute accessors during validation.
 			reconcileChildStores(
 				this,
 				name,
-				childStoreData,
+				this._childStoreDataMap!.get(name)!,
 				storeElement,
-				snapshot === undefined ? this.getPendingChildSnapshot(name) : snapshot
+				snapshot
 			);
 			if (!initialized) this.reportChildStructureChanged();
 		}
