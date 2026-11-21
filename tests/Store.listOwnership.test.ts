@@ -4,11 +4,13 @@ import {
 	createStore,
 	effect,
 	mount,
+	onSnapshot,
 	signal,
 	snapshot as snapshotField,
 	Store,
 	toSnapshot,
 } from "../src/index";
+import type { StoreSnapshot } from "../src/index";
 
 const savedLabel = (label: string) => ({ state: { label } });
 
@@ -129,7 +131,7 @@ describe("Store child list matching", () => {
 		root[Symbol.dispose]();
 	});
 
-	test("retains the pending list when construction fails and hydrates on retry", () => {
+	test("keeps live children after failed construction and hydrates on an explicit retry", () => {
 		let throwOnConstruction = true;
 		const failure = new Error("cannot construct yet");
 		class Added extends Label {
@@ -153,34 +155,67 @@ describe("Store child list matching", () => {
 		};
 		const error = captureFailure(() => applySnapshot(root, snapshot));
 		expect(underlyingFailures(error)[0]).toBe(failure);
-		expect(toSnapshot(root)).toEqual(snapshot);
+		expect(toSnapshot(root)).toEqual({
+			state: { add: true },
+			children: { tabs: [savedLabel("default")] },
+		});
 		expect(original?.label).toBe("default");
 		throwOnConstruction = false;
+		applySnapshot(root, snapshot);
 		expect(root.tabs[0]).toBe(original);
 		expect(root.tabs.map((tab) => tab?.label)).toEqual(["first", "second"]);
 		root[Symbol.dispose]();
 	});
 
-	test("retries pending hydration when the descriptor did not change", () => {
-		class Dated extends Store {
-			@snapshotField date: Date | string = new Date(0);
+	test("rejects a realized editor snapshot without saving or retrying the rejected value", () => {
+		let unopenedReads = 0;
+		class Editor extends Store {
+			@snapshotField due = new Date("2026-12-01T00:00:00.000Z");
 		}
-		class Root extends Store {
-			@child get tabs() {
-				return [createStore(Dated)];
+		class Workspace extends Store {
+			@child get editors() {
+				return [createStore(Editor, { key: "ada" })];
+			}
+			@child get unopened() {
+				unopenedReads++;
+				return [createStore(Label)];
 			}
 		}
-		const root = mount(createStore(Root));
-		const [original] = root.tabs;
-		const snapshot = { children: { tabs: [{ state: { date: "unknown" } }] } };
-		expect(() => applySnapshot(root, snapshot)).toThrow(
-			/invalid ISO date string/
-		);
-		expect(toSnapshot(root)).toEqual(snapshot);
-		original.date = "";
-		expect(root.tabs[0]).toBe(original);
-		expect(original.date).toBe("unknown");
-		root[Symbol.dispose]();
+		const workspace = mount(createStore(Workspace));
+		const editors = workspace.editors;
+		const [ada] = editors;
+		const initialDue = ada.due;
+		const input = (due: string) => ({
+			children: {
+				editors: [{ key: "ada", state: { due } }],
+				unopened: [savedLabel("still pending")],
+			},
+		});
+		const saves: (StoreSnapshot | undefined)[] = [];
+		const stop = onSnapshot(workspace, (snapshot) => saves.push(snapshot));
+
+		try {
+			expect(() => applySnapshot(workspace, input("not-a-date"))).toThrow(
+				/invalid ISO date string/
+			);
+			expect(ada.due).toBe(initialDue);
+			const live = input(initialDue.toISOString());
+			expect(toSnapshot(workspace)).toEqual(live);
+			expect(saves).toEqual([live]);
+			expect(workspace.editors).toBe(editors);
+			expect(unopenedReads).toBe(0);
+
+			const validDue = "2027-01-01T00:00:00.000Z";
+			applySnapshot(workspace, input(validDue));
+			expect(workspace.editors).toBe(editors);
+			expect(ada.due).toEqual(new Date(validDue));
+			expect(saves.at(-1)).toEqual(input(validDue));
+			expect(unopenedReads).toBe(0);
+			expect(workspace.unopened[0].label).toBe("still pending");
+		} finally {
+			stop();
+			workspace[Symbol.dispose]();
+		}
 	});
 
 	test.each([1_000, 2_000])(
