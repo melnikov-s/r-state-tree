@@ -252,20 +252,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					return Reflect.set(adm.proxy, name, desc.value);
 				}
 
-				const recording = debugEnabled && !adm.writeInProgress.has(name);
-				const before = recording
-					? Object.getOwnPropertyDescriptor(target, name)?.value
-					: undefined;
-				const result = Reflect.defineProperty(target, name, desc);
-				if (recording && result)
-					debugWrite(
-						target,
-						name,
-						"define",
-						before,
-						"value" in desc ? desc.value : undefined
-					);
-				return result;
+				// The shared trap invalidates fields and key enumeration for explicit
+				// definitions, but leaves reentrant assignment notification to write().
+				return PreactObjectAdministration.proxyTraps.defineProperty!(
+					target,
+					name,
+					desc
+				);
 			},
 
 			// Seal and freeze both reach this trap before modifying any descriptors.
@@ -697,6 +690,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private toJSON(): Snapshot<Model> {
+		// A field added after this read was not tracked as a value. Observe the
+		// key set as well, including when there are no existing snapshot fields.
+		this.keysAtom.reportObserved();
 		const keys = new Set([
 			...Object.keys(this.source),
 			...Object.keys(this.configuration),

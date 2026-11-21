@@ -516,7 +516,13 @@ A root subscription (`onSnapshot` or `onSnapshotDiff`) observes the snapshot and
 During normal application updates, the snapshot cache is invalidated by:
 
 1. **Reassigning** the Model snapshot field itself.
-2. **Mutating observable containers** (`observable()`) or **signals** (`signal()`) stored in the field.
+2. **Adding or deleting own fields** or **redefining them** with `Object.defineProperty`.
+   Models remain extensible; ordinary fields appear in snapshots under their own
+   enumerable string keys. Reflective changes to a field's value or enumerability
+   invalidate the snapshot. Key or descriptor changes may cause `onSnapshot` to
+   run even if the serialized values are unchanged. Managed `@child`, `@id`, and
+   `@modelRef` fields retain their existing write rules.
+3. **Mutating observable containers** (`observable()`) or **signals** (`signal()`) stored in the field.
 
 **Rule for mutable application state:** Initialize Model arrays/objects/collections
 with `observable()` and mutate them directly in place. Plain field values are not
@@ -1268,6 +1274,12 @@ Use `onSnapshotDiff` to receive compact undo/redo payloads. Unchanged fields are
 A move between child slots includes both slots in the diff and carries the full snapshot of the moved child at its destination. Model hydration releases departing children before claiming those IDs elsewhere, so undo/redo does not depend on the order of fields. Children matched within a slot are reused; children moved between slots by snapshot may be recreated. A slot omitted from a partial snapshot is left alone: claiming an ID still owned by an omitted slot is a conflict.
 
 If the recorded Model itself gets its first ID, keep the original `undo` object and apply it to that same Model. It can restore the previously undefined ID, along with any other fields changed in the batch, while the Model still has the assigned ID. A copy or serialization round trip does not carry that permission. Ordinary assignments and ordinary snapshots still cannot clear a Model's established ID. When replaying against an ancestor's snapshot instead, an explicitly undefined child ID can recreate the unidentified child without clearing the existing instance's ID.
+
+A full snapshot reflects additions and removals of ordinary fields on a live
+Model, but partial history snapshots do not encode arbitrary shape edits.
+Omitting a field does not delete it, and hydration ignores unknown ordinary
+fields that do not already exist on the target. Declare the fields you expect
+to hydrate or replay on a fresh instance.
 
 For a child with `@id id`, deleting `{ id: 1, value: 10 }` from `[ { id: 1, value: 10 }, { id: 2, value: 10 } ]` produces:
 
