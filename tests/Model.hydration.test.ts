@@ -9,6 +9,33 @@ import {
 	observable,
 } from "../src/index";
 
+test("leaf creation captures snapshot inputs before writes and resumes after an observable field", () => {
+	let constructing!: Leaf;
+	const initialList = observable<number[]>([]);
+	class Leaf extends Model {
+		@id key = "initial";
+		items = initialList;
+		label = "";
+		constructor() {
+			super();
+			constructing = this;
+		}
+	}
+	const leaf = Leaf.create({
+		key: "loaded",
+		items: [1, 2],
+		get label() {
+			return constructing.key;
+		},
+	});
+	expect(leaf.items).toBe(initialList);
+	expect(toSnapshot(leaf)).toStrictEqual({
+		key: "loaded",
+		items: [1, 2],
+		label: "initial",
+	});
+});
+
 test("root snapshots stay fresh when nested child model updates an observable state array", () => {
 	class Chat extends Model {
 		messages: { id: number; parts: { type: string }[] }[] = observable([]);
