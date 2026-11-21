@@ -1,6 +1,5 @@
 import { createAtom, createObservedAtom } from "../preact.js";
 import type { AtomNode, ObservedAtomNode } from "../preact.js";
-import type { SignalMap } from "./NodeMap.js";
 import { resolveNode } from "./utils.js";
 
 let circularRefSet: WeakSet<object> | null = null;
@@ -9,19 +8,21 @@ export class Administration<T extends object = any> {
 	static readonly proxyTraps: ProxyHandler<object> = {};
 	readonly proxy: T;
 	readonly source: T;
-	readonly atom: ObservedAtomNode;
+	private _atom?: ObservedAtomNode;
 
-	protected valuesMap?: SignalMap;
 	protected isObserved = false;
 	private forceObservedAtom?: AtomNode;
 
 	constructor(source: T) {
-		this.atom = createObservedAtom();
 		this.source = source;
 		this.proxy = new Proxy(
 			this.source,
 			(this.constructor as typeof Administration).proxyTraps
 		) as T;
+	}
+
+	get atom(): ObservedAtomNode {
+		return (this._atom ??= createObservedAtom());
 	}
 
 	protected flushChange(): void {
@@ -36,7 +37,7 @@ export class Administration<T extends object = any> {
 	}
 
 	reportChanged(): void {
-		this.atom.reportChanged();
+		this._atom?.reportChanged();
 	}
 
 	reportObserved(): void {

@@ -361,4 +361,50 @@ describe("implicit Model snapshot fields", () => {
 		expect(() => WithGetter.create()).toThrow(/snapshots do not support Map/);
 		expect(isObservable(seenThis)).toBe(true);
 	});
+
+	test("lazy model administration state preserves reentrant writes, parent tracking, and dynamic key observation", () => {
+		class Leaf extends Model {
+			@id id = "";
+			label = "";
+		}
+		class Container extends Model {
+			@child(Leaf) first: Leaf | null = null;
+			@child(Leaf) second: Leaf | null = null;
+			note = "";
+		}
+
+		const container = Container.create();
+		const leafA = Leaf.create({ id: "a", label: "A" });
+		const leafB = Leaf.create({ id: "b", label: "B" });
+
+		// Observe parent before attachment and across reentrant managed writes.
+		const parentHistory: (Model | null)[] = [];
+		const stopParent = effect(() => {
+			parentHistory.push(leafA.parent);
+		});
+		const stopReentrant = effect(() => {
+			if (container.first === leafA && container.second === null) {
+				container.second = leafB;
+			}
+		});
+
+		// Observe keys lazily via toSnapshot and Object.keys.
+		const snapshots: unknown[] = [];
+		const stopSnap = onSnapshot(leafA, (snap) => snapshots.push(snap));
+
+		try {
+			container.first = leafA;
+			expect(parentHistory).toEqual([null, container]);
+			expect(container.second).toBe(leafB);
+			expect(leafB.parent).toBe(container);
+
+			(leafA as unknown as Record<string, unknown>).extra = 1;
+			expect(snapshots).toEqual([{ id: "a", label: "A", extra: 1 }]);
+		} finally {
+			stopSnap();
+			stopReentrant();
+			stopParent();
+			container[Symbol.dispose]();
+		}
+	});
 });

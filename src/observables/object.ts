@@ -19,12 +19,28 @@ import { debugWrite, debugEnabled } from "./internal/debug.js";
 import { retainedChildRead } from "./internal/retainedRead.js";
 
 export class ObjectAdministration<T extends object> extends Administration<T> {
-	keysAtom: AtomNode;
-	hasMap: AtomMap<PropertyKey>;
-	valuesMap: SignalMap<PropertyKey>;
+	private _keysAtom?: AtomNode;
+	private _hasMap?: AtomMap<PropertyKey>;
+	private _valuesMap?: SignalMap<PropertyKey>;
 	computedMap!: Map<PropertyKey, ComputedNode<T[keyof T]>>;
-	types: Map<PropertyKey, PropertyType | null>;
+	private _types?: Map<PropertyKey, PropertyType | null>;
 	isWriting: boolean = false;
+
+	get keysAtom(): AtomNode {
+		return (this._keysAtom ??= createAtom());
+	}
+
+	get hasMap(): AtomMap<PropertyKey> {
+		return (this._hasMap ??= new AtomMap());
+	}
+
+	get valuesMap(): SignalMap<PropertyKey> {
+		return (this._valuesMap ??= new SignalMap());
+	}
+
+	get types(): Map<PropertyKey, PropertyType | null> {
+		return (this._types ??= new Map());
+	}
 
 	static proxyTraps: ProxyHandler<object> = {
 		has(target, name) {
@@ -78,21 +94,21 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 			if (result) {
 				batch(() => {
-					adm.types.delete(name);
+					adm._types?.delete(name);
 					adm.flushChange();
-					adm.keysAtom.reportChanged();
-					if (!hadOwn) adm.hasMap.reportChanged(name);
+					adm._keysAtom?.reportChanged();
+					if (!hadOwn) adm._hasMap?.reportChanged(name);
 
 					if ("value" in descriptor) {
 						if (isObservable(descriptor.value)) {
-							adm.explicitObservables.add(name);
+							(adm.explicitObservables ??= new Set()).add(name);
 						} else {
-							adm.explicitObservables.delete(name);
+							adm.explicitObservables?.delete(name);
 						}
-						adm.valuesMap.reportChanged(name, descriptor.value);
+						adm._valuesMap?.reportChanged(name, descriptor.value);
 					} else {
 						// Re-read accessors only in the observer, not while defining them.
-						const valueNode = adm.valuesMap.get(name);
+						const valueNode = adm._valuesMap?.get(name);
 						valueNode?.reportChanged(undefined);
 						valueNode?.invalidate();
 					}
@@ -104,10 +120,6 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 	constructor(source: T = {} as T) {
 		super(source);
-		this.keysAtom = createAtom();
-		this.hasMap = new AtomMap();
-		this.valuesMap = new SignalMap();
-		this.types = new Map();
 	}
 
 	protected readProperty(name: PropertyKey, receiver: unknown): unknown {
@@ -166,18 +178,18 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 	/** @internal Shared classification for proxy reads and field signals. */
 	getType(key: keyof T): PropertyType | null {
-		const cached = this.types.get(key);
+		const cached = this._types?.get(key);
 		if (cached !== undefined) return cached;
 
 		const descriptor = getPropertyDescriptor(this.source, key);
 		const type = getPropertyType(key, this.source, descriptor);
 		// A miss still tracks in the bounded node maps, but needs no type entry.
-		if (descriptor) this.types.set(key, type);
+		if (descriptor) (this._types ??= new Map()).set(key, type);
 		return type;
 	}
 
 	reportChanged(): void {
-		this.types.clear();
+		this._types?.clear();
 		super.reportChanged();
 	}
 
@@ -259,7 +271,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			if (
 				value &&
 				typeof value === "object" &&
-				(this.explicitObservables.has(key) || isObservable(value)) &&
+				(this.explicitObservables?.has(key) || isObservable(value)) &&
 				!Object.isFrozen(value)
 			) {
 				// Check Proxy Invariants:
@@ -282,7 +294,7 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		return getAction(value as unknown as Function);
 	}
 
-	private explicitObservables = new Set<PropertyKey>();
+	private explicitObservables?: Set<PropertyKey>;
 
 	write(key: keyof T, newValue: T[keyof T]): boolean {
 		const type = this.getType(key);
@@ -308,21 +320,21 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		const oldValue: T[keyof T] = this.get(key);
 		const targetValue = getSource(newValue);
 
-		const oldExplicit = this.explicitObservables.has(key);
+		const oldExplicit = this.explicitObservables?.has(key) ?? false;
 		const newExplicit = isObservable(newValue);
 
 		// Update strict shallow tracking
 		if (newExplicit) {
-			this.explicitObservables.add(key);
+			(this.explicitObservables ??= new Set()).add(key);
 		} else {
-			this.explicitObservables.delete(key);
+			this.explicitObservables?.delete(key);
 		}
 
 		if (
 			(type === "action" && typeof newValue !== "function") ||
 			(type === "observable" && typeof newValue === "function")
 		) {
-			this.types.delete(key);
+			this._types?.delete(key);
 		}
 
 		const changed =
@@ -347,10 +359,10 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			batch(() => {
 				this.flushChange();
 				if (added) {
-					this.keysAtom.reportChanged();
-					this.hasMap.reportChanged(key);
+					this._keysAtom?.reportChanged();
+					this._hasMap?.reportChanged(key);
 				}
-				this.valuesMap.reportChanged(key, newValue);
+				this._valuesMap?.reportChanged(key, newValue);
 			});
 			return true;
 		}
@@ -372,18 +384,18 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			: undefined;
 		const result = Reflect.deleteProperty(this.source, key);
 		if (result && hadOwn) {
-			this.types.delete(key);
-			this.explicitObservables.delete(key);
+			this._types?.delete(key);
+			this.explicitObservables?.delete(key);
 			if (debugEnabled)
 				debugWrite(this.source, key, "delete", previous, undefined);
 			batch(() => {
 				this.flushChange();
-				const valueNode = this.valuesMap.get(key);
+				const valueNode = this._valuesMap?.get(key);
 				valueNode?.reportChanged(undefined);
 				// Even an undefined key can reveal an inherited value. Keep live nodes attached.
 				valueNode?.invalidate();
-				this.keysAtom.reportChanged();
-				this.hasMap.reportChanged(key);
+				this._keysAtom?.reportChanged();
+				this._hasMap?.reportChanged(key);
 			});
 		}
 		return result;

@@ -211,7 +211,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					}
 					if (!adm.canWriteManagedField(name)) return false;
 				}
-				adm.writeInProgress.add(name);
+				adm.beginWrite(name);
 				try {
 					switch (type) {
 						case ModelCfgTypes.modelRef: {
@@ -233,7 +233,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 					return adm.writeProperty(name, value, receiver);
 				} finally {
-					adm.writeInProgress.delete(name);
+					adm.endWrite(name);
 				}
 			},
 
@@ -242,7 +242,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				// Reflect.set reenters this trap while writing the backing field.
 				// A later reentrant reaction is not an internal write.
 				if (
-					!(adm.isWriting && adm.writeInProgress.has(name)) &&
+					!(adm.isWriting && adm.hasWriteInProgress(name)) &&
 					isManagedField(adm.getCfgType(name))
 				) {
 					if (
@@ -296,17 +296,46 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	private configurationGetter?: () => ModelConfiguration<any>;
 	private _parent: ModelAdministration | null = null;
-	private parentAtom: AtomNode = createAtom();
+	private _parentAtom?: AtomNode;
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<readonly Model[]>>;
 	private activeModels?: Set<PropertyKey>;
 	private childArrays?: Map<PropertyKey, ChildModelsAdministration<Model>>;
-	private writeInProgress: Set<PropertyKey> = new Set();
+	private activeWriteKey?: PropertyKey;
+	private _writeInProgress?: Set<PropertyKey>;
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
 	private snapshotMap?: Map<string, ComputedNode<unknown[]>>;
 	private disposed = false;
 	private snapshotIdUndos?: WeakMap<object, SnapshotIdUndo>;
 	parentName: PropertyKey | null = null;
+
+	private beginWrite(name: PropertyKey): void {
+		if (this.activeWriteKey === undefined && !this._writeInProgress) {
+			this.activeWriteKey = name;
+			return;
+		}
+		const set = (this._writeInProgress ??= new Set());
+		if (this.activeWriteKey !== undefined) {
+			set.add(this.activeWriteKey);
+			this.activeWriteKey = undefined;
+		}
+		set.add(name);
+	}
+
+	private endWrite(name: PropertyKey): void {
+		if (this.activeWriteKey === name) {
+			this.activeWriteKey = undefined;
+			return;
+		}
+		this._writeInProgress?.delete(name);
+	}
+
+	private hasWriteInProgress(name: PropertyKey): boolean {
+		return (
+			this.activeWriteKey === name ||
+			(this._writeInProgress?.has(name) ?? false)
+		);
+	}
 
 	peekParent(): ModelAdministration | null {
 		return this._parent;
@@ -329,14 +358,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	get parent(): ModelAdministration | null {
-		this.parentAtom.reportObserved();
+		(this._parentAtom ??= createAtom()).reportObserved();
 		return this._parent;
 	}
 
 	set parent(value: ModelAdministration | null) {
 		if (this._parent !== value) {
 			this._parent = value;
-			this.parentAtom.reportChanged();
+			this._parentAtom?.reportChanged();
 		}
 	}
 
@@ -702,14 +731,16 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		this.disposed = true;
 		batch(() => {
 			try {
-				for (const name of this.activeModels ?? []) {
-					const child = this.source[name] as Model | Model[] | undefined;
-					if (Array.isArray(child)) {
-						for (let i = 0; i < child.length; i++) {
-							getModelAdm(child[i]).dispose(true);
+				if (this.activeModels) {
+					for (const name of this.activeModels) {
+						const child = this.source[name] as Model | Model[] | undefined;
+						if (Array.isArray(child)) {
+							for (let i = 0; i < child.length; i++) {
+								getModelAdm(child[i]).dispose(true);
+							}
+						} else if (child) {
+							getModelAdm(child).dispose(true);
 						}
-					} else if (child) {
-						getModelAdm(child).dispose(true);
 					}
 				}
 				if (this._parent) this.detach();
