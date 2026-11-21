@@ -351,7 +351,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<readonly Model[]>>;
 	declare private _activeModels?: Set<PropertyKey>;
-	declare private _childArrays?: Map<PropertyKey, ChildModelsAdministration<Model>>;
+	declare private _childArrays?: Map<
+		PropertyKey,
+		ChildModelsAdministration<Model>
+	>;
 	private _writingManagedKey: PropertyKey | undefined = undefined;
 	declare private _writeInProgress?: Set<PropertyKey>;
 	declare private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
@@ -568,41 +571,12 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 		// Fast path: pure attachment (no removals, e.g. Model.create or attaching to empty slot)
 		if (removed.length === 0) {
-			const attaching: ModelAdministration[] = [];
-			const seen =
-				added.length > 1 ? new Set<ModelAdministration>() : undefined;
-			for (let i = 0; i < added.length; i++) {
-				const adm = getModelAdm(added[i]);
-				if (seen) {
-					if (seen.has(adm)) continue;
-					seen.add(adm);
-				}
-				adm.assertUsable();
-				let ancestor: ModelAdministration | null = this;
-				while (ancestor) {
-					if (ancestor === adm)
-						throw new Error(
-							"r-state-tree: cannot attach an ancestor as a child"
-						);
-					ancestor = ancestor._parent;
-				}
-				if (adm._parent) {
-					throw new Error(
-						"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
-					);
-				}
-				attaching.push(adm);
-			}
-			validateModelAttachmentsAdm(this, attaching, EMPTY_MODEL_ADMS);
-			if (commit() === false) return false;
-			for (let i = 0; i < attaching.length; i++) {
-				const adm = attaching[i];
-				adm.assertUsable();
-				adm.parent = this;
-				adm.parentName = name;
-			}
-			onModelsAttachedValidated(this, attaching);
-			return true;
+			const attaching = added.map(getModelAdm);
+			return this.attachModels(
+				name,
+				attaching.length === 1 ? attaching : [...new Set(attaching)],
+				commit
+			);
 		}
 
 		const removedSet = new Set<ModelAdministration>();
@@ -659,6 +633,37 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		return true;
 	}
 
+	/** Attach an already distinct list; validate the entire list before committing the slot. */
+	private attachModels(
+		name: PropertyKey,
+		attaching: ModelAdministration[],
+		commit: () => void | boolean
+	): boolean {
+		this.assertUsable();
+		for (const adm of attaching) {
+			adm.assertUsable();
+			let ancestor: ModelAdministration | null = this;
+			while (ancestor) {
+				if (ancestor === adm)
+					throw new Error("r-state-tree: cannot attach an ancestor as a child");
+				ancestor = ancestor._parent;
+			}
+			if (adm._parent)
+				throw new Error(
+					"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
+				);
+		}
+		validateModelAttachmentsAdm(this, attaching, EMPTY_MODEL_ADMS);
+		if (commit() === false) return false;
+		for (const adm of attaching) {
+			adm.assertUsable();
+			adm.parent = this;
+			adm.parentName = name;
+		}
+		onModelsAttachedValidated(this, attaching);
+		return true;
+	}
+
 	private extractChildModels(
 		field: Model | Model[] | null | undefined
 	): Model[] {
@@ -693,7 +698,19 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		const added = addedModels ?? this.extractChildModels(value);
 		const removed = this.extractChildModels(current);
 		return batch(() => {
-			if (!this.changeModels(name, added, removed, commit)) return false;
+			// initMembers already resolved and deduplicated the new array. Reuse
+			// its slot-order administrations instead of rebuilding both collections.
+			const changed =
+				addedModels && removed.length === 0 && added.length > 0
+					? this.attachModels(
+							name,
+							(
+								getAdministration(value!) as ChildModelsAdministration<Model>
+							).getMemberAdms(),
+							commit
+						)
+					: this.changeModels(name, added, removed, commit);
+			if (!changed) return false;
 			this.updateChildSlot(name, value);
 			return true;
 		});
