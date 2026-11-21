@@ -295,6 +295,32 @@ describe("computed dependencies across eviction", () => {
 		expect(nodes.get(-1)).toBeUndefined();
 	});
 
+	test("exposed signals and direct readers share subscriptions and earlier writes", () => {
+		const nodes = new SignalMap<string, number>();
+		const seen: number[] = [];
+		const dispose = effect(() => {
+			seen.push(nodes.getOrCreate("key", 1).get());
+		});
+		try {
+			nodes.reportChanged("key", 2);
+			const node = nodes.getOrCreate("key").node!;
+			expect(node.peek()).toBe(2);
+			const facadeSeen: number[] = [];
+			const stop = node.subscribe((value) => facadeSeen.push(value));
+			try {
+				node.value = 3;
+				expect(seen).toEqual([1, 2, 3]);
+				expect(facadeSeen).toEqual([2, 3]);
+				expect(nodes.getOrCreate("key").node).toBe(node);
+			} finally {
+				stop();
+			}
+		} finally {
+			dispose();
+		}
+		expect(nodes.get("key")).toBeUndefined();
+	});
+
 	test("eviction invalidation does not fabricate a signal value", () => {
 		const entry = createCachedSignal(42);
 		let runs = 0;
