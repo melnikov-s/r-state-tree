@@ -37,9 +37,17 @@ import {
 } from "../configuration.js";
 import { ChildModelsAdministration } from "./ChildModelsAdministration.js";
 
-const ctorIdKeyMap: WeakMap<typeof Model, IdType | null> = new WeakMap();
+const ctorIdKeyMap: WeakMap<typeof Model, string | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
 let snapshotRollbackVersion = 0;
+
+type SnapshotPlan = {
+	releases: (() => void)[];
+	writes: (() => void)[];
+	undo?: (() => void)[];
+};
+
+type SnapshotIdUndo = { key: string; id: IdType };
 
 // Snapshots contain only primitives, arrays, and plain objects. Compare values
 // only after rollback, when reloading can create an equivalent new snapshot.
@@ -74,7 +82,7 @@ export function getModelAdm<T extends Model>(model: T): ModelAdministration {
 	return getAdministration(model)! as unknown as ModelAdministration;
 }
 
-function getIdKey(Ctor: typeof Model): string | number | null {
+function getIdKey(Ctor: typeof Model): string | null {
 	if (!ctorIdKeyMap.has(Ctor)) {
 		const config = getConfigurationForCtor(Ctor as unknown as Function);
 		const key =
@@ -94,12 +102,6 @@ function getModelRefSnapshotFromId(
 ): RefSnapshot | null {
 	const idKey = getIdKey(Ctor);
 	return idKey ? { [idKey]: id } : null;
-}
-
-function getSnapshotId(snapshot: Snapshot, Ctor: typeof Model): IdType | null {
-	const idKey = getIdKey(Ctor);
-
-	return idKey ? ((snapshot as any)[idKey] as IdType) : null;
 }
 
 function getSnapshotRefId(snapshot: RefSnapshot): IdType {
@@ -307,6 +309,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
 	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
 	private disposed = false;
+	private snapshotIdUndos?: WeakMap<object, SnapshotIdUndo>;
 	parentName: PropertyKey | null = null;
 
 	get parent(): ModelAdministration | null {
@@ -388,6 +391,21 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			// batch as the index update so observers only see a consistent identity.
 			return this.write(name, v);
 		});
+	}
+
+	/** Only the original undo payload on the recorded Model can restore its unset ID. */
+	recordSnapshotIdUndo(undo: object, next: object): void {
+		const key = getIdKey(Object.getPrototypeOf(this.proxy).constructor);
+		if (
+			key !== null &&
+			Object.hasOwn(undo, key) &&
+			(undo as Record<string, unknown>)[key] === undefined
+		) {
+			const id = (next as Record<string, unknown>)[key];
+			if (typeof id === "number" || typeof id === "string") {
+				(this.snapshotIdUndos ??= new WeakMap()).set(undo, { key, id });
+			}
+		}
 	}
 
 	private canWriteManagedField(name: PropertyKey): boolean {
@@ -798,8 +816,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				} catch (error) {
 					rejection = { error };
 					untracked(() => {
-						// Reverse writes so later slots release any IDs the earlier
-						// slots need back. Restore through the usual write paths.
+						// Reverse writes so acquisitions are undone before restoring
+						// the original ownership edges and their identifiers.
 						for (let i = undo.length - 1; i >= 0; i--) {
 							try {
 								undo[i]();
@@ -821,195 +839,231 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	loadSnapshot(snapshot: Snapshot<any>, undo?: (() => void)[]): void {
-		const assign = (
-			key: string,
-			value: unknown,
-			previous = this.proxy[key]
-		) => {
-			this.proxy[key] = value;
-			if (undo && !Object.is(previous, value)) {
-				undo.push(() => {
-					this.proxy[key] = previous;
-				});
+		untracked(() => {
+			batch(() => {
+				const plan: SnapshotPlan = { releases: [], writes: [], undo };
+				this.planSnapshot(snapshot, plan, this.snapshotIdUndos?.get(snapshot));
+				// Release only edges absent from the final slots (at every depth)
+				// before acquiring new ones. The ordinary setters still validate all
+				// attachments against retained subtrees and other new children.
+				for (const release of plan.releases) release();
+				for (const write of plan.writes) write();
+			});
+		});
+	}
+
+	private assignSnapshotField(
+		key: string,
+		value: unknown,
+		undo?: (() => void)[],
+		previous = this.proxy[key]
+	): void {
+		const hadOwn = Object.hasOwn(this.source, key);
+		this.proxy[key] = value;
+		if (undo && !Object.is(previous, value)) {
+			undo.push(() => {
+				if (!hadOwn && this.getCfgType(key) === CommonCfgTypes.child)
+					delete this.proxy[key];
+				else this.proxy[key] = previous;
+			});
+		}
+	}
+
+	private planSnapshot(
+		snapshot: Snapshot<any>,
+		plan: SnapshotPlan,
+		clearId?: SnapshotIdUndo
+	): void {
+		for (const key of Object.keys(snapshot)) {
+			const value = snapshot[key];
+			const type = this.getCfgType(key);
+			if (type === CommonCfgTypes.child) {
+				this.planSnapshotChild(key, value, plan);
+			} else {
+				plan.writes.push(() =>
+					this.loadSnapshotField(key, value, type, plan.undo, clearId)
+				);
 			}
-		};
-		const ensureChildTypes = (key: string): true => {
-			const childType = this.getCfgChildType(key);
-			if (!childType) {
+		}
+	}
+
+	private planSnapshotChild(key: string, value: any, plan: SnapshotPlan): void {
+		const current = this.proxy[key] as Model | Model[] | null | undefined;
+		const currentChildren = Array.isArray(current)
+			? Array.from({ length: current.length }, (_, index) => current[index])
+			: current
+				? [current]
+				: [];
+		const retained = new Set<Model>();
+		const snapshotIds = new Set<IdType>();
+		const Ctor = this.getCfgChildType(key) as typeof Model | undefined;
+		const inArray = Array.isArray(value);
+
+		const prepare = (
+			snapshot: Snapshot | Model,
+			index: number
+		): (() => Model) => {
+			if (snapshot instanceof Model) {
+				const model = getModelAdm(snapshot).proxy as Model;
+				retained.add(model);
+				return () => model;
+			}
+			if (!Ctor) {
 				throw new Error(
 					"r-state-tree: child constructor must be specified to load snapshots with child/children. eg: `@child(ChildCtor) MyChild`"
 				);
 			}
+			const idKey = getIdKey(Ctor);
+			const hasId = idKey !== null && Object.hasOwn(snapshot, idKey);
+			const id = hasId
+				? (snapshot as Record<string, IdType | undefined>)[idKey]
+				: undefined;
+			let match: Model | undefined;
+			if (id != null) {
+				if (snapshotIds.has(id)) {
+					throw new Error(
+						"r-state-tree duplicate ids detected after snapshot was loaded"
+					);
+				}
+				snapshotIds.add(id);
+				match = getModelById(this.root.proxy, Ctor, id);
+				if (match) {
+					const adm = getModelAdm(match);
+					if (adm.parent !== this || adm.parentName !== key) match = undefined;
+				}
+			} else if (inArray && Array.isArray(current)) {
+				const positional = currentChildren[index];
+				// An omitted identifier can patch the positional child. An explicit
+				// unset ID describes an unidentified child, not a request to clear an
+				// established ID; recreate in that case instead of changing the ID.
+				if (positional && (!hasId || getIdentifier(positional) == null))
+					match = positional;
+			}
 
-			return true;
+			if (match) {
+				retained.add(match);
+				getModelAdm(match).planSnapshot(snapshot, plan);
+				return () => match;
+			}
+			return () => {
+				if (!plan.undo) return Ctor.create(snapshot);
+				const model = Ctor.create();
+				// Hydrate in the outer transaction as a new child can itself take
+				// ownership of externally supplied Model instances.
+				getModelAdm(model).loadSnapshot(snapshot, plan.undo);
+				return model;
+			};
 		};
 
-		untracked(() => {
-			batch(() => {
-				let hasInPlaceStateChange = false;
-				Object.keys(snapshot).forEach((key) => {
-					const type = this.getCfgType(key);
-					const childType = this.getCfgChildType(key);
-					const value = snapshot[key];
+		const prepareValue = inArray
+			? (value as Snapshot[]).map((item, index) => prepare(item ?? {}, index))
+			: value == null
+				? null
+				: prepare(value, 0);
 
-					switch (type) {
-						case undefined: {
-							if (!Object.prototype.hasOwnProperty.call(this.source, key)) {
-								console.warn(
-									`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
-								);
-								break;
-							}
-							const currentValue = this.proxy[key];
-							const changeTracker = { changed: false, undo, copyInput: true };
-							const hydratedValue = hydrateSnapshotValue(
-								currentValue,
-								value,
-								changeTracker
-							);
-							assign(key, hydratedValue, currentValue);
-							if (
-								changeTracker.changed &&
-								Object.is(currentValue, hydratedValue)
-							) {
-								hasInPlaceStateChange = true;
-							}
-							break;
-						}
-						case ModelCfgTypes.transient:
-							console.warn(
-								`r-state-tree: transient Model key '${key}' found in snapshot, ignored.`
-							);
-							break;
-						case ModelCfgTypes.modelRef:
-							if (undo) {
-								const previous = this.source[key];
-								undo.push(() => this.writeReference(key, previous));
-							}
-							if (Array.isArray(value)) {
-								if ((value as unknown[])?.[0] instanceof Model) {
-									this.proxy[key] = value;
-								} else {
-									this.writeReference(
-										key,
-										value.map((snapshot: RefSnapshot) =>
-											getSnapshotRefId(snapshot)
-										)
-									);
-								}
-								break;
-							} else if (value instanceof Model) {
-								this.proxy[key] = value;
-							} else if (value == null) {
-								this.writeReference(key, undefined);
-							} else {
-								this.writeReference(key, getSnapshotRefId(value));
-							}
-							break;
-						case ModelCfgTypes.id:
-							if (undo) {
-								const previous = this.proxy[key];
-								const previousId = getIdentifier(this.proxy);
-								undo.push(() => {
-									// Public writes still cannot clear an established ID.
-									setIdentifier(this.proxy, previousId);
-									this.write(key, previous);
-								});
-							}
-							this.proxy[key] = value;
-							break;
-						case CommonCfgTypes.child:
-							if (value == null) {
-								assign(key, null);
-								break;
-							}
+		const remaining = currentChildren.filter((model) => retained.has(model));
+		if (remaining.length !== currentChildren.length) {
+			plan.releases.push(() =>
+				this.assignSnapshotField(
+					key,
+					Array.isArray(current) ? remaining : null,
+					plan.undo
+				)
+			);
+		}
+		plan.writes.push(() =>
+			this.assignSnapshotField(
+				key,
+				Array.isArray(prepareValue)
+					? prepareValue.map((makeChild) => makeChild())
+					: (prepareValue?.() ?? null),
+				plan.undo
+			)
+		);
+	}
 
-							let model: Model;
-
-							if (Array.isArray(value)) {
-								const Ctor = childType as typeof Model;
-								const snapshotIds = new Set<IdType>();
-								for (const childSnapshot of value as Snapshot[]) {
-									if (childSnapshot instanceof Model) continue;
-									const snapshotId = childType
-										? getSnapshotId(childSnapshot ?? {}, Ctor)
-										: null;
-									if (snapshotId != null && snapshotIds.has(snapshotId)) {
-										throw new Error(
-											"r-state-tree duplicate ids detected after snapshot was loaded"
-										);
-									}
-									if (snapshotId != null) snapshotIds.add(snapshotId);
-								}
-								assign(
-									key,
-									(value as Snapshot[]).map((snapshot, index) => {
-										snapshot = snapshot ?? {};
-										let model: Model;
-										if (snapshot instanceof Model) {
-											model = snapshot;
-										} else {
-											ensureChildTypes(key);
-
-											const id = childType && getSnapshotId(snapshot, Ctor);
-											const foundModel =
-												id != null
-													? getModelById(this.root.proxy, Ctor, id)
-													: this.proxy[key]?.[index];
-											const adm = foundModel && getModelAdm(foundModel);
-
-											if (
-												adm &&
-												foundModel!.parent === this.proxy &&
-												adm?.parentName === key
-											) {
-												adm.loadSnapshot(snapshot, undo);
-												model = foundModel!;
-											} else {
-												model = Ctor.create(snapshot);
-											}
-										}
-
-										return model;
-									})
-								);
-								break;
-							} else if (value instanceof Model) {
-								model = value;
-							} else {
-								ensureChildTypes(key);
-
-								const id =
-									childType &&
-									getSnapshotId(value as Snapshot, childType as typeof Model);
-
-								if (
-									id != null &&
-									this.proxy[key] &&
-									this.proxy[key] instanceof (childType as typeof Model) &&
-									id === getIdentifier(this.proxy[key])
-								) {
-									const adm = getModelAdm(this.proxy[key]);
-									adm.loadSnapshot(value as Snapshot, undo);
-									model = this.proxy[key];
-								} else {
-									model = (childType as typeof Model).create(value as Snapshot);
-								}
-							}
-
-							assign(key, model);
-							break;
-						default:
-							console.warn(
-								`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
-							);
-					}
-				});
-				if (hasInPlaceStateChange) {
+	private loadSnapshotField(
+		key: string,
+		value: any,
+		type: ModelCfgTypes | CommonCfgTypes | undefined,
+		undo?: (() => void)[],
+		clearId?: SnapshotIdUndo
+	): void {
+		switch (type) {
+			case undefined: {
+				if (!Object.prototype.hasOwnProperty.call(this.source, key)) {
+					console.warn(
+						`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
+					);
+					break;
+				}
+				const currentValue = this.proxy[key];
+				const changeTracker = { changed: false, undo, copyInput: true };
+				const hydratedValue = hydrateSnapshotValue(
+					currentValue,
+					value,
+					changeTracker
+				);
+				this.assignSnapshotField(key, hydratedValue, undo, currentValue);
+				if (changeTracker.changed && Object.is(currentValue, hydratedValue)) {
 					this.atom.reportChanged();
 				}
-			});
-		});
+				break;
+			}
+			case ModelCfgTypes.transient:
+				console.warn(
+					`r-state-tree: transient Model key '${key}' found in snapshot, ignored.`
+				);
+				break;
+			case ModelCfgTypes.modelRef:
+				if (undo) {
+					const previous = this.source[key];
+					undo.push(() => this.writeReference(key, previous));
+				}
+				if (Array.isArray(value)) {
+					if ((value as unknown[])?.[0] instanceof Model) {
+						this.proxy[key] = value;
+					} else {
+						this.writeReference(
+							key,
+							value.map((snapshot: RefSnapshot) => getSnapshotRefId(snapshot))
+						);
+					}
+					break;
+				} else if (value instanceof Model) {
+					this.proxy[key] = value;
+				} else if (value == null) {
+					this.writeReference(key, undefined);
+				} else {
+					this.writeReference(key, getSnapshotRefId(value));
+				}
+				break;
+			case ModelCfgTypes.id:
+				if (undo) {
+					const previous = this.proxy[key];
+					const previousId = getIdentifier(this.proxy);
+					undo.push(() => {
+						// Public writes still cannot clear an established ID.
+						setIdentifier(this.proxy, previousId);
+						this.write(key, previous);
+					});
+				}
+				if (
+					clearId &&
+					value === undefined &&
+					clearId.key === key &&
+					Object.is(clearId.id, getIdentifier(this.proxy))
+				) {
+					this.assertUsable();
+					if (!this.canWriteManagedField(key))
+						throw new TypeError(`r-state-tree: cannot write id field '${key}'`);
+					setIdentifier(this.proxy, undefined);
+					this.write(key, undefined);
+				} else {
+					this.proxy[key] = value;
+				}
+				break;
+		}
 	}
 
 	getSnapshot(): Snapshot<any> {

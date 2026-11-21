@@ -1265,6 +1265,10 @@ Use `onSnapshotDiff` to receive compact undo/redo payloads. Unchanged fields are
 - Children absent from the other state carry complete snapshots, so undo can recreate a deleted child without losing persisted data. The same applies to inserted and replaced children.
 - Children without an established identifier, and transitions between single/array/null shapes, use complete snapshots where recreation may be required.
 
+A move between child slots includes both slots in the diff and carries the full snapshot of the moved child at its destination. Model hydration releases departing children before claiming those IDs elsewhere, so undo/redo does not depend on the order of fields. Children matched within a slot are reused; children moved between slots by snapshot may be recreated. A slot omitted from a partial snapshot is left alone: claiming an ID still owned by an omitted slot is a conflict.
+
+If the recorded Model itself gets its first ID, keep the original `undo` object and apply it to that same Model. It can restore the previously undefined ID, along with any other fields changed in the batch, while the Model still has the assigned ID. A copy or serialization round trip does not carry that permission. Ordinary assignments and ordinary snapshots still cannot clear a Model's established ID. When replaying against an ancestor's snapshot instead, an explicitly undefined child ID can recreate the unidentified child without clearing the existing instance's ID.
+
 For a child with `@id id`, deleting `{ id: 1, value: 10 }` from `[ { id: 1, value: 10 }, { id: 2, value: 10 } ]` produces:
 
 ```ts

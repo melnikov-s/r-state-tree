@@ -91,6 +91,7 @@ export function onSnapshotDiff<T extends Model>(
 		const redo = getDiff(prev, next, getConfigurationFromSnapshot);
 		prev = next;
 		if (!undo && !redo) return;
+		if (undo) adm.recordSnapshotIdUndo(undo, next);
 		callback({ undo: undo ?? {}, redo: redo ?? {} }, value as T);
 	});
 }
