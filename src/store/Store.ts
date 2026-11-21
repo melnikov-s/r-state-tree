@@ -13,16 +13,38 @@ import {
 import {
 	createObservableWithCustomAdministration,
 	getObservable,
+	untracked,
 } from "../observables/index.js";
 import { getConfigurationForCtor } from "../configuration.js";
 
-let initEnabled = false;
-export function allowNewStore<T>(fn: () => T): T {
-	initEnabled = true;
+type StoreConstruction = { administration?: StoreAdministration };
+let currentConstruction: StoreConstruction | undefined;
+
+export function constructStore<T extends Store>(
+	Type: new (props: Props) => T,
+	props: Props
+): T {
+	const previousConstruction = currentConstruction;
+	const construction: StoreConstruction = {};
 	try {
-		return fn();
-	} finally {
-		initEnabled = false;
+		currentConstruction = construction;
+		try {
+			return new Type(props);
+		} finally {
+			currentConstruction = previousConstruction;
+		}
+	} catch (error) {
+		try {
+			// Derived initializers can realize children before `new` returns.
+			untracked(() => construction.administration?.dispose(true));
+		} catch (cleanupError) {
+			throw new AggregateError(
+				[error, cleanupError],
+				"r-state-tree: store construction and cleanup failed",
+				{ cause: error }
+			);
+		}
+		throw error;
 	}
 }
 
@@ -102,7 +124,8 @@ export default class Store<
 	props!: StoreProps<PropsType>;
 
 	constructor(props: StoreProps<PropsType>) {
-		if (!initEnabled) {
+		const construction = currentConstruction;
+		if (!construction || construction.administration) {
 			throw new Error("r-state-tree: Can't initialize store directly");
 		}
 
@@ -111,6 +134,7 @@ export default class Store<
 			StoreAdministration
 		);
 		const adm = getStoreAdm(observable);
+		construction.administration = adm;
 		adm.setConfiguration(
 			() =>
 				(getConfigurationForCtor(

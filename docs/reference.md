@@ -225,6 +225,12 @@ finalizes lifecycle state, then throws an `AggregateError` containing the failur
 Repeated or reentrant disposal is a no-op. Child getters throw once disposal
 begins, rather than creating or reconciling children on a disposed Store.
 
+If a Store constructor throws, the framework disposes the incomplete Store and
+any children realized by that attempt. A failed child replacement leaves the
+previously committed children alive. The constructor error is rethrown, or
+retained as the cause if cleanup also fails. This does not undo arbitrary side
+effects of user code in the constructor.
+
 Pass the lifetime signal to APIs that support cancellation:
 
 ```ts

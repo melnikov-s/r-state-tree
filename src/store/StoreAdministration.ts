@@ -16,7 +16,7 @@ import type {
 	ComputedNode,
 	AtomNode,
 } from "../observables/index.js";
-import { allowNewStore } from "./Store.js";
+import { constructStore } from "./Store.js";
 import { debugWrite, debugEnabled } from "../observables/internal/debug.js";
 import { retainedChildRead } from "../observables/internal/retainedRead.js";
 import type Store from "./Store.js";
@@ -414,7 +414,7 @@ export class StoreAdministration<
 				propsUpdates.push({ store: old, props, snapshot });
 				stores.push(old);
 			} else {
-				const store = allowNewStore(() => new Type(props));
+				const store = constructStore(Type, props);
 				created.push(store);
 				if (snapshot) getStoreAdm(store).loadSnapshot(snapshot);
 				stores.push(store);
@@ -457,7 +457,7 @@ export class StoreAdministration<
 		let replacement: Store | null = null;
 		if (element) {
 			const { Type, props } = element;
-			replacement = allowNewStore(() => new Type(props));
+			replacement = constructStore(Type, props);
 			created.push(replacement);
 			if (snapshot) getStoreAdm(replacement).loadSnapshot(snapshot);
 		}

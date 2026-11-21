@@ -1,6 +1,6 @@
 import type { Snapshot, SnapshotDiff, IdType, StoreSnapshot } from "./types.js";
 import { getDiff } from "./utils.js";
-import Store, { allowNewStore, isStoreElement } from "./store/Store.js";
+import Store, { constructStore, isStoreElement } from "./store/Store.js";
 import {
 	getStoreAdm,
 	StoreAdministration,
@@ -31,25 +31,23 @@ export function mount<T extends Store>(
 	}
 
 	const element = container;
-	return allowNewStore(() => {
-		const s = new element.Type(element.props);
-		const adm = getStoreAdm(s);
-		if (!(adm instanceof StoreAdministration)) {
-			throw new TypeError("r-state-tree: mount expected a Store descriptor");
-		}
-		try {
-			// Prefer an explicit mount-time snapshot; otherwise consume one stashed
-			// earlier by applySnapshot on the not-yet-instantiated element.
-			const snapshot = options?.snapshot ?? element.snapshot;
-			delete element.snapshot;
-			if (snapshot) adm.loadSnapshot(snapshot);
-			adm.mount();
-		} catch (error) {
-			adm.dispose(true);
-			throw error;
-		}
-		return s;
-	}) as T;
+	const s = constructStore(element.Type, element.props);
+	const adm = getStoreAdm(s);
+	if (!(adm instanceof StoreAdministration)) {
+		throw new TypeError("r-state-tree: mount expected a Store descriptor");
+	}
+	try {
+		// Prefer an explicit mount-time snapshot; otherwise consume one stashed
+		// earlier by applySnapshot on the not-yet-instantiated element.
+		const snapshot = options?.snapshot ?? element.snapshot;
+		delete element.snapshot;
+		if (snapshot) adm.loadSnapshot(snapshot);
+		adm.mount();
+	} catch (error) {
+		adm.dispose(true);
+		throw error;
+	}
+	return s as T;
 }
 
 export function toSnapshot<T extends Model>(value: T): Snapshot<T>;
