@@ -347,17 +347,17 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	/** @internal */
 	_modelId?: IdType;
 	private _parent: ModelAdministration | null = null;
-	private _parentAtom?: AtomNode;
+	declare private _parentAtom?: AtomNode;
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<readonly Model[]>>;
-	private _activeModels?: Set<PropertyKey>;
-	private _childArrays?: Map<PropertyKey, ChildModelsAdministration<Model>>;
+	declare private _activeModels?: Set<PropertyKey>;
+	declare private _childArrays?: Map<PropertyKey, ChildModelsAdministration<Model>>;
 	private _writingManagedKey: PropertyKey | undefined = undefined;
-	private _writeInProgress?: Set<PropertyKey>;
-	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
-	private _snapshotMap?: Map<string, ComputedNode<unknown[]>>;
+	declare private _writeInProgress?: Set<PropertyKey>;
+	declare private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
+	declare private _snapshotMap?: Map<string, ComputedNode<unknown[]>>;
 	private disposed = false;
-	private snapshotIdUndos?: WeakMap<object, SnapshotIdUndo>;
+	declare private snapshotIdUndos?: WeakMap<object, SnapshotIdUndo>;
 	parentName: PropertyKey | null = null;
 
 	protected override getInstanceConfig(): Record<PropertyKey, any> {
