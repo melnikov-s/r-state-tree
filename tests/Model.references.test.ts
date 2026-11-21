@@ -7,6 +7,7 @@ import {
 	toSnapshot,
 	onSnapshot,
 	applySnapshot,
+	computed,
 	effect,
 	findModelById,
 } from "../src/index";
@@ -443,6 +444,33 @@ describe("model references", () => {
 			}
 		}
 	);
+
+	test("findModelById isolates observed IDs and refreshes evicted lazy misses", () => {
+		class Item extends Model {
+			@id id = 0;
+		}
+		class List extends Model {
+			@child item: Item | null = null;
+		}
+		using list = List.create();
+		const lazy = computed(() => findModelById(list, Item, 1));
+		let runs = 0;
+		const stop = effect(() => {
+			findModelById(list, Item, -1);
+			runs++;
+		});
+		try {
+			expect(lazy.value).toBeUndefined();
+			for (let id = 2; id <= 600; id++) findModelById(list, Item, id);
+			list.item = Item.create({ id: 1 });
+			expect(lazy.value).toBe(list.item);
+			list.item = null;
+			expect(lazy.value).toBeUndefined();
+			expect(runs).toBe(1);
+		} finally {
+			stop();
+		}
+	});
 
 	test("findModelById excludes the tree root but includes an attached supplied model", () => {
 		class Item extends Model {

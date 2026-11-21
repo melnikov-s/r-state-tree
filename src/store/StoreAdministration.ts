@@ -158,6 +158,7 @@ type ChildStoreData = {
 	value: SignalNode<Store | null | Store[]>;
 	computed: ComputedNode<StoreElement | null | StoreElement[]>;
 	listener?: ListenerNode;
+	refresh: () => void;
 };
 
 type ChildSnapshot = NonNullable<StoreSnapshot["children"]>[string];
@@ -246,7 +247,7 @@ export class StoreAdministration<
 		{},
 		ObjectAdministration.proxyTraps,
 		{
-			get(target, name) {
+			get(target, name, receiver) {
 				if (name === "key" || name === Symbol.dispose) {
 					return Reflect.get(target, name);
 				}
@@ -256,22 +257,17 @@ export class StoreAdministration<
 					case CommonCfgTypes.child:
 						return adm.getStore(name);
 					default:
-						return ObjectAdministration.proxyTraps.get?.apply(
-							null,
-							arguments as any
-						);
+						return adm.readProperty(name, receiver);
 				}
 			},
 
-			set(target, name, value) {
+			set(target, name, value, receiver) {
 				if (name === "props") {
 					throw new Error(`r-state-tree: ${name} is read-only`);
 				}
 
-				return ObjectAdministration.proxyTraps.set?.apply(
-					null,
-					arguments as any
-				);
+				const adm = getAdministration(target) as StoreAdministration;
+				return adm.writeProperty(name, value, receiver);
 			},
 		} as ProxyHandler<object>
 	);
@@ -589,17 +585,18 @@ export class StoreAdministration<
 			return childStoreData.value.get() as Store | null;
 		}
 
-		const data = untracked(() => {
-			const data = childStoreData ?? {
-				computed: this.getComputedGetter(name),
+		let data = childStoreData;
+		if (!data) {
+			data = {
+				computed: untracked(() => this.getComputedGetter(name)),
 				value: createSignal<Store | Store[] | null>(null),
+				refresh: () => this.updateStore(name),
 			};
-			if (!childStoreData) this.childStoreDataMap.set(name, data);
-			// Refresh stale descriptors synchronously, including inside a batch before
-			// the listener runs. Unchanged descriptors need no reconciliation work.
-			this.updateStore(name);
-			return data;
-		});
+			this.childStoreDataMap.set(name, data);
+		}
+		// Refresh stale descriptors synchronously, including inside a batch before
+		// the listener runs. Unchanged descriptors need no reconciliation work.
+		untracked(data.refresh);
 		return data.value.get() as Store | null;
 	}
 

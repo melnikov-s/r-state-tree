@@ -31,38 +31,12 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 			return getAdministration(target).has(name);
 		},
 
-		get(target, name) {
-			const adm = getAdministration(target);
-			// Check if the property is physically present on the source.
-			// Ideally we want to let `Reflect.has` decide, but we need to intercept
-			// standard object methods if they are NOT own properties (to hide administration).
-			// If they ARE own properties (e.g. user defined toString), we should track them.
-			if (
-				isPropertyKey(name) &&
-				(!(name in Object.prototype) ||
-					Object.prototype.hasOwnProperty.call(adm.source, name)) &&
-				(typeof adm.source !== "function" || name !== "prototype")
-			) {
-				return adm.read(name, arguments[2]);
-			}
-
-			return Reflect.get(adm.source, name, arguments[2]);
+		get(target, name, receiver) {
+			return getAdministration(target).readProperty(name, receiver);
 		},
 
-		set(target, name, value) {
-			if (!isPropertyKey(name)) return false;
-
-			const adm = getAdministration(target) as ObjectAdministration<any>;
-			const receiver = arguments[3];
-
-			// If receiver is the proxy itself, use the administration write path (reactive)
-			if (receiver === adm.proxy) {
-				return adm.write(name, value);
-			}
-
-			// Otherwise (prototype chain access), perform a standard Reflect.set on the receiver.
-			// This ensures the property is set on the child object (receiver), not the prototype (validating tests).
-			return Reflect.set(adm.source, name, value, receiver);
+		set(target, name, value, receiver) {
+			return getAdministration(target).writeProperty(name, value, receiver);
 		},
 
 		deleteProperty(target, name) {
@@ -134,6 +108,27 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		this.hasMap = new AtomMap();
 		this.valuesMap = new SignalMap();
 		this.types = new Map();
+	}
+
+	protected readProperty(name: PropertyKey, receiver: unknown): unknown {
+		// Inherited Object methods are transparent; own overrides are reactive.
+		if (
+			(!(name in Object.prototype) || Object.hasOwn(this.source, name)) &&
+			(typeof this.source !== "function" || name !== "prototype")
+		) {
+			return this.read(name as keyof T, receiver);
+		}
+		return Reflect.get(this.source, name, receiver);
+	}
+
+	protected writeProperty(
+		name: PropertyKey,
+		value: T[keyof T],
+		receiver: unknown
+	): boolean {
+		if (receiver === this.proxy) return this.write(name as keyof T, value);
+		// A prototype-chain write must target the actual receiver.
+		return Reflect.set(this.source, name, value, receiver);
 	}
 
 	private get(key: PropertyKey): T[keyof T] {
@@ -234,13 +229,10 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 		if (type === "observable") {
 			// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
-			const shouldWrap =
-				this.explicitObservables.has(key) || isObservable(value);
-
 			if (
-				shouldWrap &&
 				value &&
 				typeof value === "object" &&
+				(this.explicitObservables.has(key) || isObservable(value)) &&
 				!Object.isFrozen(value)
 			) {
 				// Check Proxy Invariants:

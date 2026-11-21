@@ -28,6 +28,8 @@ export function getAdministration<T extends object>(
 const actionsMap: WeakMap<Function, Function> = new WeakMap();
 
 export function getSource<T>(obj: T): T {
+	if (obj == null || (typeof obj !== "object" && typeof obj !== "function"))
+		return obj;
 	const adm = getAdministration(obj as object);
 
 	return adm ? (adm.source as unknown as T) : obj;

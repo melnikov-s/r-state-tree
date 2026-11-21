@@ -184,10 +184,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						}
 						return adm.getModelRef(prop);
 					default:
-						return PreactObjectAdministration.proxyTraps.get?.apply(
-							null,
-							arguments as any
-						);
+						return adm.readProperty(prop, proxy);
 				}
 			},
 			set(target, name, value, receiver) {
@@ -222,10 +219,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						}
 					}
 
-					return PreactObjectAdministration.proxyTraps.set?.apply(
-						null,
-						arguments as any
-					);
+					return adm.writeProperty(name, value, receiver);
 				} finally {
 					adm.writeInProgress.delete(name);
 				}

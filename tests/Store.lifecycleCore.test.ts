@@ -107,6 +107,26 @@ describe("Store lifetime signal", () => {
 		expect(abortedDuringCleanup).toBe(true);
 	});
 
+	test("returns a stable, already-aborted signal when first accessed in cleanup", () => {
+		let firstRead: AbortSignal | undefined;
+		class S extends Store {
+			constructor(props: S["props"]) {
+				super(props);
+				this.effect(() => () => {
+					firstRead = this.signal;
+					expect(firstRead.aborted).toBe(true);
+				});
+			}
+		}
+
+		const store = mount(createStore(S));
+		const other = mount(createStore(S));
+		store[Symbol.dispose]();
+		expect(store.signal).toBe(firstRead);
+		other[Symbol.dispose]();
+		expect(other.signal).not.toBe(store.signal);
+	});
+
 	test("aborts during rollback when mounting fails", () => {
 		let failedStore!: Store;
 		class FailingStore extends Store {

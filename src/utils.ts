@@ -48,8 +48,6 @@ export function getParentConstructor(
  * @param path - Internal: the current key path for error messages.
  */
 export function clone<T>(val: T, path: string = ""): T {
-	const atPath = path ? ` at path "${path}"` : "";
-
 	if (val === null || val === undefined) {
 		return val;
 	}
@@ -63,6 +61,7 @@ export function clone<T>(val: T, path: string = ""): T {
 			return val;
 		}
 
+		const atPath = path ? ` at path "${path}"` : "";
 		if (typeof val === "bigint") {
 			throw new Error(
 				`r-state-tree: snapshots do not support bigint${atPath}. ` +
