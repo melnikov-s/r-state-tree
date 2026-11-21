@@ -1,7 +1,6 @@
 import { getModelAdm, ModelAdministration } from "./ModelAdministration.js";
-import type { Configuration, ModelConfiguration, Snapshot } from "../types.js";
+import type { ModelConfiguration, Snapshot } from "../types.js";
 import { createObservableWithCustomAdministration } from "../observables/index.js";
-import { getConfigurationForCtor } from "../configuration.js";
 
 let initEnabled = false;
 
@@ -40,19 +39,7 @@ export default class Model implements Disposable {
 			);
 		}
 
-		const observable = createObservableWithCustomAdministration(
-			this,
-			ModelAdministration
-		);
-		const adm = getModelAdm(observable);
-		adm.setConfiguration(
-			() =>
-				(getConfigurationForCtor(
-					this.constructor as unknown as Function
-				) as Configuration<this>) ?? {}
-		);
-
-		return observable;
+		return createObservableWithCustomAdministration(this, ModelAdministration);
 	}
 
 	get parent(): Model | null {

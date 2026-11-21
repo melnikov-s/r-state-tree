@@ -351,15 +351,20 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private get configuration(): ModelConfiguration<any> {
-		return this.configurationGetter?.() ?? {};
+		return this.configurationGetter
+			? this.configurationGetter()
+			: (getConfigurationForCtor(
+					this.source.constructor as Function
+				) as ModelConfiguration<any>);
 	}
 
 	/** Retained runtime metadata; snapshots intentionally have different semantics. */
 	getInspectionMetadata() {
+		const config = this.configuration;
 		return {
-			fields: Reflect.ownKeys(this.configuration).map((key) => ({
+			fields: Reflect.ownKeys(config).map((key) => ({
 				key,
-				type: getConfigType(this.configuration[key as string]),
+				type: getConfigType(config[key as string]),
 			})),
 			parent: this.parent?.proxy ?? null,
 			status: this.disposed ? "disposed" : "active",
@@ -722,12 +727,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		// A field added after this read was not tracked as a value. Observe the
 		// key set as well, including when there are no existing snapshot fields.
 		this.keysAtom.reportObserved();
-		const keys = new Set([
-			...Object.keys(this.source),
-			...Object.keys(this.configuration),
-		]);
+		const config = this.configuration;
+		const keys = new Set([...Object.keys(this.source), ...Object.keys(config)]);
 		return Array.from(keys).reduce((json: any, key) => {
-			switch (getConfigType(this.configuration[key])) {
+			switch (getConfigType(config[key])) {
 				case ModelCfgTypes.transient:
 					break;
 				case ModelCfgTypes.id:
@@ -802,10 +805,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	validateSnapshotFields(): void {
 		untracked(() => {
+			const config = this.configuration;
 			const keys = Object.keys(this.source);
 			for (let i = 0; i < keys.length; i++) {
 				const key = keys[i];
-				if (this.getCfgType(key) === undefined) {
+				if (getConfigType(config[key]) === undefined) {
 					try {
 						clone(this.peekField(key), key);
 					} catch (error) {
@@ -904,9 +908,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		plan: SnapshotPlan,
 		clearId?: SnapshotIdUndo
 	): void {
+		const config = this.configuration;
 		for (const key of Object.keys(snapshot)) {
 			const value = snapshot[key];
-			const type = this.getCfgType(key);
+			const type = getConfigType(config[key]) as
+				| ModelCfgTypes
+				| CommonCfgTypes
+				| undefined;
 			if (type === CommonCfgTypes.child) {
 				this.planSnapshotChild(key, value, plan);
 			} else {

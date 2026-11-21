@@ -232,3 +232,42 @@ test("context types reflect whether a default value was supplied", () => {
 	void checkConsumers;
 	void UserProvider;
 });
+
+test("class configuration cache invalidates on static types, metadata, and prototype replacement", () => {
+	class BaseA extends Model {
+		baseField = 1;
+		static types: any = { baseField: transient };
+	}
+
+	class BaseB extends Model {
+		baseField = 1;
+	}
+
+	class Derived extends BaseA {
+		local = 2;
+		static types: any = {};
+	}
+
+	expect(toSnapshot(Derived.create())).toEqual({ local: 2 });
+
+	// Replacing derived static types invalidates cache.
+	Derived.types = { local: transient };
+	expect(toSnapshot(Derived.create())).toEqual({});
+
+	// Replacing base static types invalidates derived cache.
+	BaseA.types = {};
+	expect(toSnapshot(Derived.create())).toEqual({ baseField: 1 });
+
+	// Replacing decorator metadata object invalidates cache.
+	const metadataSymbol = (Symbol as any).metadata as symbol;
+	Derived.types = undefined;
+	(Derived as any)[metadataSymbol] = { local: transient };
+	expect(toSnapshot(Derived.create())).toEqual({ baseField: 1 });
+	(Derived as any)[metadataSymbol] = {};
+	expect(toSnapshot(Derived.create())).toEqual({ baseField: 1, local: 2 });
+
+	// Changing prototype chain invalidates derived cache.
+	BaseB.types = { baseField: transient };
+	Object.setPrototypeOf(Derived.prototype, BaseB.prototype);
+	expect(toSnapshot(Derived.create())).toEqual({ local: 2 });
+});
