@@ -1,16 +1,23 @@
 import { ArrayAdministration, getSource, batch } from "../observables/index.js";
 import { getAdministration } from "../observables/internal/lookup.js";
 import Model from "./Model.js";
+import type { ModelAdministration } from "./ModelAdministration.js";
 
 function isIndex(name: PropertyKey): boolean {
 	if (typeof name !== "string") return false;
-	const index = Number(name);
-	return (
-		Number.isInteger(index) &&
-		index >= 0 &&
-		index < 2 ** 32 - 1 &&
-		String(index) === name
-	);
+	const len = name.length;
+	if (len === 0 || len > 10) return false;
+	const c0 = name.charCodeAt(0);
+	if (c0 < 48 || c0 > 57) return false;
+	if (len === 1) return true;
+	if (c0 === 48) return false;
+	let n = c0 - 48;
+	for (let i = 1; i < len; i++) {
+		const c = name.charCodeAt(i);
+		if (c < 48 || c > 57) return false;
+		n = n * 10 + (c - 48);
+	}
+	return n < 4294967295;
 }
 
 export class ChildModelsAdministration<
@@ -19,8 +26,24 @@ export class ChildModelsAdministration<
 	private members = new Set<T>();
 	private mutating = false;
 	private disposed = false;
+	private _cachedAdms?: ModelAdministration[];
 	// The owner validates before commit, then publishes ownership in the same batch.
 	change?: (added: T[], removed: T[], commit: () => void) => void;
+
+	/** @internal Cached ModelAdministration list matching source order; invalidated on structural writes. */
+	getMemberAdms(): ModelAdministration[] {
+		let adms = this._cachedAdms;
+		if (!adms) {
+			const src = this.source;
+			const len = src.length;
+			adms = new Array<ModelAdministration>(len);
+			for (let i = 0; i < len; i++) {
+				adms[i] = getAdministration(src[i]) as unknown as ModelAdministration;
+			}
+			this._cachedAdms = adms;
+		}
+		return adms;
+	}
 
 	static proxyTraps: ProxyHandler<unknown[]> = {
 		...ArrayAdministration.proxyTraps,
@@ -66,44 +89,68 @@ export class ChildModelsAdministration<
 		},
 		reverse<T extends Model>(this: T[]): T[] {
 			const adm = getAdministration(this) as ChildModelsAdministration<T>;
-			return adm.transaction(
-				() => ArrayAdministration.methods.reverse!.call(this) as T[]
-			);
+			return adm.transaction(() => {
+				adm._cachedAdms = undefined;
+				return ArrayAdministration.methods.reverse!.call(this) as T[];
+			});
 		},
 		sort<T extends Model>(this: T[], compareFn?: (a: T, b: T) => number): T[] {
 			const adm = getAdministration(this) as ChildModelsAdministration<T>;
-			return adm.transaction(
-				() => ArrayAdministration.methods.sort!.call(this, compareFn) as T[]
-			);
+			return adm.transaction(() => {
+				adm._cachedAdms = undefined;
+				return ArrayAdministration.methods.sort!.call(this, compareFn) as T[];
+			});
 		},
 	});
 
 	dispose(): void {
 		this.disposed = true;
 		this.change = undefined;
+		this._cachedAdms = undefined;
 	}
 
-	/** Populate private backing storage before the new array is exposed. */
-	initializeMembers(items: T[]): void {
-		let duplicate = false;
-		for (let i = 0; i < items.length; i++) {
-			const item = items[i];
+	/** Populate a freshly created unattached child array without proxy/batch overhead. */
+	initMembers(models: T[]): T[] {
+		// Use the supplied iterable (as a spread into push would), not its indices.
+		const proxies = [...models];
+		const len = proxies.length;
+		const adms = new Array<ModelAdministration>(len);
+		const source = this.source;
+		const members = this.members;
+		for (let i = 0; i < len; i++) {
+			const item = proxies[i];
 			if (!(item instanceof Model))
 				throw new TypeError(
 					"r-state-tree: child arrays require Model instances"
 				);
-			const adm = getAdministration(item);
+			const adm = getAdministration(item)!;
 			const raw = adm.source as T;
-			if (this.members.has(raw)) duplicate = true;
-			this.members.add(raw);
-			this.source[i] = raw;
+			if (members.has(raw)) {
+				throw new Error(
+					"r-state-tree: child arrays cannot contain duplicate models"
+				);
+			}
+			members.add(raw);
+			source.push(raw);
+			const proxy = adm.proxy as T;
 			this.trackObservableSource(raw);
-			items[i] = adm.proxy as T;
+			proxies[i] = proxy;
+			adms[i] = adm as unknown as ModelAdministration;
 		}
-		if (duplicate)
-			throw new Error(
-				"r-state-tree: child arrays cannot contain duplicate models"
-			);
+		this._cachedAdms = adms;
+		return proxies;
+	}
+
+	/** Copy an existing child slot in the same order, without revalidating its membership. */
+	copyMembersFrom(adms: ModelAdministration[]): void {
+		const source = this.source;
+		for (let i = 0; i < adms.length; i++) {
+			const raw = adms[i].source as T;
+			source[i] = raw;
+			this.members.add(raw);
+			this.trackObservableSource(raw);
+		}
+		this._cachedAdms = adms;
 	}
 
 	assertMutable(): void {
@@ -149,17 +196,9 @@ export class ChildModelsAdministration<
 		}
 		if (this.change) this.change(added, removed, commit);
 		else commit();
+		this._cachedAdms = undefined;
 		for (const item of removedSet) this.members.delete(item);
 		for (const item of addedSet) this.members.add(item);
-	}
-
-	peekItems(): T[] {
-		const length = this.source.length;
-		const items = new Array<T>(length);
-		for (let i = 0; i < length; i++) {
-			items[i] = this._getEffectiveValue(i) as T;
-		}
-		return items;
 	}
 
 	setArrayLength(): never {
@@ -176,7 +215,7 @@ export class ChildModelsAdministration<
 			if (index === this.source.length) {
 				this.spliceNormalized(index, 0, [newValue]);
 			} else if (getSource(newValue) !== this.source[index]) {
-				this.update([newValue], [this._getEffectiveValue(index) as T], () => {
+				this.update([newValue], [this.proxy[index]], () => {
 					if (!super.set(index, newValue))
 						throw new TypeError("r-state-tree: cannot write child array index");
 				});
@@ -209,8 +248,7 @@ export class ChildModelsAdministration<
 		added: T[]
 	): T[] {
 		const removed: T[] = [];
-		for (let i = 0; i < deleteCount; i++)
-			removed.push(this._getEffectiveValue(index + i) as T);
+		for (let i = 0; i < deleteCount; i++) removed.push(this.proxy[index + i]);
 		if (deleteCount || added.length) {
 			this.update(added, removed, () =>
 				super.spliceWithArray(index, deleteCount, added)

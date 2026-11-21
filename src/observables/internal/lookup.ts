@@ -1,4 +1,7 @@
-import { CollectionAdministration } from "../collection.js";
+import {
+	CollectionAdministration,
+	WeakCollectionAdministration,
+} from "../collection.js";
 import { PreactObjectAdministration } from "../preact.js";
 import { ArrayAdministration } from "../array.js";
 import { DateAdministration } from "../date.js";
@@ -28,9 +31,10 @@ export function getAdministration<T extends object>(
 const actionsMap: WeakMap<Function, Function> = new WeakMap();
 
 export function getSource<T>(obj: T): T {
-	if (obj == null || (typeof obj !== "object" && typeof obj !== "function"))
+	if (obj === null || (typeof obj !== "object" && typeof obj !== "function")) {
 		return obj;
-	const adm = getAdministration(obj as object);
+	}
+	const adm = administrationMap.get(obj as object);
 
 	return adm ? (adm.source as unknown as T) : obj;
 }
@@ -79,6 +83,12 @@ export function getObservableIfExists<T>(value: T): T | undefined {
 	}
 
 	return undefined;
+}
+
+export function registerAdministration<A extends Administration>(adm: A): A {
+	administrationMap.set(adm.proxy, adm);
+	administrationMap.set(adm.source, adm);
+	return adm;
 }
 
 export function createObservableWithCustomAdministration<T>(
@@ -130,10 +140,10 @@ export function getObservable<T>(value: T): T {
 		// Note: Map/Set/Date are wrapped even if frozen because Object.freeze only prevents
 		// property additions/deletions on the object shell, but internal slots remain mutable.
 		// A frozen Map can still be mutated via map.set(), etc.
-		if (obj instanceof Map || obj instanceof WeakMap) {
+		if (obj instanceof Map || obj instanceof Set) {
 			Adm = CollectionAdministration;
-		} else if (obj instanceof Set || obj instanceof WeakSet) {
-			Adm = CollectionAdministration;
+		} else if (obj instanceof WeakMap || obj instanceof WeakSet) {
+			Adm = WeakCollectionAdministration;
 		} else if (obj instanceof Date) {
 			Adm = DateAdministration;
 		} else if (!Object.isFrozen(obj)) {

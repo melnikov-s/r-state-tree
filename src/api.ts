@@ -11,7 +11,7 @@ import {
 	getConfigurationFromSnapshot,
 	ModelAdministration,
 } from "./model/ModelAdministration.js";
-import { getModelById } from "./model/idMap.js";
+import { getModelByIdAdm } from "./model/idMap.js";
 import { getAdministration } from "./observables/index.js";
 
 export function findModelById<T extends Model>(
@@ -19,7 +19,7 @@ export function findModelById<T extends Model>(
 	ModelType: new (...args: any[]) => T,
 	id: IdType
 ): T | undefined {
-	return getModelById(getModelAdm(root).root.proxy, ModelType, id);
+	return getModelByIdAdm(getModelAdm(root).root, ModelType, id);
 }
 
 export function mount<T extends Store>(

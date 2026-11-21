@@ -5,6 +5,7 @@ export {
 	getObservable,
 	getInternalNode,
 	createObservableWithCustomAdministration,
+	registerAdministration,
 	Observable,
 } from "./internal/lookup.js";
 export { batch } from "./internal/debug.js";

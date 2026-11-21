@@ -1,12 +1,12 @@
 import {
-	computed as preactComputed,
+	Computed,
 	signal as preactSignal,
 	Signal,
 	batch,
 	effect,
 	untracked,
 } from "@preact/signals-core";
-import type { ReadonlySignal, SignalOptions } from "@preact/signals-core";
+import type { ReadonlySignal } from "@preact/signals-core";
 
 import { computedType } from "../types.js";
 import { retainedChildRead } from "./internal/retainedRead.js";
@@ -56,47 +56,49 @@ export interface ListenerNode {
 	isDisposed: boolean;
 }
 
-const observedAtomOptions: SignalOptions<number> = {
-	watched(this: Signal<number>) {
-		(this as ObservedAtom).notifyObservedState(true);
-	},
-	unwatched(this: Signal<number>) {
-		(this as ObservedAtom).notifyObservedState(false);
-	},
+function onObservedAtomWatched(this: Signal<number>): void {
+	const atom = this as ObservedAtom;
+	const callbacks = atom._callbacks;
+	if (callbacks) {
+		callbacks.forEach((callback) => callback(true));
+	}
+	atom.observing = true;
+}
+
+function onObservedAtomUnwatched(this: Signal<number>): void {
+	const atom = this as ObservedAtom;
+	const callbacks = atom._callbacks;
+	if (callbacks) {
+		callbacks.forEach((callback) => callback(false));
+	}
+	atom.observing = false;
+}
+
+const OBSERVED_ATOM_OPTIONS = {
+	watched: onObservedAtomWatched,
+	unwatched: onObservedAtomUnwatched,
 };
 
 class ObservedAtom extends Signal<number> implements ObservedAtomNode {
+	observing = false;
 	private _revision = 0;
-	private _observing = false;
-	private _callbacks: Set<(observing: boolean) => void> | undefined;
+	/** @internal */
+	_callbacks?: Set<(observing: boolean) => void>;
 
 	constructor() {
-		super(0, observedAtomOptions);
+		super(0, OBSERVED_ATOM_OPTIONS);
 	}
 
 	get node(): Signal<unknown> {
 		return this;
 	}
 
-	get observing(): boolean {
-		return this._observing;
-	}
-
-	notifyObservedState(observing: boolean): void {
-		if (this._callbacks) {
-			for (const callback of this._callbacks) {
-				callback(observing);
-			}
-		}
-		this._observing = observing;
-	}
-
 	reportObserved(): void {
-		void super.value;
+		this.value;
 	}
 
 	reportChanged(): void {
-		super.value = ++this._revision;
+		this.value = ++this._revision;
 	}
 
 	onObservedStateChange(callback: (observing: boolean) => void): () => void {
@@ -108,29 +110,29 @@ class ObservedAtom extends Signal<number> implements ObservedAtomNode {
 	}
 }
 
-class ValueSignal<T> extends Signal<T> implements SignalNode<T> {
+class SimpleSignal<T> extends Signal<T> implements SignalNode<T> {
 	get node(): Signal<T> {
 		return this;
 	}
 
 	reportChanged(value: T): void {
-		super.value = value;
+		this.value = value;
 	}
 
 	reportObserved(): void {
-		void super.value;
+		this.value;
 	}
 
 	get(): T {
-		return super.value;
+		return this.value;
 	}
 
 	set(value: T): T {
-		return (super.value = value);
+		return (this.value = value);
 	}
 }
 
-class Atom extends Signal<number> implements AtomNode {
+class SimpleAtom extends Signal<number> implements AtomNode {
 	private _revision = 0;
 
 	constructor() {
@@ -142,11 +144,11 @@ class Atom extends Signal<number> implements AtomNode {
 	}
 
 	reportChanged(): void {
-		super.value = ++this._revision;
+		this.value = ++this._revision;
 	}
 
 	reportObserved(): void {
-		void super.value;
+		this.value;
 	}
 }
 
@@ -155,11 +157,11 @@ export function createObservedAtom(): ObservedAtomNode {
 }
 
 export function createSignal<T>(initialValue: T): SignalNode<T> {
-	return new ValueSignal(initialValue);
+	return new SimpleSignal(initialValue);
 }
 
 export function createAtom(): AtomNode {
-	return new Atom();
+	return new SimpleAtom();
 }
 
 export { effect, batch, untracked, Signal };
@@ -247,43 +249,54 @@ export function createListener(
 	return listener;
 }
 
-function internalCreateComputed<T>(fn: () => T) {
-	const version = preactSignal(0);
-	const c = preactComputed(
-		() => {
+function onManagedComputedUnwatched(this: Signal<unknown>): void {
+	// Mark as dirty when unobserved. This is silent because there are no subscribers.
+	(this as ManagedComputed<unknown>)._version.value++;
+}
+
+const MANAGED_COMPUTED_OPTIONS = {
+	unwatched: onManagedComputedUnwatched,
+};
+
+class ManagedComputed<T> extends Computed<T> implements ComputedNode<T> {
+	private _userFn: () => T;
+	private _readingRetained = false;
+	/** @internal */
+	_version: Signal<number>;
+
+	constructor(fn: () => T) {
+		const version = new Signal(0);
+		super(() => {
 			version.value;
 			return fn();
-		},
-		{
-			unwatched() {
-				// Mark as dirty when unobserved. This is silent because there are no subscribers.
-				version.value++;
-			},
+		}, MANAGED_COMPUTED_OPTIONS);
+		this._userFn = fn;
+		this._version = version;
+	}
+
+	get node(): ReadonlySignal<T> {
+		return this;
+	}
+
+	override get value(): T {
+		if (!retainedChildRead) return super.value;
+		// Don't cache restricted results/errors on this RStateTree computed.
+		if (this._readingRetained) throw new Error("Cycle detected");
+		this._readingRetained = true;
+		try {
+			return this._userFn();
+		} finally {
+			this._readingRetained = false;
 		}
-	);
+	}
 
-	// Keep the native signal object and ordinary Preact tracking/cache behavior.
-	// peek(), coercions and subscribe() also read through this value accessor.
-	const cachedValue = Object.getOwnPropertyDescriptor(
-		Object.getPrototypeOf(c),
-		"value"
-	)!.get!;
-	let readingRetained = false;
-	Object.defineProperty(c, "value", {
-		get() {
-			if (!retainedChildRead) return cachedValue.call(this);
-			// Don't cache restricted results/errors on this RStateTree computed.
-			if (readingRetained) throw new Error("Cycle detected");
-			readingRetained = true;
-			try {
-				return fn();
-			} finally {
-				readingRetained = false;
-			}
-		},
-	});
+	get(): T {
+		return retainedChildRead ? this.value : super.value;
+	}
+}
 
-	return c;
+function internalCreateComputed<T>(fn: () => T): ManagedComputed<T> {
+	return new ManagedComputed(fn);
 }
 
 export function createComputed<T>(
@@ -291,14 +304,7 @@ export function createComputed<T>(
 	context: unknown = null
 ): ComputedNode<T> {
 	const bound = context ? fn.bind(context) : fn;
-	const c = internalCreateComputed(bound);
-
-	return {
-		node: c,
-		get() {
-			return c.value;
-		},
-	};
+	return new ManagedComputed(bound);
 }
 
 export type PreactObservable<T> = T;

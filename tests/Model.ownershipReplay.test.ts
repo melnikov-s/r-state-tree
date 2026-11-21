@@ -28,6 +28,20 @@ class Board extends Model {
 
 const book = { id: "42", title: "book" };
 
+test("applying a snapshot detaches the old array even when its Models are all retained", () => {
+	const board = Board.create({ backlog: [book] });
+	const previous = board.backlog;
+	const task = previous[0];
+
+	applySnapshot(board, { backlog: [{ ...book, title: "updated" }] });
+	previous.pop();
+
+	expect(board.backlog).toEqual([task]);
+	expect(task.title).toBe("updated");
+	expect(task.parent).toBe(board);
+	expect(findModelById(board, Task, "42")).toBe(task);
+});
+
 test.each([false, true])(
 	"replays an ownership move (reverse slot order: %s)",
 	(reverse) => {

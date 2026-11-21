@@ -6,19 +6,33 @@ import {
 	isObservable,
 } from "./internal/lookup.js";
 import { Administration } from "./internal/Administration.js";
-import { SignalMap } from "./internal/NodeMap.js";
+import { ArraySignalMap, type SignalMap } from "./internal/NodeMap.js";
 import { resolveNode } from "./internal/utils.js";
 import { debugWrite, debugEnabled } from "./internal/debug.js";
 
 /**
- * Parse an array index per ECMAScript spec; return -1 for other keys.
- * An array index is a String-valued property key that is a canonical numeric string
- * and whose numeric value i satisfies 0 ≤ i < 2^32 - 1.
+ * Parse a property key as a canonical ECMAScript array index in [0, 2^32 - 2].
+ * Returns -1 if not a valid array index.
  */
-function arrayIndex(key: string | symbol): number {
-	if (typeof key === "symbol") return -1;
-	const index = Number(key) >>> 0;
-	return index < 0xffffffff && String(index) === key ? index : -1;
+function parseArrayIndex(key: PropertyKey): number {
+	if (typeof key !== "string") return -1;
+	const len = key.length;
+	if (len === 0) return -1;
+	const c0 = key.charCodeAt(0) - 48;
+	if (c0 < 0 || c0 > 9) return -1;
+	if (len === 1) return c0;
+	if (c0 === 0 || len > 10) return -1;
+	if (len === 2) {
+		const c1 = key.charCodeAt(1) - 48;
+		return c1 >= 0 && c1 <= 9 ? c0 * 10 + c1 : -1;
+	}
+	let n = c0;
+	for (let i = 1; i < len; i++) {
+		const c = key.charCodeAt(i) - 48;
+		if (c < 0 || c > 9) return -1;
+		n = n * 10 + c;
+	}
+	return n < 4294967295 ? n : -1;
 }
 
 /** ECMAScript ToIntegerOrInfinity (unary + also rejects BigInt and Symbol). */
@@ -41,40 +55,45 @@ function reportConflict(): void {
 }
 
 export class ArrayAdministration<T> extends Administration<T[]> {
-	valuesMap: SignalMap<number>;
+	private _valuesMap?: ArraySignalMap;
 	private _keysAtom?: AtomNode;
-
-	get keysAtom(): AtomNode {
-		return (this._keysAtom ??= createAtom());
-	}
 	/**
 	 * Parent-based ownership tracking: sources assigned as observable.
 	 * Unlike index-based tracking, this doesn't require updates on reorder ops.
 	 */
-	private observableSources = new WeakSet<object>();
-	private rawSources = new WeakSet<object>();
+	private observableSources?: WeakSet<object>;
+	private rawSources?: WeakSet<object>;
+
+	get valuesMap(): SignalMap<number> {
+		return (this._valuesMap ??= new ArraySignalMap());
+	}
+
+	get keysAtom(): AtomNode {
+		return (this._keysAtom ??= createAtom());
+	}
+
+	/** @internal Register a known-observable raw source on this array. */
+	protected trackObservableSource(source: object): void {
+		(this.observableSources ??= new WeakSet()).add(source);
+	}
 
 	/**
 	 * Track a value being assigned to this array.
 	 * Detects conflicts if same source is assigned as both observable and raw.
 	 */
-	protected trackObservableSource(source: object): void {
-		this.observableSources.add(source);
-	}
-
 	private trackValue(value: unknown): void {
-		if (value && typeof value === "object") {
+		if (typeof value === "object" && value !== null) {
 			const source = getSource(value);
 			if (isObservable(value)) {
-				if (this.rawSources.has(source)) {
+				if (this.rawSources?.has(source)) {
 					reportConflict();
 				}
-				this.observableSources.add(source);
+				(this.observableSources ??= new WeakSet()).add(source);
 			} else {
-				if (this.observableSources.has(source)) {
+				if (this.observableSources?.has(source)) {
 					reportConflict();
 				} else {
-					this.rawSources.add(source);
+					(this.rawSources ??= new WeakSet()).add(source);
 				}
 			}
 		}
@@ -87,14 +106,17 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 				return adm.getArrayLength();
 			}
 
-			const index = arrayIndex(name);
-			if (index !== -1) return adm.get(index);
+			const index = parseArrayIndex(name);
+			if (index !== -1) {
+				return adm.get(index);
+			}
 
 			const arrayMethods = (adm.constructor as typeof ArrayAdministration)
 				.methods;
 
-			if (arrayMethods.hasOwnProperty(name)) {
-				return arrayMethods[name as keyof typeof arrayMethods];
+			const method = arrayMethods[name as keyof typeof arrayMethods];
+			if (method !== undefined) {
+				return method;
 			}
 
 			// Use Reflect.get with receiver to preserve prototype chain semantics
@@ -103,9 +125,14 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		set(target, name, value, receiver) {
 			const adm = getAdministration(target) as ArrayAdministration<any>;
-			if (name === "length") return adm.setArrayLength(value);
-			const index = arrayIndex(name);
-			if (index !== -1) return adm.set(index, value);
+
+			if (name === "length") {
+				return adm.setArrayLength(value);
+			}
+			const index = parseArrayIndex(name);
+			if (index !== -1) {
+				return adm.set(index, value);
+			}
 			return Reflect.set(adm.source, name, value, receiver);
 		},
 
@@ -132,14 +159,15 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 					if (name === "length") {
 						adm._keysAtom?.reportChanged();
-						adm.atom.reportChanged();
+						adm.reportChanged();
 					} else {
-						const index = arrayIndex(name);
+						const index = parseArrayIndex(name);
 						if (index !== -1) {
 							adm._keysAtom?.reportChanged();
 							adm.onArrayChanged(false, index, 1);
 						} else {
-							adm.atom.reportChanged();
+							// Other properties
+							adm.reportChanged();
 						}
 					}
 				});
@@ -149,7 +177,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		deleteProperty(target, name) {
 			const adm = getAdministration(target) as ArrayAdministration<any>;
-			const index = arrayIndex(name);
+			const index = parseArrayIndex(name);
 
 			const had = name in adm.source;
 			const before = debugEnabled
@@ -176,7 +204,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		has(target, name) {
 			const adm = getAdministration(target) as ArrayAdministration<any>;
-			const index = arrayIndex(name);
+			const index = parseArrayIndex(name);
 			if (index !== -1) {
 				adm.atom.reportObserved();
 				adm.valuesMap.reportObserved(index, adm.source[index]);
@@ -192,7 +220,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 				? K
 				: never
 		]: (typeof Array.prototype)[K];
-	}> = {
+	}> = Object.assign(Object.create(null), {
 		fill<T>(
 			this: T[],
 			value: T,
@@ -344,11 +372,10 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 		find: createFilterMethod("find"),
 		reduce: createReduceMethod("reduce"),
 		reduceRight: createReduceMethod("reduceRight"),
-	};
+	});
 
 	constructor(source: T[] = []) {
 		super(source);
-		this.valuesMap = new SignalMap();
 	}
 
 	getNode(key?: number): unknown {
@@ -360,53 +387,65 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 	}
 
 	get(index: number): T | undefined {
+		const value = this.source[index];
 		this.atom.reportObserved();
-		this.valuesMap.reportObserved(index, this.source[index]);
+		const slots = this._valuesMap?._slots;
+		const entry = slots !== undefined && index < 256 ? slots[index] : undefined;
+		if (entry !== undefined && entry.observing) {
+			entry.reportObserved();
+		} else {
+			this.valuesMap.reportObserved(index, value);
+		}
 
-		return this._getEffectiveValue(index);
+		if (typeof value === "object" && value !== null && this.observableSources) {
+			return this._wrapValue(index, value);
+		}
+		return value;
 	}
 
-	protected _getEffectiveValue(index: number): T | undefined {
-		const value = this.source[index];
-		if (value && typeof value === "object" && !Object.isFrozen(value)) {
-			// Parent-based ownership: return proxy if this source was assigned as observable
-			if (this.observableSources.has(value)) {
-				const adm = getAdministration(value)!; // Known to exist if in observableSources
-				// Check proxy invariants
-				if (adm.proxy !== value) {
-					const desc = Object.getOwnPropertyDescriptor(this.source, index);
-					if (desc && !desc.configurable && !desc.writable) {
-						if (process.env.NODE_ENV !== "production") {
-							console.warn(
-								`r-state-tree: cannot return an observable proxy for arr[${index}] because it is a non-configurable, non-writable data property; returning the raw value to uphold Proxy invariants.`
-							);
-						}
-						return value;
+	private _wrapValue(index: number, value: T & object): T {
+		if (!Object.isFrozen(value) && this.observableSources!.has(value)) {
+			const adm = getAdministration(value)!; // Known to exist if in observableSources
+			// Check proxy invariants
+			if (adm.proxy !== value) {
+				const desc = Object.getOwnPropertyDescriptor(this.source, index);
+				if (desc && !desc.configurable && !desc.writable) {
+					if (process.env.NODE_ENV !== "production") {
+						console.warn(
+							`r-state-tree: cannot return an observable proxy for arr[${index}] because it is a non-configurable, non-writable data property; returning the raw value to uphold Proxy invariants.`
+						);
 					}
+					return value;
 				}
-				return adm.proxy as T;
 			}
+			return adm.proxy as T;
+		}
+		return value;
+	}
+
+	private _getEffectiveValue(index: number): T | undefined {
+		const value = this.source[index];
+		if (typeof value === "object" && value !== null && this.observableSources) {
+			return this._wrapValue(index, value);
 		}
 		return value;
 	}
 
 	set(index: number, newValue: T): boolean {
 		const values = this.source;
-		const targetValue = getSource(newValue);
+		const isObj = typeof newValue === "object" && newValue !== null;
+		let targetValue = newValue;
+		if (isObj) {
+			targetValue = getSource(newValue);
+			// Always track the value for observability (even if source is same)
+			this.trackValue(newValue);
+		}
 		const oldLength = values.length;
 
-		// Always track the value for observability (even if source is same)
-		// This ensures that assigning an observable version of the same source is tracked
-		this.trackValue(newValue);
-
 		// Check if value changed
-		let changed = true;
-		if (index < oldLength) {
-			const oldValue = values[index];
-			changed = targetValue !== oldValue;
+		if (index < oldLength && targetValue === values[index]) {
+			return true;
 		}
-
-		if (!changed) return true;
 
 		const before = debugEnabled
 			? Object.getOwnPropertyDescriptor(values, index)?.value
@@ -414,11 +453,18 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 		const result = Reflect.set(values, index, targetValue);
 		if (!result) return false;
 
-		const newLength = values.length;
-		const lengthChanged = newLength !== oldLength;
+		const lengthChanged = values.length !== oldLength;
 
 		if (debugEnabled)
 			debugWrite(this.source, String(index), "set", before, newValue);
+
+		if (!lengthChanged && !this.hasForceObserved()) {
+			const node = this._valuesMap?.get(index);
+			if (node) {
+				node.reportChanged(isObj ? this._getEffectiveValue(index) : newValue);
+			}
+			return true;
+		}
 		this.onArrayChanged(lengthChanged, index, 1);
 
 		return true;
@@ -472,12 +518,15 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 						Math.min(toIntegerOrInfinity(deleteCount), length - index)
 					);
 
-		const newTargetItems: T[] = [];
-		if (newItems) {
-			for (let i = 0; i < newItems.length; i++) {
-				newTargetItems[i] = getSource(newItems[i]);
-				// Track the value (parent-based ownership)
-				this.trackValue(newItems[i]);
+		const newLen = newItems ? newItems.length : 0;
+		const newTargetItems: T[] = new Array(newLen);
+		for (let i = 0; i < newLen; i++) {
+			const item = newItems![i];
+			if (typeof item === "object" && item !== null) {
+				newTargetItems[i] = getSource(item);
+				this.trackValue(item);
+			} else {
+				newTargetItems[i] = item;
 			}
 		}
 
@@ -491,20 +540,20 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		this.spliceItemsIntoValues(index, deleteCount, newTargetItems);
 
-		if (deleteCount !== 0 || newTargetItems.length !== 0) {
+		if (deleteCount !== 0 || newLen !== 0) {
 			if (debugEnabled)
 				debugWrite(
 					this.source,
 					"$items",
 					"splice",
 					removedItems.length,
-					newTargetItems.length
+					newLen
 				);
-			const shift = (newItems?.length ?? 0) - deleteCount;
+			const shift = newLen - deleteCount;
 			const reindexing = shift !== 0 && index + deleteCount < length;
 			const count = reindexing
 				? Number.POSITIVE_INFINITY
-				: Math.max(deleteCount ?? 0, newItems?.length ?? 0);
+				: Math.max(deleteCount, newLen);
 
 			this.onArrayChanged(length !== this.source.length, index, count);
 		}
@@ -517,44 +566,50 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 		deleteCount: number,
 		newItems: T[]
 	): T[] {
-		return this.source.splice.apply(
-			this.source,
-			([index, deleteCount] as any).concat(newItems)
-		);
+		if (newItems.length === 0) {
+			return this.source.splice(index, deleteCount);
+		}
+		return this.source.splice(index, deleteCount, ...newItems);
 	}
 
 	private reportIndexChanged(index: number): void {
-		const node = this.valuesMap.get(index);
+		const node = this._valuesMap?.get(index);
 		if (node) node.reportChanged(this._getEffectiveValue(index));
 	}
 
 	onArrayChanged(lengthChanged = false, index?: number, count?: number): void {
 		if (
-			index != null &&
-			!(lengthChanged && this._keysAtom) &&
-			!this.hasForceObservedAtom &&
-			!this.valuesMap.hasPrimitiveKeys
-		)
+			!lengthChanged &&
+			!this.hasForceObserved() &&
+			count === 1 &&
+			index !== undefined &&
+			Number.isInteger(index)
+		) {
+			this.reportIndexChanged(index);
 			return;
+		}
+		if (
+			!lengthChanged &&
+			!this.hasForceObserved() &&
+			index !== undefined &&
+			!this._valuesMap
+		) {
+			return;
+		}
 		batch(() => {
 			if (lengthChanged) {
 				this._keysAtom?.reportChanged();
 			}
 			if (index == null) {
-				super.reportChanged();
+				this.reportChanged();
 			} else if (count === 1 && Number.isInteger(index)) {
 				// An indexed write need not enumerate unrelated tracked indices.
 				// Non-integer bounds (e.g. from fill) still use the range check.
 				this.reportIndexChanged(index);
-			} else if (count !== undefined && count > 0) {
+			} else if (count !== undefined && count > 0 && this._valuesMap) {
 				// Optimization: Do NOT iterate the full range [index, index+count).
-				// That would be O(N) where N is array length (e.g. 2^32).
 				// Instead, iterate only the *observed* atoms and check if they fall in range.
-				// This is O(M) where M is number of observed indices, usually small.
-
-				// We need to cast because NodeMap.keys() returns Iterable<unknown>
-				// and valuesMap keys are numbers.
-				const observedKeys = this.valuesMap.keys() as Iterable<number>;
+				const observedKeys = this._valuesMap.keys() as Iterable<number>;
 
 				const end = index + count;
 				for (const key of observedKeys) {

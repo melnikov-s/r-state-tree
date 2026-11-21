@@ -15,6 +15,29 @@ import {
 	signal,
 } from "../src/index";
 
+test("nested snapshots honor an overridden Model.create", () => {
+	const snapshots: unknown[] = [];
+	class Leaf extends Model {
+		title = "";
+	}
+	const createLeaf = (Leaf.create<Leaf>).bind(Leaf);
+	Object.defineProperty(Leaf, "create", {
+		value(snapshot?: { title: string }) {
+			snapshots.push(snapshot);
+			const leaf = createLeaf(snapshot);
+			if (snapshot) leaf.title = leaf.title.toUpperCase();
+			return leaf;
+		},
+	});
+	class Root extends Model {
+		@child(Leaf) leaf: Leaf | null = null;
+	}
+
+	const root = Root.create({ leaf: { title: "leaf" } });
+	expect(root.leaf?.title).toBe("LEAF");
+	expect(snapshots).toEqual([{ title: "leaf" }]);
+});
+
 test("can create a model", () => {
 	class M extends Model {}
 

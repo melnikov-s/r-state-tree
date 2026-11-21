@@ -1,8 +1,42 @@
 import { getModelAdm, ModelAdministration } from "./ModelAdministration.js";
 import type { ModelConfiguration, Snapshot } from "../types.js";
-import { createObservableWithCustomAdministration } from "../observables/index.js";
+import { registerAdministration } from "../observables/index.js";
 
 let initEnabled = false;
+
+/** @internal Shared creation helper; allows skipping nested untracked/batch when already inside one. */
+export function createModelInstance<T extends Model>(
+	Ctor: { new (...args: unknown[]): T },
+	snapshot: Snapshot<T> | undefined,
+	inUntrackedBatch: boolean,
+	undo?: (() => void)[]
+): T {
+	const prevInit = initEnabled;
+	let instance: T;
+	try {
+		initEnabled = true;
+		instance = new Ctor();
+	} finally {
+		initEnabled = prevInit;
+	}
+	const modelAdm = getModelAdm(instance);
+	modelAdm._constructing = false;
+	try {
+		modelAdm.validateSnapshotFields();
+		if (snapshot) {
+			if (inUntrackedBatch) {
+				modelAdm.loadSnapshotInBatch(snapshot, undo);
+			} else {
+				modelAdm.loadSnapshot(snapshot, undo);
+			}
+		}
+	} catch (error) {
+		modelAdm.dispose(true);
+		throw error;
+	}
+
+	return instance;
+}
 
 export default class Model implements Disposable {
 	declare static types?: ModelConfiguration<unknown>;
@@ -13,23 +47,7 @@ export default class Model implements Disposable {
 		this: { new (...args: unknown[]): T },
 		snapshot?: Snapshot<T>
 	): T {
-		let instance: T;
-		try {
-			initEnabled = true;
-			instance = new this();
-		} finally {
-			initEnabled = false;
-		}
-		const adm = getModelAdm(instance);
-		try {
-			adm.validateSnapshotFields();
-			snapshot && adm.loadSnapshot(snapshot);
-		} catch (error) {
-			adm.dispose(true);
-			throw error;
-		}
-
-		return instance;
+		return createModelInstance(this, snapshot, false);
 	}
 
 	constructor() {
@@ -39,7 +57,11 @@ export default class Model implements Disposable {
 			);
 		}
 
-		return createObservableWithCustomAdministration(this, ModelAdministration);
+		const adm = registerAdministration(new ModelAdministration(this));
+		adm.setCtor(this.constructor as unknown as Function);
+		adm._constructing = true;
+
+		return adm.proxy;
 	}
 
 	get parent(): Model | null {

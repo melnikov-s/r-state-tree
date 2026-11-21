@@ -48,19 +48,17 @@ export function getParentConstructor(
  * @param path - Internal: the current key path for error messages.
  */
 export function clone<T>(val: T, path: string = ""): T {
-	if (val === null || val === undefined) {
+	if (
+		val === null ||
+		val === undefined ||
+		typeof val === "string" ||
+		typeof val === "number" ||
+		typeof val === "boolean"
+	) {
 		return val;
 	}
 
 	if (typeof val !== "object") {
-		if (
-			typeof val === "string" ||
-			typeof val === "number" ||
-			typeof val === "boolean"
-		) {
-			return val;
-		}
-
 		const atPath = path ? ` at path "${path}"` : "";
 		if (typeof val === "bigint") {
 			throw new Error(

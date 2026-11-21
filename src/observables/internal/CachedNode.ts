@@ -1,91 +1,96 @@
-import type { SignalOptions } from "@preact/signals-core";
 import { Signal } from "../preact.js";
 import type { AtomNode, SignalNode } from "../preact.js";
 
-export interface CachedNodeOwner {
-	onEntryObservedStateChange(key: unknown, observing: boolean): void;
+/** @internal */
+export interface NodeMapOwner {
+	_onNodeObserved(node: CachedNode<any>): void;
+	_onNodeUnobserved(key: unknown): void;
 }
 
 export type CachedNode<T> = T & {
 	readonly observing: boolean;
 	onObservedStateChange?: (observing: boolean) => void;
-	setOwner?(owner: CachedNodeOwner | undefined, key: unknown): void;
 	invalidate(): void;
+	/** @internal */
+	_owner?: NodeMapOwner;
+	/** @internal */
+	_key?: unknown;
+	/** @internal Intrusive LRU links for inactive nodes in NodeMap. */
+	_prev?: CachedNode<any>;
+	/** @internal */
+	_next?: CachedNode<any>;
+	/** @internal */
+	_inInactive?: boolean;
 };
 
-const cachedSignalOptions: SignalOptions<unknown> = {
-	watched(this: Signal<unknown>) {
-		(this as CachedSignalNode<unknown>).handleObservedState(true);
-	},
-	unwatched(this: Signal<unknown>) {
-		(this as CachedSignalNode<unknown>).handleObservedState(false);
-	},
+// Boxed sentinel lets invalidate() bump the single Preact Signal version without
+// exposing a fabricated value through peek() / .value reads.
+class InvalidatedBox {
+	readonly value: unknown;
+	constructor(value: unknown) {
+		this.value = value;
+	}
+}
+
+function onCachedNodeWatched(this: Signal<unknown>): void {
+	const node = this as CachedSignal<unknown> | CachedAtom;
+	node.observing = true;
+	if (node._owner) node._owner._onNodeObserved(node);
+	else node.onObservedStateChange?.(true);
+}
+
+function onCachedNodeUnwatched(this: Signal<unknown>): void {
+	const node = this as CachedSignal<unknown> | CachedAtom;
+	node.observing = false;
+	if (node._owner) node._owner._onNodeUnobserved(node._key);
+	else node.onObservedStateChange?.(false);
+}
+
+const CACHED_NODE_OPTIONS = {
+	watched: onCachedNodeWatched,
+	unwatched: onCachedNodeUnwatched,
 };
 
-const cachedAtomOptions: SignalOptions<number> = {
-	watched(this: Signal<number>) {
-		(this as CachedAtomNode).handleObservedState(true);
-	},
-	unwatched(this: Signal<number>) {
-		(this as CachedAtomNode).handleObservedState(false);
-	},
-};
-
-// A separate revision lets eviction invalidate lazy computed dependencies without
-// changing the value they expose. Subclassing Signal keeps the value accessor on
-// the prototype and tracks the revision using only public Preact APIs (including
-// peek/subscribe).
-class CachedSignalNode<T>
+export class CachedSignal<T>
 	extends Signal<T>
 	implements CachedNode<SignalNode<T>>
 {
-	private _version: Signal<number>;
-	private _revision = 0;
-	private _observing = false;
-	private _owner: CachedNodeOwner | undefined;
-	private _ownerKey: unknown;
+	observing = false;
 	onObservedStateChange?: (observing: boolean) => void;
+	/** @internal */
+	_owner?: NodeMapOwner;
+	/** @internal */
+	_key?: unknown;
+	/** @internal */
+	_prev?: CachedNode<any>;
+	/** @internal */
+	_next?: CachedNode<any>;
+	/** @internal */
+	_inInactive?: boolean;
 
 	constructor(initialValue: T) {
-		super(initialValue, cachedSignalOptions as SignalOptions<T>);
-		this._version = new Signal(0);
-	}
-
-	override get value(): T {
-		void this._version.value;
-		return super.value;
-	}
-
-	override set value(next: T) {
-		super.value = next;
+		super(initialValue, CACHED_NODE_OPTIONS);
 	}
 
 	get node(): Signal<T> {
 		return this;
 	}
 
-	get observing(): boolean {
-		return this._observing;
+	override get value(): T {
+		const v = super.value;
+		return v instanceof InvalidatedBox ? (v.value as T) : v;
 	}
 
-	setOwner(owner: CachedNodeOwner | undefined, key: unknown): void {
-		this._owner = owner;
-		this._ownerKey = key;
-	}
-
-	handleObservedState(observing: boolean): void {
-		this._observing = observing;
-		this._owner?.onEntryObservedStateChange(this._ownerKey, observing);
-		this.onObservedStateChange?.(observing);
+	override set value(next: T) {
+		super.value = next;
 	}
 
 	invalidate(): void {
-		this._version.value = ++this._revision;
+		super.value = new InvalidatedBox(this.peek()) as unknown as T;
 	}
 
 	reportObserved(): void {
-		void this._version.value;
-		void super.value;
+		super.value;
 	}
 
 	reportChanged(next: T): void {
@@ -93,8 +98,7 @@ class CachedSignalNode<T>
 	}
 
 	get(): T {
-		void this._version.value;
-		return super.value;
+		return this.value;
 	}
 
 	set(next: T): T {
@@ -102,55 +106,48 @@ class CachedSignalNode<T>
 	}
 }
 
-class CachedAtomNode extends Signal<number> implements CachedNode<AtomNode> {
-	private _revision = 0;
-	private _observing = false;
-	private _owner: CachedNodeOwner | undefined;
-	private _ownerKey: unknown;
+export class CachedAtom extends Signal<number> implements CachedNode<AtomNode> {
+	observing = false;
 	onObservedStateChange?: (observing: boolean) => void;
+	/** @internal */
+	_owner?: NodeMapOwner;
+	/** @internal */
+	_key?: unknown;
+	/** @internal */
+	_prev?: CachedNode<any>;
+	/** @internal */
+	_next?: CachedNode<any>;
+	/** @internal */
+	_inInactive?: boolean;
+	private _revision = 0;
 
 	constructor() {
-		super(0, cachedAtomOptions);
+		super(0, CACHED_NODE_OPTIONS);
 	}
 
 	get node(): Signal<unknown> {
 		return this;
 	}
 
-	get observing(): boolean {
-		return this._observing;
-	}
-
-	setOwner(owner: CachedNodeOwner | undefined, key: unknown): void {
-		this._owner = owner;
-		this._ownerKey = key;
-	}
-
-	handleObservedState(observing: boolean): void {
-		this._observing = observing;
-		this._owner?.onEntryObservedStateChange(this._ownerKey, observing);
-		this.onObservedStateChange?.(observing);
-	}
-
 	invalidate(): void {
-		super.value = ++this._revision;
+		this.value = ++this._revision;
 	}
 
 	reportObserved(): void {
-		void super.value;
+		this.value;
 	}
 
 	reportChanged(): void {
-		super.value = ++this._revision;
+		this.value = ++this._revision;
 	}
 }
 
 export function createCachedSignal<T>(
 	initialValue: T
 ): CachedNode<SignalNode<T>> {
-	return new CachedSignalNode(initialValue);
+	return new CachedSignal(initialValue);
 }
 
 export function createCachedAtom(): CachedNode<AtomNode> {
-	return new CachedAtomNode();
+	return new CachedAtom();
 }

@@ -2,8 +2,6 @@ import { createAtom, createObservedAtom } from "../preact.js";
 import type { AtomNode, ObservedAtomNode } from "../preact.js";
 import { resolveNode } from "./utils.js";
 
-let circularRefSet: WeakSet<object> | null = null;
-
 export class Administration<T extends object = any> {
 	static readonly proxyTraps: ProxyHandler<object> = {};
 	readonly proxy: T;
@@ -12,6 +10,7 @@ export class Administration<T extends object = any> {
 
 	protected isObserved = false;
 	private forceObservedAtom?: AtomNode;
+	private reportingObserved = false;
 
 	constructor(source: T) {
 		this.source = source;
@@ -25,7 +24,11 @@ export class Administration<T extends object = any> {
 		return (this._atom ??= createObservedAtom());
 	}
 
-	protected get hasForceObservedAtom(): boolean {
+	protected get atomObserving(): boolean {
+		return this._atom !== undefined && this._atom.observing;
+	}
+
+	protected hasForceObserved(): boolean {
 		return this.forceObservedAtom !== undefined;
 	}
 
@@ -45,22 +48,15 @@ export class Administration<T extends object = any> {
 	}
 
 	reportObserved(): void {
-		const entry = circularRefSet == null;
-		if (entry) {
-			circularRefSet = new WeakSet();
-		} else if (circularRefSet!.has(this)) {
-			return;
-		}
-
-		circularRefSet!.add(this);
-
-		if (!this.forceObservedAtom) {
-			this.forceObservedAtom = createAtom();
-		}
-		this.forceObservedAtom.reportObserved();
-
-		if (entry) {
-			circularRefSet = null;
+		if (this.reportingObserved) return;
+		this.reportingObserved = true;
+		try {
+			if (!this.forceObservedAtom) {
+				this.forceObservedAtom = createAtom();
+			}
+			this.forceObservedAtom.reportObserved();
+		} finally {
+			this.reportingObserved = false;
 		}
 	}
 }

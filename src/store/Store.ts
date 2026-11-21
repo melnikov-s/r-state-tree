@@ -2,7 +2,6 @@ import type {
 	Props,
 	StoreProps,
 	StoreConfiguration,
-	Configuration,
 	StoreElement,
 } from "../types.js";
 import {
@@ -11,11 +10,12 @@ import {
 	updateProps,
 } from "./StoreAdministration.js";
 import {
-	createObservableWithCustomAdministration,
+	getAdministration,
 	getObservable,
+	registerAdministration,
 	untracked,
 } from "../observables/index.js";
-import { getConfigurationForCtor } from "../configuration.js";
+import { debugEnabled } from "../observables/internal/debug.js";
 
 type StoreConstruction = { administration?: StoreAdministration };
 let currentConstruction: StoreConstruction | undefined;
@@ -31,6 +31,9 @@ export function constructStore<T extends Store>(
 		try {
 			return new Type(props);
 		} finally {
+			if (construction.administration) {
+				construction.administration._constructing = false;
+			}
 			currentConstruction = previousConstruction;
 		}
 	} catch (error) {
@@ -62,11 +65,11 @@ type UpdateStoreProps<T extends Record<string, any>> = Partial<T> &
 
 type PropsOfStore<T extends Store<any>> = T extends Store<infer P> ? P : never;
 
-const storeElements = new WeakSet<object>();
+export const STORE_ELEMENT = Symbol("r-state-tree.storeElement");
 
 export function isStoreElement(value: unknown): value is StoreElement {
 	if (typeof value !== "object" || value === null) return false;
-	if (storeElements.has(value)) return true;
+	if ((value as any)[STORE_ELEMENT] === true) return true;
 
 	// Keep accepting structural descriptors, but do not duck-type Store or
 	// Model instances (or invoke an accessor named Type on an unrelated object).
@@ -92,13 +95,12 @@ export function createStore<
 		: [props: CreateStoreProps<T>]
 ): K {
 	const props = args[0];
-	const element = {
+	return {
+		[STORE_ELEMENT]: true,
 		Type,
 		props: props ?? {},
 		key: props && props.key,
-	};
-	storeElements.add(element);
-	return element as unknown as K;
+	} as unknown as K;
 }
 
 export function updateStore<K extends Store<any>>(
@@ -129,20 +131,39 @@ export default class Store<
 			throw new Error("r-state-tree: Can't initialize store directly");
 		}
 
-		const observable = createObservableWithCustomAdministration(
-			this,
-			StoreAdministration
-		);
-		const adm = getStoreAdm(observable);
+		const adm = registerAdministration(new StoreAdministration(this));
+		const observable = adm.proxy as this;
 		construction.administration = adm;
-		adm.setConfiguration(
-			() =>
-				(getConfigurationForCtor(
-					this.constructor as unknown as Function
-				) as Configuration<this>) ?? {}
-		);
-		adm.write("props", getObservable({}));
-		updateProps(observable.props, props);
+		adm.setCtor(this.constructor as unknown as Function);
+		adm._constructing = true;
+		if (debugEnabled) {
+			const propsProxy = getObservable({});
+			adm.propsAdm = getAdministration(propsProxy);
+			adm.write("props", propsProxy);
+			updateProps(observable.props, props);
+		} else {
+			// Materialize props observable proxy lazily when store.props is read.
+			const propsSource: Record<string, unknown> = {};
+			if (props) {
+				let explicitKeys: Set<string> | undefined;
+				for (const key in props) {
+					if (!Object.prototype.hasOwnProperty.call(props, key)) continue;
+					const val = props[key];
+					if (typeof val === "object" && val !== null) {
+						const valAdm = getAdministration(val);
+						if (valAdm && valAdm.proxy === val) {
+							(explicitKeys ??= new Set()).add(key);
+							propsSource[key] = valAdm.source;
+							continue;
+						}
+					}
+					propsSource[key] = val;
+				}
+				if (explicitKeys) adm._propsExplicitKeys = explicitKeys;
+			}
+			(adm.source as any).props = propsSource;
+			adm.markExplicitObservable("props");
+		}
 
 		return observable;
 	}

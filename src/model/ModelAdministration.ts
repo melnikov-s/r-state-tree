@@ -1,8 +1,9 @@
 import {
 	getAdministration,
-	createObservableWithCustomAdministration,
+	registerAdministration,
 	PreactObjectAdministration,
 	getSource,
+	isObservable,
 	batch,
 	untracked,
 	createComputed,
@@ -12,7 +13,7 @@ import {
 import type { ComputedNode, AtomNode } from "../observables/index.js";
 import { debugWrite, debugEnabled } from "../observables/internal/debug.js";
 import { getPropertyDescriptor } from "../observables/internal/utils.js";
-import Model from "../model/Model.js";
+import Model, { createModelInstance } from "../model/Model.js";
 import type {
 	ModelConfiguration,
 	IdType,
@@ -23,12 +24,14 @@ import type {
 import { ModelCfgTypes, CommonCfgTypes } from "../types.js";
 import {
 	getIdentifier,
-	getModelById,
-	peekModelById,
-	onModelAttached,
-	onModelDetached,
-	validateModelAttachments,
-	setIdentifier,
+	getModelByIdAdm,
+	onModelsAttachedValidated,
+	onModelDetachedAdm,
+	validateModelAttachmentsAdm,
+	setIdentifierAdm,
+	type IdBucket,
+	type ModelConstructor,
+	type TypeMap,
 } from "./idMap.js";
 import { clone, hydrateSnapshotValue } from "../utils.js";
 import {
@@ -40,19 +43,54 @@ import { ChildModelsAdministration } from "./ChildModelsAdministration.js";
 
 const ctorIdKeyMap: WeakMap<typeof Model, string | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
+const configHasChildMap: WeakMap<object, boolean> = new WeakMap();
+const configHasModelRefMap: WeakMap<object, boolean> = new WeakMap();
+const EMPTY_MODELS: Model[] = [];
+const EMPTY_MODEL_ADMS: ModelAdministration[] = [];
+const EMPTY_MODEL_CONFIG: ModelConfiguration<any> = Object.create(null);
 let snapshotRollbackVersion = 0;
+
+function configHasChildren(config: ModelConfiguration<any>): boolean {
+	let has = configHasChildMap.get(config);
+	if (has === undefined) {
+		has = false;
+		for (const key in config) {
+			if (getConfigType(config[key]) === CommonCfgTypes.child) {
+				has = true;
+				break;
+			}
+		}
+		configHasChildMap.set(config, has);
+	}
+	return has;
+}
+
+function configHasModelRefs(config: ModelConfiguration<any>): boolean {
+	let has = configHasModelRefMap.get(config);
+	if (has === undefined) {
+		has = false;
+		for (const key of Reflect.ownKeys(config)) {
+			if (getConfigType(config[key as string]) === ModelCfgTypes.modelRef) {
+				has = true;
+				break;
+			}
+		}
+		configHasModelRefMap.set(config, has);
+	}
+	return has;
+}
 
 type SnapshotPlan = {
 	releases: (() => void)[];
-	writes: (() => void)[];
+	writes: Array<(() => void) | SnapshotFields>;
 	undo?: (() => void)[];
 };
 
 type SnapshotIdUndo = { key: string; id: IdType };
-type SnapshotField = {
-	key: string;
-	value: unknown;
-	type: ModelCfgTypes | CommonCfgTypes | undefined;
+type SnapshotFields = {
+	model: ModelAdministration;
+	fields: unknown[];
+	clearId?: SnapshotIdUndo;
 };
 
 // Snapshots contain only primitives, arrays, and plain objects. Compare values
@@ -160,26 +198,7 @@ function isManagedField(type: ModelCfgTypes | CommonCfgTypes | undefined) {
 	);
 }
 
-function isScalarField(value: unknown): boolean {
-	return (
-		value == null || (typeof value !== "object" && typeof value !== "function")
-	);
-}
-
-// Ownership follows the indexed members, not a caller's custom iterator.
-function readChildField(field: Model | Model[] | null | undefined): Model[] {
-	if (!field) return [];
-	if (!Array.isArray(field)) return [field];
-	const adm = getAdministration(field);
-	if (adm instanceof ChildModelsAdministration) {
-		return adm.peekItems();
-	}
-	return Array.from({ length: field.length }, (_, index) => field[index]);
-}
-
 export class ModelAdministration extends PreactObjectAdministration<any> {
-	protected override readonly allowsDirectDataWrites = true;
-
 	private getCfgType(
 		name: PropertyKey
 	): ModelCfgTypes | CommonCfgTypes | undefined {
@@ -202,20 +221,43 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				if (prop === "parent") {
 					return (target as Model).parent;
 				}
-				switch (adm.getCfgType(prop)) {
-					case ModelCfgTypes.modelRef:
-						if (Array.isArray(adm.source[prop])) {
-							return adm.getModelRefs(prop);
-						}
-						return adm.getModelRef(prop);
-					default:
-						return adm.readProperty(prop, proxy);
+				if (
+					(adm._hasModelRefs || adm.configurationGetter) &&
+					adm.getCfgType(prop) === ModelCfgTypes.modelRef
+				) {
+					if (Array.isArray(adm.source[prop])) {
+						return adm.getModelRefs(prop);
+					}
+					return adm.getModelRef(prop);
 				}
+				return PreactObjectAdministration.trapGet(adm, prop, proxy);
 			},
 			set(target, name, value, receiver) {
 				const adm = getAdministration(target) as ModelAdministration;
 				adm.assertUsable();
 				const type = adm.getCfgType(name);
+				if (
+					adm._constructing &&
+					!debugEnabled &&
+					receiver === adm.proxy &&
+					(type === undefined || type === ModelCfgTypes.id) &&
+					(value == null ||
+						typeof value === "string" ||
+						typeof value === "number" ||
+						typeof value === "boolean") &&
+					!adm.hasAnyObservers() &&
+					!(name in target) &&
+					(type !== ModelCfgTypes.id ||
+						(!adm._parent &&
+							adm._modelId === undefined &&
+							(value === undefined ||
+								typeof value === "string" ||
+								typeof value === "number")))
+				) {
+					if (!Reflect.set(target, name, value)) return false;
+					if (type === ModelCfgTypes.id) adm._modelId = value as IdType;
+					return true;
+				}
 				if (isManagedField(type)) {
 					if (receiver !== adm.proxy) {
 						throw new TypeError(
@@ -223,44 +265,56 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						);
 					}
 					if (!adm.canWriteManagedField(name)) return false;
-				}
-				adm.beginWrite(name);
-				try {
-					switch (type) {
-						case ModelCfgTypes.modelRef: {
-							Array.isArray(value)
-								? adm.setModelRefs(name, value)
-								: adm.setModelRef(name, value as Model | undefined);
-							return true;
+					const prevKey = adm._writingManagedKey;
+					let overflowed = false;
+					if (prevKey === undefined) {
+						adm._writingManagedKey = name;
+					} else {
+						(adm._writeInProgress ??= new Set()).add(name);
+						overflowed = true;
+					}
+					try {
+						switch (type) {
+							case ModelCfgTypes.modelRef: {
+								Array.isArray(value)
+									? adm.setModelRefs(name, value)
+									: adm.setModelRef(name, value as Model | undefined);
+								return true;
+							}
+							case CommonCfgTypes.child: {
+								validateModelChildValue(value, name);
+								return Array.isArray(value)
+									? adm.setModels(name, value)
+									: adm.setModel(name, value);
+							}
+							case ModelCfgTypes.id: {
+								return adm.setId(name as string, value as IdType);
+							}
 						}
-						case CommonCfgTypes.child: {
-							validateModelChildValue(value, name);
-							return Array.isArray(value)
-								? adm.setModels(name, value)
-								: adm.setModel(name, value);
-						}
-						case ModelCfgTypes.id: {
-							return adm.setId(name as string, value as IdType);
+					} finally {
+						if (overflowed) {
+							adm._writeInProgress!.delete(name);
+						} else {
+							adm._writingManagedKey = undefined;
 						}
 					}
-
-					return type === undefined && receiver === adm.proxy
-						? adm.write(name, value, true)
-						: adm.writeProperty(name, value, receiver);
-				} finally {
-					adm.endWrite(name);
 				}
+
+				return PreactObjectAdministration.trapSet(adm, name, value, receiver);
 			},
 
 			defineProperty(target, name, desc) {
 				const adm = getAdministration(target) as ModelAdministration;
 				// Reflect.set reenters this trap while writing the backing field.
 				// A later reentrant reaction is not an internal write.
-				if (adm.isWriting && adm.hasWriteInProgress(name)) {
-					return Reflect.defineProperty(target, name, desc);
-				}
-				const type = adm.getCfgType(name);
-				if (isManagedField(type)) {
+				const cfgType = adm.getCfgType(name);
+				if (
+					!(
+						adm.isWriting &&
+						(adm._writingManagedKey === name || adm._writeInProgress?.has(name))
+					) &&
+					isManagedField(cfgType)
+				) {
 					if (
 						!("value" in desc) ||
 						desc.configurable === false ||
@@ -271,25 +325,26 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 							`r-state-tree: managed model field '${String(name)}' only supports ordinary data writes`
 						);
 					}
-					// A normal class field initializer can install a new detached ID
-					// without going through the set trap and reentering defineProperty.
+					// Fast path for class field initializer of @id on a fresh unattached, unobserved Model.
 					if (
-						type === ModelCfgTypes.id &&
+						cfgType === ModelCfgTypes.id &&
 						desc.configurable &&
 						desc.writable &&
 						desc.enumerable &&
-						(desc.value === undefined ||
-							typeof desc.value === "string" ||
-							typeof desc.value === "number") &&
 						!adm.disposed &&
 						!adm._parent &&
+						!adm.hasAnyObservers() &&
 						!debugEnabled &&
-						!adm.hasFieldDependencies() &&
-						adm.identifier === undefined &&
-						getPropertyDescriptor(target, name) === undefined
+						!(name in adm.source)
 					) {
-						if (!Reflect.defineProperty(target, name, desc)) return false;
-						adm.identifier = desc.value;
+						const v = desc.value as IdType;
+						if (adm._modelId != null && v == null) {
+							throw new Error(
+								"r-state-tree can't clear an id once it has already been set."
+							);
+						}
+						if (!Reflect.defineProperty(adm.source, name, desc)) return false;
+						if (v !== undefined) adm._modelId = v;
 						return true;
 					}
 					return Reflect.set(adm.proxy, name, desc.value);
@@ -332,68 +387,49 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	);
 
 	private configurationGetter?: () => ModelConfiguration<any>;
-	/** @internal Identifier state used by the ownership index. */
-	identifier?: IdType;
+	private _config: ModelConfiguration<any> = EMPTY_MODEL_CONFIG;
+	private _hasModelRefs = false;
+	protected override _cleanOwnDescriptors = true;
+	/** @internal */
+	_modelCtor?: ModelConstructor;
+	/** @internal */
+	_idIndex?: TypeMap;
+	/** @internal */
+	_lastIdType?: ModelConstructor;
+	/** @internal */
+	_lastIdBucket?: IdBucket;
+	/** @internal */
+	_modelId?: IdType;
 	private _parent: ModelAdministration | null = null;
 	private _parentAtom?: AtomNode;
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<readonly Model[]>>;
-	private activeModels?: Set<PropertyKey>;
-	private childArrays?: Map<PropertyKey, ChildModelsAdministration<Model>>;
-	private activeWriteKey?: PropertyKey;
+	private _activeModels?: Set<PropertyKey>;
+	private _childArrays?: Map<PropertyKey, ChildModelsAdministration<Model>>;
+	private _writingManagedKey: PropertyKey | undefined = undefined;
 	private _writeInProgress?: Set<PropertyKey>;
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
-	private snapshotMap?: Map<string, ComputedNode<unknown[]>>;
+	private _snapshotMap?: Map<string, ComputedNode<unknown[]>>;
 	private disposed = false;
 	private snapshotIdUndos?: WeakMap<object, SnapshotIdUndo>;
 	parentName: PropertyKey | null = null;
 
-	private beginWrite(name: PropertyKey): void {
-		if (this.activeWriteKey === undefined && !this._writeInProgress) {
-			this.activeWriteKey = name;
-			return;
-		}
-		const set = (this._writeInProgress ??= new Set());
-		if (this.activeWriteKey !== undefined) {
-			set.add(this.activeWriteKey);
-			this.activeWriteKey = undefined;
-		}
-		set.add(name);
+	protected override getInstanceConfig(): Record<PropertyKey, any> {
+		return this.configuration;
 	}
 
-	private endWrite(name: PropertyKey): void {
-		if (this.activeWriteKey === name) {
-			this.activeWriteKey = undefined;
-			return;
-		}
-		this._writeInProgress?.delete(name);
-	}
-
-	private hasWriteInProgress(name: PropertyKey): boolean {
-		return (
-			this.activeWriteKey === name ||
-			(this._writeInProgress?.has(name) ?? false)
-		);
-	}
-
-	peekParent(): ModelAdministration | null {
+	/** @internal Non-reactive parent access for internal structural operations. */
+	get rawParent(): ModelAdministration | null {
 		return this._parent;
 	}
 
-	peekRoot(): ModelAdministration {
+	/** @internal Non-reactive root access for internal structural operations. */
+	get rawRoot(): ModelAdministration {
 		let node: ModelAdministration = this;
-		while (node._parent) node = node._parent;
-		return node;
-	}
-
-	private peekField(name: PropertyKey): unknown {
-		if (
-			name in Object.prototype &&
-			!Object.prototype.hasOwnProperty.call(this.source, name)
-		) {
-			return Reflect.get(this.source, name, this.proxy);
+		while (node._parent) {
+			node = node._parent;
 		}
-		return this.peek(name, this.proxy);
+		return node;
 	}
 
 	get parent(): ModelAdministration | null {
@@ -408,6 +444,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		}
 	}
 
+	setCtor(ctor: Function): void {
+		this._modelCtor = ctor as ModelConstructor;
+		const config = getConfigurationForCtor(ctor) as ModelConfiguration<any>;
+		this._config = config;
+		this._hasModelRefs = configHasModelRefs(config);
+	}
+
 	setConfiguration(configurationGetter: () => ModelConfiguration<any>): void {
 		this.configurationGetter = configurationGetter;
 	}
@@ -419,20 +462,33 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private get configuration(): ModelConfiguration<any> {
-		return this.configurationGetter
-			? this.configurationGetter()
-			: (getConfigurationForCtor(
-					this.source.constructor as Function
-				) as ModelConfiguration<any>);
+		return this.configurationGetter ? this.configurationGetter() : this._config;
+	}
+
+	private peekField(key: PropertyKey): any {
+		const value =
+			this._cleanOwnDescriptors &&
+			Object.prototype.hasOwnProperty.call(this.source, key)
+				? (this.source as any)[key]
+				: Reflect.get(this.source, key, this.proxy);
+		if (
+			typeof value === "object" &&
+			value !== null &&
+			(this.hasExplicitObservable(key) || isObservable(value)) &&
+			!Object.isFrozen(value)
+		) {
+			const existingAdm = getAdministration(value);
+			if (existingAdm) return existingAdm.proxy;
+		}
+		return value;
 	}
 
 	/** Retained runtime metadata; snapshots intentionally have different semantics. */
 	getInspectionMetadata() {
-		const config = this.configuration;
 		return {
-			fields: Reflect.ownKeys(config).map((key) => ({
+			fields: Reflect.ownKeys(this.configuration).map((key) => ({
 				key,
-				type: getConfigType(config[key as string]),
+				type: getConfigType(this.configuration[key as string]),
 			})),
 			parent: this.parent?.proxy ?? null,
 			status: this.disposed ? "disposed" : "active",
@@ -459,7 +515,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private setId(name: string, v: IdType): boolean {
-		const id = this.identifier;
+		const id = this._modelId;
 
 		// Undefined IDs still need the backing field initialized.
 		if (id !== undefined && id === v) {
@@ -472,26 +528,21 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			);
 		}
 
-		if (isScalarField(v) && this.writeDetachedId(name, v)) return true;
+		if (!this._parent && !this.hasAnyObservers()) {
+			if (v !== undefined) {
+				this._modelId = v;
+			}
+			return this.write(name, v);
+		}
 
 		return batch(() => {
 			if (v !== undefined) {
-				setIdentifier(this, v);
+				setIdentifierAdm(this, v);
 			}
 			// Publish the field through the observable write path, in the same
 			// batch as the index update so observers only see a consistent identity.
-			return this.write(name, v, true);
+			return this.write(name, v);
 		});
-	}
-
-	private writeDetachedId(name: string, value: IdType): boolean {
-		if (this._parent || this.hasFieldDependencies()) return false;
-		const desc = this.ownScalarDescriptor(name);
-		if (!desc?.writable) return false;
-		if (this.identifier !== undefined && this.identifier === value) return true;
-		if (!this.writeOwnScalar(name, value, desc)) return false;
-		if (value !== undefined) this.identifier = value;
-		return true;
 	}
 
 	/** Only the original undo payload on the recorded Model can restore its unset ID. */
@@ -510,14 +561,12 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	private canWriteManagedField(name: PropertyKey): boolean {
+		if (!(name in this.source)) return Object.isExtensible(this.source);
 		const own = Object.getOwnPropertyDescriptor(this.source, name);
 		if (own) return own.writable === true;
-		if (getPropertyDescriptor(this.source, name)) {
-			throw new TypeError(
-				`r-state-tree: managed model field '${String(name)}' cannot be inherited from a prototype`
-			);
-		}
-		return Object.isExtensible(this.source);
+		throw new TypeError(
+			`r-state-tree: managed model field '${String(name)}' cannot be inherited from a prototype`
+		);
 	}
 
 	private setModel(
@@ -552,13 +601,71 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		commit: () => void | boolean
 	): boolean {
 		this.assertUsable();
-		const removedSet = removed.length
-			? new Set(removed.map(getModelAdm))
-			: undefined;
+
+		// Fast path: pure detachment (e.g. setting child field to null)
+		if (added.length === 0) {
+			if (commit() === false) return false;
+			if (removed.length === 1) {
+				getModelAdm(removed[0]).detachInner();
+			} else if (removed.length > 1) {
+				const seen = new Set<ModelAdministration>();
+				for (let i = 0; i < removed.length; i++) {
+					const adm = getModelAdm(removed[i]);
+					if (!seen.has(adm)) {
+						seen.add(adm);
+						adm.detachInner();
+					}
+				}
+			}
+			return true;
+		}
+
+		// Fast path: pure attachment (no removals, e.g. Model.create or attaching to empty slot)
+		if (removed.length === 0) {
+			const attaching: ModelAdministration[] = [];
+			const seen =
+				added.length > 1 ? new Set<ModelAdministration>() : undefined;
+			for (let i = 0; i < added.length; i++) {
+				const adm = getModelAdm(added[i]);
+				if (seen) {
+					if (seen.has(adm)) continue;
+					seen.add(adm);
+				}
+				adm.assertUsable();
+				let ancestor: ModelAdministration | null = this;
+				while (ancestor) {
+					if (ancestor === adm)
+						throw new Error(
+							"r-state-tree: cannot attach an ancestor as a child"
+						);
+					ancestor = ancestor._parent;
+				}
+				if (adm._parent) {
+					throw new Error(
+						"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
+					);
+				}
+				attaching.push(adm);
+			}
+			validateModelAttachmentsAdm(this, attaching, EMPTY_MODEL_ADMS);
+			if (commit() === false) return false;
+			for (let i = 0; i < attaching.length; i++) {
+				const adm = attaching[i];
+				adm.assertUsable();
+				adm.parent = this;
+				adm.parentName = name;
+			}
+			onModelsAttachedValidated(this, attaching);
+			return true;
+		}
+
+		const removedSet = new Set<ModelAdministration>();
+		for (let i = 0; i < removed.length; i++) {
+			removedSet.add(getModelAdm(removed[i]));
+		}
 		const addedSet = new Set<ModelAdministration>();
-		const attaching: ModelAdministration[] = [];
-		for (const model of added) {
-			const adm = getModelAdm(model);
+		for (let i = 0; i < added.length; i++) {
+			const adm = getModelAdm(added[i]);
 			if (addedSet.has(adm)) continue;
 			addedSet.add(adm);
 			adm.assertUsable();
@@ -571,7 +678,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			if (
 				adm._parent &&
 				!(
-					removedSet?.has(adm) &&
+					removedSet.has(adm) &&
 					adm._parent === this &&
 					adm.parentName === name
 				)
@@ -580,26 +687,56 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
 				);
 			}
-			if (!removedSet?.has(adm)) attaching.push(adm);
 		}
 		const detaching: ModelAdministration[] = [];
-		if (removedSet) {
-			for (const adm of removedSet) {
-				if (!addedSet.has(adm)) detaching.push(adm);
+		for (const adm of removedSet) {
+			if (!addedSet.has(adm)) {
+				detaching.push(adm);
 			}
 		}
-		validateModelAttachments(this, attaching, detaching);
+		const attaching: ModelAdministration[] = [];
+		for (const adm of addedSet) {
+			if (!removedSet.has(adm)) {
+				attaching.push(adm);
+			}
+		}
+		validateModelAttachmentsAdm(this, attaching, detaching);
 		if (commit() === false) return false;
-		for (const adm of detaching) adm.detach();
-		for (const adm of attaching) adm.attach(this, name);
+		for (let i = 0; i < detaching.length; i++) detaching[i].detachInner();
+		for (let i = 0; i < attaching.length; i++) {
+			const adm = attaching[i];
+			adm.assertUsable();
+			adm.parent = this;
+			adm.parentName = name;
+		}
+		onModelsAttachedValidated(this, attaching);
 		return true;
+	}
+
+	private extractChildModels(
+		field: Model | Model[] | null | undefined
+	): Model[] {
+		if (!field) return EMPTY_MODELS;
+		if (!Array.isArray(field)) return [field];
+		const adm = getAdministration(field);
+		if (adm instanceof ChildModelsAdministration) {
+			const adms = adm.getMemberAdms();
+			const len = adms.length;
+			if (len === 0) return EMPTY_MODELS;
+			const result = new Array<Model>(len);
+			for (let i = 0; i < len; i++) {
+				result[i] = adms[i].proxy;
+			}
+			return result;
+		}
+		return Array.from({ length: field.length }, (_, index) => field[index]);
 	}
 
 	private changeChildField(
 		name: PropertyKey,
 		value: Model | Model[] | null | undefined,
 		commit: () => boolean,
-		added?: Model[]
+		addedModels?: Model[]
 	): boolean {
 		const current = this.peekField(name) as Model | Model[] | null | undefined;
 		if (Array.isArray(current)) {
@@ -607,55 +744,49 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				getAdministration(current) as ChildModelsAdministration<Model>
 			).assertMutable();
 		}
+		const added = addedModels ?? this.extractChildModels(value);
+		const removed = this.extractChildModels(current);
 		return batch(() => {
-			if (
-				!this.changeModels(
-					name,
-					added ?? readChildField(value),
-					readChildField(current),
-					commit
-				)
-			)
-				return false;
-			const previousArray = this.childArrays?.get(name);
-			if (previousArray) previousArray.change = undefined;
-			this.childArrays?.delete(name);
-			if (value) (this.activeModels ??= new Set()).add(name);
-			else this.activeModels?.delete(name);
-			if (Array.isArray(value)) {
-				const adm = getAdministration(
-					value
-				) as ChildModelsAdministration<Model>;
-				adm.change = (added, removed, commit) => {
-					this.changeModels(name, added, removed, commit);
-				};
-				(this.childArrays ??= new Map()).set(name, adm);
-			}
+			if (!this.changeModels(name, added, removed, commit)) return false;
+			this.updateChildSlot(name, value);
 			return true;
 		});
 	}
 
+	private updateChildSlot(
+		name: PropertyKey,
+		value: Model | Model[] | null | undefined
+	): void {
+		const previousArray = this._childArrays?.get(name);
+		if (previousArray) {
+			previousArray.change = undefined;
+			this._childArrays!.delete(name);
+		}
+		if (value) (this._activeModels ??= new Set()).add(name);
+		else this._activeModels?.delete(name);
+		if (Array.isArray(value)) {
+			const adm = getAdministration(value) as ChildModelsAdministration<Model>;
+			adm.change = (a, r, c) => {
+				this.changeModels(name, a, r, c);
+			};
+			(this._childArrays ??= new Map()).set(name, adm);
+		}
+	}
+
 	private setModels(name: PropertyKey, newModelsSource: Model[]): boolean {
 		if (this.peekField(name) === newModelsSource) return true;
-		const newModels = createObservableWithCustomAdministration(
-			[] as Model[],
-			ChildModelsAdministration
+		const childAdm = registerAdministration(
+			new ChildModelsAdministration<Model>([])
 		);
-		let members: Model[] | undefined;
-		if (debugEnabled) {
-			newModels.push(...newModelsSource);
-		} else {
-			members = [...newModelsSource];
-			const adm = getAdministration(
-				newModels
-			) as ChildModelsAdministration<Model>;
-			adm.initializeMembers(members);
-		}
+		const newModels = childAdm.proxy;
+		let addedProxies: Model[] | undefined;
+		if (debugEnabled) newModels.push(...newModelsSource);
+		else addedProxies = childAdm.initMembers(newModelsSource);
 		return this.changeChildField(
 			name,
 			newModels,
 			() => this.write(name, newModels),
-			members
+			addedProxies
 		);
 	}
 
@@ -664,9 +795,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 		a.reportObserved();
 		const Type = this.getRequiredModelRefType(name);
-		const root = this.root.proxy;
+		const rootAdm = this.root;
 		return this.source[name] != null
-			? getModelById(root, Type, this.source[name] as IdType)
+			? getModelByIdAdm(rootAdm, Type, this.source[name] as IdType)
 			: undefined;
 	}
 
@@ -680,10 +811,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			c = createComputed(() => {
 				a.reportObserved();
 				const Type = this.getRequiredModelRefType(name);
-				const root = this.root.proxy;
+				const rootAdm = this.root;
 				const ids = this.source[name] as IdType | IdType[] | undefined;
 				const models = (Array.isArray(ids) ? ids : [])
-					.map((id) => getModelById(root, Type, id))
+					.map((id) => getModelByIdAdm(rootAdm, Type, id))
 					.filter((model) => model !== undefined);
 
 				// Membership comes from the stored IDs. Freeze only the resolved list.
@@ -751,43 +882,19 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		}
 	}
 
-	private attach(
-		parent: ModelAdministration | null = null,
-		parentName: PropertyKey | null = null
-	): void {
-		this.assertUsable();
-		if (this._parent) {
-			throw new Error(
-				"r-state-tree: child model already attached to a parent. Did you mean to use modelRef?"
-			);
-		}
-
-		batch(() => {
-			if (parent) {
-				this.parent = parent;
-				this.parentName = parentName;
-			}
-			try {
-				onModelAttached(this);
-			} catch (error) {
-				this.parent = null;
-				this.parentName = null;
-				throw error;
-			}
-		});
-	}
-
 	get root(): ModelAdministration {
-		const parent = this.parent;
-		return parent ? parent.root : this;
+		let node: ModelAdministration = this;
+		while (true) {
+			const parent = node.parent;
+			if (!parent) return node;
+			node = parent;
+		}
 	}
 
-	private detach(): void {
-		batch(() => {
-			onModelDetached(this.proxy);
-			this.parent = null;
-			this.parentName = null;
-		});
+	private detachInner(): void {
+		onModelDetachedAdm(this);
+		this.parent = null;
+		this.parentName = null;
 	}
 
 	dispose(internal = false): void {
@@ -802,8 +909,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		this.disposed = true;
 		batch(() => {
 			try {
-				if (this.activeModels) {
-					for (const name of this.activeModels) {
+				if (this._activeModels) {
+					for (const name of this._activeModels) {
 						const child = this.source[name] as Model | Model[] | undefined;
 						if (Array.isArray(child)) {
 							for (let i = 0; i < child.length; i++) {
@@ -814,119 +921,199 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 						}
 					}
 				}
-				if (this._parent) this.detach();
+				if (this._parent) this.detachInner();
 			} finally {
-				if (this.childArrays) {
-					for (const array of this.childArrays.values()) array.dispose();
-					this.childArrays.clear();
+				if (this._childArrays) {
+					for (const array of this._childArrays.values()) array.dispose();
+					this._childArrays.clear();
 				}
-				this.activeModels?.clear();
+				this._activeModels?.clear();
 			}
 		});
+	}
+
+	private writeSnapshotKey(
+		json: Record<string, unknown>,
+		config: ModelConfiguration<any>,
+		source: any,
+		key: string,
+		isOwn: boolean
+	): void {
+		switch (getConfigType(config[key])) {
+			case ModelCfgTypes.transient:
+				break;
+			case ModelCfgTypes.id: {
+				const idVal = this.read(key);
+				json[key] =
+					typeof idVal === "string" ||
+					typeof idVal === "number" ||
+					idVal === undefined ||
+					idVal === null
+						? idVal
+						: clone(getSource(idVal), key);
+				break;
+			}
+			case ModelCfgTypes.modelRef: {
+				this.getReferencedAtom(key).reportObserved();
+				const Type = this.getRequiredModelRefType(key);
+				const reference = source[key] as IdType | IdType[] | null | undefined;
+				if (Array.isArray(reference)) {
+					json[key] = clone(
+						reference.map((id) => getModelRefSnapshotFromId(Type, id)),
+						key
+					);
+					break;
+				}
+				json[key] =
+					reference == null
+						? null
+						: clone(getModelRefSnapshotFromId(Type, reference), key);
+				break;
+			}
+			case CommonCfgTypes.child: {
+				const child = this.read(key) as Model | Model[] | undefined;
+				if (Array.isArray(child)) {
+					const snapshotMap = (this._snapshotMap ??= new Map());
+					let childComputed = snapshotMap.get(key);
+					if (!childComputed) {
+						let chunkSource: ModelAdministration[] | undefined;
+						let chunkComputeds: ComputedNode<unknown[]>[] | undefined;
+						const CHUNK_SIZE = 16;
+						const CHUNK_THRESHOLD = 64;
+						childComputed = createComputed(() => {
+							const value = this.read(key);
+							if (!Array.isArray(value)) return [];
+							const array = getAdministration(value);
+							if (!(array instanceof ChildModelsAdministration)) {
+								return getSource(
+									value.map((model: Model) => getModelAdm(model).getSnapshot())
+								);
+							}
+							// The child array reports every structural write to this
+							// dependency; only the individual Model snapshots need
+							// tracking, not each proxy index read.
+							array.reportObserved();
+							array.atom.reportObserved(); // also track explicit reportChanged()
+							const adms = array.getMemberAdms();
+							const len = adms.length;
+							if (len < CHUNK_THRESHOLD) {
+								chunkSource = undefined;
+								chunkComputeds = undefined;
+								const snapshots = new Array(len);
+								for (let i = 0; i < len; i++) {
+									snapshots[i] = adms[i].getSnapshot();
+								}
+								return snapshots;
+							}
+							// O(sqrt(N)) incremental snapshot updates for large child arrays:
+							// a single leaf edit only re-evaluates its 16-item chunk.
+							if (chunkSource !== adms || !chunkComputeds) {
+								chunkSource = adms;
+								const chunkCount = Math.ceil(len / CHUNK_SIZE);
+								chunkComputeds = new Array(chunkCount);
+								for (let c = 0; c < chunkCount; c++) {
+									const start = c * CHUNK_SIZE;
+									const end = Math.min(start + CHUNK_SIZE, len);
+									const sliceAdms = adms;
+									chunkComputeds[c] = createComputed(() => {
+										const out = new Array(end - start);
+										for (let i = start; i < end; i++) {
+											out[i - start] = sliceAdms[i].getSnapshot();
+										}
+										return out;
+									});
+								}
+							}
+							const snapshots = new Array(len);
+							let offset = 0;
+							for (let c = 0; c < chunkComputeds.length; c++) {
+								const chunk = chunkComputeds[c].get();
+								for (let j = 0; j < chunk.length; j++) {
+									snapshots[offset++] = chunk[j];
+								}
+							}
+							return snapshots;
+						});
+						snapshotMap.set(key, childComputed);
+					}
+					json[key] = childComputed.get();
+					break;
+				}
+				json[key] = child ? getModelAdm(child).getSnapshot() : null;
+				break;
+			}
+			default:
+				if (isOwn) {
+					const val = this.read(key);
+					json[key] =
+						val === null ||
+						val === undefined ||
+						typeof val === "string" ||
+						typeof val === "number" ||
+						typeof val === "boolean"
+							? val
+							: clone(val, key);
+				}
+				break;
+		}
 	}
 
 	private toJSON(): Snapshot<Model> {
 		// A field added after this read was not tracked as a value. Observe the
 		// key set as well, including when there are no existing snapshot fields.
 		this.keysAtom.reportObserved();
+		const source = this.source;
 		const config = this.configuration;
-		const keys = new Set([...Object.keys(this.source), ...Object.keys(config)]);
-		return Array.from(keys).reduce((json: any, key) => {
-			switch (getConfigType(config[key])) {
-				case ModelCfgTypes.transient:
-					break;
-				case ModelCfgTypes.id:
-					json[key] = clone(getSource(this.proxy[key]), key);
-					break;
-				case ModelCfgTypes.modelRef:
-					this.getReferencedAtom(key).reportObserved();
-					const Type = this.getRequiredModelRefType(key);
-					const reference = this.source[key] as
-						| IdType
-						| IdType[]
-						| null
-						| undefined;
-					if (Array.isArray(reference)) {
-						json[key] = clone(
-							reference.map((id) => getModelRefSnapshotFromId(Type, id)),
-							key
-						);
-						break;
-					}
-					json[key] =
-						reference == null
-							? null
-							: clone(getModelRefSnapshotFromId(Type, reference), key);
-					break;
-				case CommonCfgTypes.child:
-					const child: Model | Model[] | undefined = this.proxy[key];
-					if (Array.isArray(child)) {
-						const snapshotMap = (this.snapshotMap ??= new Map());
-						if (!snapshotMap.has(key)) {
-							snapshotMap.set(
-								key,
-								createComputed(() => {
-									const value = this.proxy[key];
-									if (!Array.isArray(value)) return [];
-									const array = getAdministration(value);
-									if (!(array instanceof ChildModelsAdministration)) {
-										return getSource(
-											value.map((model: Model) =>
-												getModelAdm(model).getSnapshot()
-											)
-										);
-									}
-									// The child array reports every structural write to this
-									// dependency; only the individual Model snapshots need
-									// tracking, not each proxy index read.
-									array.reportObserved();
-									array.atom.reportObserved(); // also track explicit reportChanged()
-									const items = array.source;
-									const snapshots = new Array(items.length);
-									for (let i = 0; i < items.length; i++) {
-										snapshots[i] = getModelAdm(items[i]).getSnapshot();
-									}
-									return snapshots;
-								})
-							);
-						}
-						json[key] = snapshotMap.get(key)!.get();
-						break;
-					}
-					json[key] = child ? getModelAdm(child).getSnapshot() : null;
-					break;
-				default:
-					if (Object.prototype.hasOwnProperty.call(this.source, key)) {
-						json[key] = clone(this.proxy[key], key);
-					}
-					break;
+		const json: Record<string, unknown> = {};
+
+		for (const key in source) {
+			if (Object.prototype.hasOwnProperty.call(source, key)) {
+				this.writeSnapshotKey(json, config, source, key, true);
 			}
-			return json;
-		}, {}) as Snapshot<any>;
+		}
+		for (const key in config) {
+			if (
+				Object.prototype.hasOwnProperty.call(config, key) &&
+				!Object.prototype.hasOwnProperty.call(source, key)
+			) {
+				this.writeSnapshotKey(json, config, source, key, false);
+			}
+		}
+
+		return json as Snapshot<any>;
 	}
 
 	validateSnapshotFields(): void {
-		untracked(() => {
-			const config = this.configuration;
-			const keys = Object.keys(this.source);
-			for (let i = 0; i < keys.length; i++) {
-				const key = keys[i];
-				if (getConfigType(config[key]) === undefined) {
-					try {
-						const ownScalar = this.ownScalarDescriptor(key);
-						clone(ownScalar ? ownScalar.value : this.peekField(key), key);
-					} catch (error) {
-						if (error instanceof Error) {
-							throw new Error(
-								`${error.message} Mark runtime-only Model fields with @transient.`,
-								{ cause: error }
-							);
-						}
-						throw error;
+		const config = this.configuration;
+		const source = this.source;
+		for (const key of Object.keys(source)) {
+			if (
+				config[key] === undefined ||
+				getConfigType(config[key]) === undefined
+			) {
+				try {
+					if (this._cleanOwnDescriptors) {
+						const val = source[key];
+						if (
+							val == null ||
+							typeof val === "string" ||
+							typeof val === "number" ||
+							typeof val === "boolean"
+						)
+							continue;
 					}
+					untracked(() => clone(this.peekField(key), key));
+				} catch (error) {
+					if (error instanceof Error) {
+						throw new Error(
+							`${error.message} Mark runtime-only Model fields with @transient.`,
+							{ cause: error }
+						);
+					}
+					throw error;
 				}
 			}
-		});
+		}
 	}
 
 	onSnapshotChange(onChange: SnapshotChange<any>): () => void {
@@ -978,15 +1165,49 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	loadSnapshot(snapshot: Snapshot<any>, undo?: (() => void)[]): void {
 		untracked(() => {
 			batch(() => {
-				const plan: SnapshotPlan = { releases: [], writes: [], undo };
-				this.planSnapshot(snapshot, plan, this.snapshotIdUndos?.get(snapshot));
-				// Release only edges absent from the final slots (at every depth)
-				// before acquiring new ones. The ordinary setters still validate all
-				// attachments against retained subtrees and other new children.
-				for (const release of plan.releases) release();
-				for (const write of plan.writes) write();
+				this.loadSnapshotInBatch(snapshot, undo);
 			});
 		});
+	}
+
+	/** @internal Assumes caller is already inside untracked() + batch(). */
+	loadSnapshotInBatch(snapshot: Snapshot<any>, undo?: (() => void)[]): void {
+		const config = this.configuration;
+		const clearId = this.snapshotIdUndos?.get(snapshot);
+		if (!configHasChildren(config)) {
+			const fields: unknown[] = [];
+			for (const key of Object.keys(snapshot)) {
+				fields.push(key, snapshot[key], getConfigType(config[key]));
+			}
+			this.writeSnapshotFields(fields, undo, clearId);
+			return;
+		}
+		const plan: SnapshotPlan = { releases: [], writes: [], undo };
+		this.planSnapshot(snapshot, plan, clearId);
+		// Release only edges absent from the final slots (at every depth)
+		// before acquiring new ones. The ordinary setters still validate all
+		// attachments against retained subtrees and other new children.
+		for (let i = 0; i < plan.releases.length; i++) plan.releases[i]();
+		for (const entry of plan.writes) {
+			if (typeof entry === "function") entry();
+			else entry.model.writeSnapshotFields(entry.fields, undo, entry.clearId);
+		}
+	}
+
+	private writeSnapshotFields(
+		fields: unknown[],
+		undo?: (() => void)[],
+		clearId?: SnapshotIdUndo
+	): void {
+		for (let i = 0; i < fields.length; i += 3) {
+			this.loadSnapshotField(
+				fields[i] as string,
+				fields[i + 1],
+				fields[i + 2] as ModelCfgTypes | CommonCfgTypes | undefined,
+				undo,
+				clearId
+			);
+		}
 	}
 
 	private assignSnapshotField(
@@ -1012,122 +1233,297 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		clearId?: SnapshotIdUndo
 	): void {
 		const config = this.configuration;
-		let fields: SnapshotField[] | undefined;
+		let fields: unknown[] | undefined;
 		for (const key of Object.keys(snapshot)) {
 			const value = snapshot[key];
-			const type = getConfigType(config[key]) as SnapshotField["type"];
+			const type = getConfigType(config[key]);
 			if (type === CommonCfgTypes.child) {
 				fields = undefined;
 				this.planSnapshotChild(key, value, plan);
 			} else {
-				if (!fields) {
-					const run: SnapshotField[] = [];
-					fields = run;
-					plan.writes.push(() => {
-						for (const field of run)
-							this.loadSnapshotField(
-								field.key,
-								field.value,
-								field.type,
-								plan.undo,
-								clearId
-							);
-					});
-				}
-				fields.push({ key, value, type });
+				if (!fields)
+					plan.writes.push({ model: this, fields: (fields = []), clearId });
+				fields.push(key, value, type);
 			}
 		}
 	}
 
 	private planSnapshotChild(key: string, value: any, plan: SnapshotPlan): void {
 		const current = this.peekField(key) as Model | Model[] | null | undefined;
-		const currentChildren = readChildField(current);
-		const retained = new Set<Model>();
-		const snapshotIds = new Set<IdType>();
+		const currentAdm = Array.isArray(current)
+			? getAdministration(current)
+			: undefined;
+		const currentChildArray =
+			currentAdm instanceof ChildModelsAdministration ? currentAdm : undefined;
+		const memberAdms = currentChildArray
+			? currentChildArray.getMemberAdms()
+			: undefined;
+		const currentChildren = memberAdms
+			? undefined
+			: this.extractChildModels(current);
+		const currentCount = memberAdms
+			? memberAdms.length
+			: currentChildren!.length;
+		let retained: Set<Model> | undefined;
+		let snapshotIds: Set<IdType> | undefined;
 		const Ctor = this.getCfgChildType(key) as typeof Model | undefined;
 		const inArray = Array.isArray(value);
+		const idKey = Ctor ? getIdKey(Ctor) : null;
+		const rawRootAdm = this.rawRoot;
+		const idBucketModels = Ctor
+			? rawRootAdm._lastIdType === Ctor
+				? rawRootAdm._lastIdBucket!.models
+				: rawRootAdm._idIndex?.get(Ctor)?.models
+			: undefined;
 
-		const prepare = (
-			snapshot: Snapshot | Model,
-			index: number
-		): (() => Model) => {
-			if (snapshot instanceof Model) {
-				const model = getModelAdm(snapshot).proxy as Model;
-				retained.add(model);
-				return () => model;
+		let prepareValue: Array<Model | Snapshot> | Model | Snapshot | null;
+		let allReusedInOrder = false;
+
+		if (inArray) {
+			const arr = value as Snapshot[];
+			const len = arr.length;
+			allReusedInOrder =
+				currentChildArray !== undefined && len === currentCount;
+			let prepared: Array<Model | Snapshot> | undefined = allReusedInOrder
+				? undefined
+				: new Array<Model | Snapshot>(len);
+
+			for (let i = 0; i < len; i++) {
+				const entry: Snapshot | Model = arr[i] ?? {};
+				let item: Model | Snapshot;
+				let isModel = false;
+				if (entry instanceof Model) {
+					item = getModelAdm(entry).proxy as Model;
+					isModel = true;
+				} else {
+					if (!Ctor) {
+						throw new Error(
+							"r-state-tree: child constructor must be specified to load snapshots with child/children. eg: `@child(ChildCtor) MyChild`"
+						);
+					}
+					const hasId =
+						idKey !== null &&
+						Object.prototype.hasOwnProperty.call(entry, idKey);
+					const id = hasId
+						? (entry as Record<string, IdType | undefined>)[idKey!]
+						: undefined;
+					let matchAdm: ModelAdministration | undefined;
+					if (id != null) {
+						if (snapshotIds === undefined) {
+							snapshotIds = new Set();
+							snapshotIds.add(id);
+						} else {
+							const prevSize = snapshotIds.size;
+							snapshotIds.add(id);
+							if (snapshotIds.size === prevSize) {
+								throw new Error(
+									"r-state-tree duplicate ids detected after snapshot was loaded"
+								);
+							}
+						}
+						if (
+							memberAdms &&
+							i < currentCount &&
+							memberAdms[i]._modelId === id &&
+							memberAdms[i]._modelCtor === Ctor
+						) {
+							matchAdm = memberAdms[i];
+						} else if (idBucketModels) {
+							const found = idBucketModels.get(id);
+							if (found) {
+								const adm = getModelAdm(found);
+								if (adm._parent === this && adm.parentName === key) {
+									matchAdm = adm;
+								}
+							}
+						}
+					} else if (Array.isArray(current)) {
+						// An omitted identifier can patch the positional child. An explicit
+						// unset ID describes an unidentified child, not a request to clear an
+						// established ID; recreate in that case instead of changing the ID.
+						if (memberAdms) {
+							const posAdm = i < currentCount ? memberAdms[i] : undefined;
+							if (posAdm && (!hasId || posAdm._modelId == null)) {
+								matchAdm = posAdm;
+							}
+						} else {
+							const positional = currentChildren![i];
+							if (positional && (!hasId || getIdentifier(positional) == null)) {
+								matchAdm = getModelAdm(positional);
+							}
+						}
+					}
+					if (matchAdm) {
+						matchAdm.planSnapshot(entry, plan);
+						item = matchAdm.proxy;
+						isModel = true;
+					} else {
+						item = entry;
+					}
+				}
+
+				if (allReusedInOrder) {
+					if (item !== memberAdms![i].proxy) {
+						allReusedInOrder = false;
+						prepared = new Array<Model | Snapshot>(len);
+						retained = new Set<Model>();
+						for (let j = 0; j < i; j++) {
+							const prevProxy = memberAdms![j].proxy;
+							prepared[j] = prevProxy;
+							retained.add(prevProxy);
+						}
+						prepared[i] = item;
+						if (isModel) retained.add(item as Model);
+					}
+				} else {
+					prepared![i] = item;
+					if (isModel && currentCount > 0) {
+						(retained ??= new Set()).add(item as Model);
+					}
+				}
 			}
+			if (allReusedInOrder) {
+				const previousArray = currentChildArray!;
+				const members = memberAdms!;
+				plan.writes.push(() =>
+					this.replaceRetainedChildArray(key, previousArray, members, plan.undo)
+				);
+				return;
+			}
+			prepareValue = prepared!;
+		} else if (value == null) {
+			prepareValue = null;
+		} else if (value instanceof Model) {
+			const model = getModelAdm(value).proxy as Model;
+			if (currentCount > 0) (retained ??= new Set()).add(model);
+			prepareValue = model;
+		} else {
 			if (!Ctor) {
 				throw new Error(
 					"r-state-tree: child constructor must be specified to load snapshots with child/children. eg: `@child(ChildCtor) MyChild`"
 				);
 			}
-			const idKey = getIdKey(Ctor);
-			const hasId = idKey !== null && Object.hasOwn(snapshot, idKey);
+			const hasId =
+				idKey !== null && Object.prototype.hasOwnProperty.call(value, idKey);
 			const id = hasId
-				? (snapshot as Record<string, IdType | undefined>)[idKey]
+				? (value as Record<string, IdType | undefined>)[idKey!]
 				: undefined;
-			let match: Model | undefined;
-			if (id != null) {
-				if (snapshotIds.has(id)) {
-					throw new Error(
-						"r-state-tree duplicate ids detected after snapshot was loaded"
-					);
+			let matchAdm: ModelAdministration | undefined;
+			if (id != null && idBucketModels) {
+				const found = idBucketModels.get(id);
+				if (found) {
+					const adm = getModelAdm(found);
+					if (adm._parent === this && adm.parentName === key) {
+						matchAdm = adm;
+					}
 				}
-				snapshotIds.add(id);
-				match = peekModelById(this.peekRoot().proxy, Ctor, id);
-				if (match) {
-					const adm = getModelAdm(match);
-					if (adm._parent !== this || adm.parentName !== key) match = undefined;
-				}
-			} else if (inArray && Array.isArray(current)) {
-				const positional = currentChildren[index];
-				// An omitted identifier can patch the positional child. An explicit
-				// unset ID describes an unidentified child, not a request to clear an
-				// established ID; recreate in that case instead of changing the ID.
-				if (positional && (!hasId || getIdentifier(positional) == null))
-					match = positional;
 			}
-
-			if (match) {
-				retained.add(match);
-				getModelAdm(match).planSnapshot(snapshot, plan);
-				return () => match;
+			if (matchAdm) {
+				if (currentCount > 0) (retained ??= new Set()).add(matchAdm.proxy);
+				matchAdm.planSnapshot(value, plan);
+				prepareValue = matchAdm.proxy;
+			} else {
+				prepareValue = value;
 			}
-			return () => {
-				if (!plan.undo) return Ctor.create(snapshot);
-				const model = Ctor.create();
-				// Hydrate in the outer transaction as a new child can itself take
-				// ownership of externally supplied Model instances.
-				getModelAdm(model).loadSnapshot(snapshot, plan.undo);
-				return model;
-			};
-		};
-
-		const prepareValue = inArray
-			? (value as Snapshot[]).map((item, index) => prepare(item ?? {}, index))
-			: value == null
-				? null
-				: prepare(value, 0);
-
-		const remaining = currentChildren.filter((model) => retained.has(model));
-		if (remaining.length !== currentChildren.length) {
-			plan.releases.push(() =>
-				this.assignSnapshotField(
-					key,
-					Array.isArray(current) ? remaining : null,
-					plan.undo
-				)
-			);
 		}
-		plan.writes.push(() =>
+
+		if (currentCount > 0 && (!retained || retained.size < currentCount)) {
+			const remaining: Model[] = [];
+			if (memberAdms) {
+				for (let i = 0; i < currentCount; i++) {
+					const childProxy = memberAdms[i].proxy;
+					if (retained?.has(childProxy)) remaining.push(childProxy);
+				}
+			} else {
+				for (let i = 0; i < currentCount; i++) {
+					if (retained?.has(currentChildren![i]))
+						remaining.push(currentChildren![i]);
+				}
+			}
+			if (remaining.length !== currentCount) {
+				plan.releases.push(() =>
+					this.assignSnapshotField(
+						key,
+						Array.isArray(current) ? remaining : null,
+						plan.undo
+					)
+				);
+			}
+		}
+
+		const createChild = (snapshot: Snapshot): Model => {
+			if (!plan.undo) {
+				return Ctor!.create === Model.create
+					? createModelInstance(Ctor!, snapshot, true)
+					: Ctor!.create(snapshot);
+			}
+			// During apply, an override still constructs without a snapshot so
+			// any subsequent ownership changes join the enclosing rollback.
+			if (Ctor!.create !== Model.create) {
+				const model = Ctor!.create();
+				getModelAdm(model).loadSnapshotInBatch(snapshot, plan.undo);
+				return model;
+			}
+			return createModelInstance(Ctor!, snapshot, true, plan.undo);
+		};
+		plan.writes.push(() => {
+			if (Array.isArray(prepareValue)) {
+				const len = prepareValue.length;
+				const models = new Array<Model>(len);
+				for (let i = 0; i < len; i++) {
+					const entry = prepareValue[i];
+					models[i] = entry instanceof Model ? entry : createChild(entry);
+				}
+				this.assignSnapshotField(key, models, plan.undo);
+			} else if (prepareValue == null) {
+				this.assignSnapshotField(key, null, plan.undo);
+			} else {
+				const resolved =
+					prepareValue instanceof Model
+						? prepareValue
+						: createChild(prepareValue);
+				this.assignSnapshotField(key, resolved, plan.undo);
+			}
+		});
+	}
+
+	/** Replace the array wrapper while preserving every existing ownership edge. */
+	private replaceRetainedChildArray(
+		key: string,
+		previous: ChildModelsAdministration<Model>,
+		members: ModelAdministration[],
+		undo?: (() => void)[]
+	): void {
+		if (
+			debugEnabled ||
+			!this._cleanOwnDescriptors ||
+			this._childArrays?.get(key) !== previous ||
+			previous.getMemberAdms() !== members ||
+			this.getCfgType(key) !== CommonCfgTypes.child
+		) {
 			this.assignSnapshotField(
 				key,
-				Array.isArray(prepareValue)
-					? prepareValue.map((makeChild) => makeChild())
-					: (prepareValue?.() ?? null),
-				plan.undo
-			)
+				members.map((adm) => adm.proxy),
+				undo
+			);
+			return;
+		}
+		this.assertUsable();
+		previous.assertMutable();
+		for (const adm of members) adm.assertUsable();
+		if (!this.canWriteManagedField(key))
+			throw new TypeError(`r-state-tree: cannot write child field '${key}'`);
+		const next = registerAdministration(
+			new ChildModelsAdministration<Model>([])
 		);
+		next.copyMembersFrom(members);
+		if (!this.write(key, next.proxy))
+			throw new TypeError(`r-state-tree: cannot write child field '${key}'`);
+		this.updateChildSlot(key, next.proxy);
+		if (undo)
+			undo.push(() => {
+				this.proxy[key] = previous.proxy;
+			});
 	}
 
 	private loadSnapshotField(
@@ -1145,25 +1541,28 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					);
 					break;
 				}
+				const currentValue = this.peekField(key);
 				if (
-					!this.disposed &&
-					isScalarField(value) &&
-					this.getCfgType(key) === undefined
+					(currentValue === null || typeof currentValue !== "object") &&
+					(value === null || typeof value !== "object")
 				) {
-					const desc = this.ownScalarDescriptor(key);
-					if (desc && this.writeOwnScalar(key, value, desc)) {
-						if (undo && !Object.is(desc.value, value)) {
-							const previous = desc.value;
+					if (
+						!debugEnabled &&
+						!this.disposed &&
+						!this.hasAnyObservers() &&
+						!this.hasExplicitObservable(key) &&
+						typeof currentValue !== "function" &&
+						typeof value !== "function" &&
+						(this._cleanOwnDescriptors ||
+							Object.getOwnPropertyDescriptor(this.source, key)?.writable)
+					) {
+						if (currentValue !== value) this.source[key] = value;
+						if (undo && !Object.is(currentValue, value))
 							undo.push(() => {
-								this.proxy[key] = previous;
+								this.proxy[key] = currentValue;
 							});
-						}
 						break;
 					}
-				}
-				const currentValue = this.peekField(key);
-				// A scalar replacing a scalar needs no shape hydration or input copy.
-				if (isScalarField(currentValue) && isScalarField(value)) {
 					this.assignSnapshotField(key, value, undo, currentValue);
 					break;
 				}
@@ -1175,7 +1574,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				);
 				this.assignSnapshotField(key, hydratedValue, undo, currentValue);
 				if (changeTracker.changed && Object.is(currentValue, hydratedValue)) {
-					this.atom.reportChanged();
+					this.reportChanged();
 				}
 				break;
 			}
@@ -1211,31 +1610,62 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				if (
 					!undo &&
 					!clearId &&
+					!debugEnabled &&
 					!this.disposed &&
-					(typeof value === "string" || typeof value === "number") &&
-					this.getCfgType(key) === ModelCfgTypes.id &&
-					this.writeDetachedId(key, value)
-				)
-					break;
+					!this._parent &&
+					!this.hasAnyObservers() &&
+					(typeof value === "string" || typeof value === "number")
+				) {
+					if (this._modelId !== value) {
+						if (
+							!this._hasCustomOwnDescriptor &&
+							Object.prototype.hasOwnProperty.call(this.source, key)
+						) {
+							this._modelId = value;
+							this.source[key] = value;
+							break;
+						}
+						const own = Object.getOwnPropertyDescriptor(this.source, key);
+						if (own && "value" in own && own.writable) {
+							this._modelId = value;
+							this.source[key] = value;
+							break;
+						}
+					} else {
+						break;
+					}
+				}
 				if (undo) {
 					const previous = this.peekField(key);
-					const previousId = getIdentifier(this.proxy);
-					undo.push(() => {
-						// Public writes still cannot clear an established ID.
-						setIdentifier(this, previousId);
-						this.write(key, previous);
-					});
+					const previousId = this._modelId;
+					if (
+						Object.is(previous, value) &&
+						Object.is(previousId, value) &&
+						!debugEnabled &&
+						!this.disposed &&
+						!this._hasCustomOwnDescriptor &&
+						(typeof value === "string" || typeof value === "number")
+					) {
+						break;
+					}
+					if (!Object.is(previous, value) || !Object.is(previousId, value)) {
+						undo.push(() => {
+							// Public writes still cannot clear an established ID.
+							setIdentifierAdm(this, previousId);
+							this.write(key, previous);
+						});
+					}
 				}
 				if (
 					clearId &&
 					value === undefined &&
 					clearId.key === key &&
-					Object.is(clearId.id, getIdentifier(this.proxy))
+					Object.is(clearId.id, this._modelId)
 				) {
 					this.assertUsable();
 					if (!this.canWriteManagedField(key))
 						throw new TypeError(`r-state-tree: cannot write id field '${key}'`);
-					setIdentifier(this, undefined);
+					setIdentifierAdm(this, undefined);
 					this.write(key, undefined);
 				} else {
 					this.proxy[key] = value;
@@ -1245,6 +1675,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	getSnapshot(): Snapshot<any> {
+		if (this._constructing) this._constructing = false;
 		if (!this.computedSnapshot) {
 			this.computedSnapshot = createComputed(() => {
 				const snapshot = this.toJSON();
