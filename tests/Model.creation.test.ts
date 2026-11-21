@@ -1,5 +1,8 @@
+import { computed as preactComputed } from "@preact/signals-core";
 import {
 	Model,
+	child,
+	findModelById,
 	id,
 	transient,
 	toSnapshot,
@@ -11,6 +14,7 @@ import {
 	observable,
 	signal,
 } from "../src/index";
+import { getAdministration } from "../src/observables/internal/lookup";
 
 test("can create a model", () => {
 	class M extends Model {}
@@ -284,5 +288,77 @@ describe("implicit Model snapshot fields", () => {
 
 		// Should NOT throw - values are plain objects
 		expect(() => structuredClone(m.data)).not.toThrow();
+	});
+
+	test("housekeeping reads during creation skip value nodes while keeping lazy Preact tracking", () => {
+		class Doc extends Model {
+			@id id = "";
+			title = "";
+			value = 0;
+		}
+		class Docs extends Model {
+			@child(Doc) items = observable<Doc[]>([]);
+		}
+
+		const created = Docs.create({
+			items: [
+				{ id: "a", title: "A", value: 1 },
+				{ id: "b", title: "B", value: 2 },
+			],
+		});
+		try {
+			const rootAdm = getAdministration(created);
+			expect([...rootAdm.valuesMap.keys()]).toEqual([]);
+			const itemsAdm = getAdministration(created.items);
+			expect([...itemsAdm.valuesMap.keys()]).toEqual([]);
+			const first = created.items[0];
+			const firstAdm = getAdministration(first);
+			expect([...firstAdm.valuesMap.keys()]).toEqual([]);
+
+			// Lazy raw Preact computeds still track fields, child arrays, parent, and ID lookup.
+			const lazyTitle = preactComputed(() => first.title);
+			const lazyLookup = preactComputed(
+				() => findModelById(created, Doc, "b")?.value
+			);
+			const lazyParent = preactComputed(() => first.parent);
+			expect(lazyTitle.value).toBe("A");
+			expect(lazyLookup.value).toBe(2);
+			expect(lazyParent.value).toBe(created);
+
+			applySnapshot(created, {
+				items: [
+					{ id: "a", title: "A2", value: 10 },
+					{ id: "b", title: "B", value: 20 },
+				],
+			});
+			expect(lazyTitle.value).toBe("A2");
+			expect(lazyLookup.value).toBe(20);
+
+			created.items.splice(0, 1);
+			expect(lazyParent.value).toBeNull();
+		} finally {
+			created[Symbol.dispose]();
+		}
+	});
+
+	test("snapshot field validation preserves own accessor reads with proxy receiver", () => {
+		let seenThis: unknown;
+		class WithGetter extends Model {
+			label = "ok";
+			constructor() {
+				super();
+				Object.defineProperty(this, "computedOwn", {
+					enumerable: true,
+					configurable: true,
+					get() {
+						seenThis = this;
+						return new Map();
+					},
+				});
+			}
+		}
+
+		expect(() => WithGetter.create()).toThrow(/snapshots do not support Map/);
+		expect(isObservable(seenThis)).toBe(true);
 	});
 });

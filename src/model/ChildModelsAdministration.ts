@@ -130,6 +130,15 @@ export class ChildModelsAdministration<
 		for (const item of addedSet) this.members.add(item);
 	}
 
+	peekItems(): T[] {
+		const length = this.source.length;
+		const items = new Array<T>(length);
+		for (let i = 0; i < length; i++) {
+			items[i] = this._getEffectiveValue(i) as T;
+		}
+		return items;
+	}
+
 	setArrayLength(): never {
 		throw new TypeError(
 			"r-state-tree: child array length is read-only; use splice() to remove children"
@@ -144,7 +153,7 @@ export class ChildModelsAdministration<
 			if (index === this.source.length) {
 				this.spliceNormalized(index, 0, [newValue]);
 			} else if (getSource(newValue) !== this.source[index]) {
-				this.update([newValue], [this.proxy[index]], () => {
+				this.update([newValue], [this._getEffectiveValue(index) as T], () => {
 					if (!super.set(index, newValue))
 						throw new TypeError("r-state-tree: cannot write child array index");
 				});
@@ -177,7 +186,8 @@ export class ChildModelsAdministration<
 		added: T[]
 	): T[] {
 		const removed: T[] = [];
-		for (let i = 0; i < deleteCount; i++) removed.push(this.proxy[index + i]);
+		for (let i = 0; i < deleteCount; i++)
+			removed.push(this._getEffectiveValue(index + i) as T);
 		if (deleteCount || added.length) {
 			this.update(added, removed, () =>
 				super.spliceWithArray(index, deleteCount, added)

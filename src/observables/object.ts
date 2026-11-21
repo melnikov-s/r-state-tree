@@ -1,4 +1,4 @@
-import { batch, createAtom, createComputed } from "./preact.js";
+import { batch, createAtom, createComputed, untracked } from "./preact.js";
 import type { AtomNode, ComputedNode } from "./preact.js";
 import {
 	getSource,
@@ -227,6 +227,33 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		const value = Reflect.get(this.source, key, receiver);
 		this.valuesMap.reportObserved(key, value);
 
+		return this.wrapReadValue(key, type, value);
+	}
+
+	/** Read a property with the same wrapping/accessor semantics as `read`, without creating dependency nodes. */
+	peek(key: keyof T, receiver: any = this.proxy): unknown {
+		const type = this.getType(key);
+
+		if (type === "computed") {
+			if (receiver === this.proxy) {
+				return untracked(() => this.callComputed(key));
+			}
+			return Reflect.get(this.source, key, receiver);
+		}
+
+		if (type === null) {
+			return Reflect.get(this.source, key, receiver);
+		}
+
+		const value = Reflect.get(this.source, key, receiver);
+		return this.wrapReadValue(key, type, value);
+	}
+
+	private wrapReadValue(
+		key: keyof T,
+		type: "action" | "observable",
+		value: unknown
+	): unknown {
 		if (type === "observable") {
 			// Strict Shallow: Only re-wrap if explicitly tracked or if source contains a proxy
 			if (

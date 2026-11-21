@@ -359,7 +359,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 		return this._getEffectiveValue(index);
 	}
 
-	private _getEffectiveValue(index: number): T | undefined {
+	protected _getEffectiveValue(index: number): T | undefined {
 		const value = this.source[index];
 		if (value && typeof value === "object" && !Object.isFrozen(value)) {
 			// Parent-based ownership: return proxy if this source was assigned as observable

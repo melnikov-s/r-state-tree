@@ -1,6 +1,7 @@
 import { AtomMap } from "../observables/internal/NodeMap.js";
 import type { IdType } from "../types.js";
 import type Model from "./Model.js";
+import { getModelAdm } from "./ModelAdministration.js";
 
 export type ModelConstructor<T extends Model = Model> = new (
 	...args: any[]
@@ -35,6 +36,10 @@ const idMap: WeakMap<Model, IdType> = new WeakMap();
 
 function getModelType(model: Model): ModelConstructor {
 	return Object.getPrototypeOf(model).constructor as ModelConstructor;
+}
+
+function peekParent(model: Model): Model | null {
+	return getModelAdm(model).peekParent()?.proxy ?? null;
 }
 
 function entriesFor(model: Model): Array<[ModelConstructor, IdType, Model]> {
@@ -81,11 +86,11 @@ export function setIdentifier(model: Model, id: IdType | undefined): void {
 	if (previousId === id) return;
 	const Type = getModelType(model);
 	const ancestors: Model[] = [];
-	let node = model.parent;
+	let node = peekParent(model);
 	while (node) {
 		if (id !== undefined) assertAvailable(node, [[Type, id, model]]);
 		ancestors.push(node);
-		node = node.parent;
+		node = peekParent(node);
 	}
 	for (const ancestor of ancestors) {
 		const ids = bucket(ancestor, Type);
@@ -125,9 +130,15 @@ export function validateModelAttachments(
 	added: Model[],
 	removed: Model[]
 ): void {
-	const released = new Set(
-		removed.flatMap(entriesFor).map(([, , model]) => model)
-	);
+	if (!added.length) return;
+	const released = removed.length
+		? new Set(removed.flatMap(entriesFor).map(([, , model]) => model))
+		: undefined;
+	const ancestors: Array<Map<ModelConstructor, IdBucket>> = [];
+	for (let node: Model | null = parent; node; node = peekParent(node)) {
+		const map = attachedIdMap.get(node);
+		if (map) ancestors.push(map);
+	}
 	const incoming = new Map<ModelConstructor, Map<IdType, Model>>();
 	for (const model of added) {
 		for (const [Type, id, value] of entriesFor(model)) {
@@ -137,15 +148,13 @@ export function validateModelAttachments(
 					`r-state-tree: id: ${id} is already assigned to another model`
 				);
 			}
-			let node: Model | null = parent;
-			while (node) {
-				const existing = attachedIdMap.get(node)?.get(Type)?.get(id);
-				if (existing && existing !== value && !released.has(existing)) {
+			for (const ancestor of ancestors) {
+				const existing = ancestor.get(Type)?.get(id);
+				if (existing && existing !== value && !released?.has(existing)) {
 					throw new Error(
 						`r-state-tree: id: ${id} is already assigned to another model`
 					);
 				}
-				node = node.parent;
 			}
 			let ids = incoming.get(Type);
 			if (!ids) incoming.set(Type, (ids = new Map()));
@@ -158,11 +167,11 @@ export function onModelAttached(model: Model): void {
 	const entries = entriesFor(model);
 	if (!entries.length) return;
 	const ancestors: Model[] = [];
-	let node = model.parent;
+	let node = peekParent(model);
 	while (node) {
 		assertAvailable(node, entries);
 		ancestors.push(node);
-		node = node.parent;
+		node = peekParent(node);
 	}
 	for (const ancestor of ancestors) {
 		for (const [Type, id, value] of entries)
@@ -172,13 +181,14 @@ export function onModelAttached(model: Model): void {
 
 export function onModelDetached(model: Model): void {
 	const entries = entriesFor(model);
-	let node = model.parent;
+	if (!entries.length) return;
+	let node = peekParent(model);
 	while (node) {
 		const map = attachedIdMap.get(node);
 		for (const [Type, id, value] of entries) {
 			const ids = map?.get(Type);
 			if (ids?.get(id) === value) ids.delete(id);
 		}
-		node = node.parent;
+		node = peekParent(node);
 	}
 }
