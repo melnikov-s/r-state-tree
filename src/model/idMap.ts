@@ -110,6 +110,15 @@ export function getModelById<T extends Model>(
 	return bucket(root, Type).read(id) as T | undefined;
 }
 
+/** Snapshot planning is already untracked and need not allocate read dependencies. */
+export function peekModelById<T extends Model>(
+	root: Model,
+	Type: ModelConstructor<T>,
+	id: IdType
+): T | undefined {
+	return attachedIdMap.get(root)?.get(Type)?.get(id) as T | undefined;
+}
+
 /** Validate only the changed subtrees, allowing identifiers released by removals. */
 export function validateModelAttachments(
 	parent: Model,

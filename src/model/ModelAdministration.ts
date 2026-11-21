@@ -24,6 +24,7 @@ import { ModelCfgTypes, CommonCfgTypes } from "../types.js";
 import {
 	getIdentifier,
 	getModelById,
+	peekModelById,
 	onModelAttached,
 	onModelDetached,
 	validateModelAttachments,
@@ -287,14 +288,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	private parentAtom: AtomNode = createAtom();
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<readonly Model[]>>;
-	activeModels: Set<PropertyKey> = new Set();
-	private childArrays = new Map<
-		PropertyKey,
-		ChildModelsAdministration<Model>
-	>();
+	private activeModels?: Set<PropertyKey>;
+	private childArrays?: Map<PropertyKey, ChildModelsAdministration<Model>>;
 	private writeInProgress: Set<PropertyKey> = new Set();
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
-	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
+	private snapshotMap?: Map<string, ComputedNode<unknown[]>>;
 	private disposed = false;
 	private snapshotIdUndos?: WeakMap<object, SnapshotIdUndo>;
 	parentName: PropertyKey | null = null;
@@ -491,11 +489,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		return batch(() => {
 			if (!this.changeModels(name, children(value), children(current), commit))
 				return false;
-			const previousArray = this.childArrays.get(name);
+			const previousArray = this.childArrays?.get(name);
 			if (previousArray) previousArray.change = undefined;
-			this.childArrays.delete(name);
-			if (value) this.activeModels.add(name);
-			else this.activeModels.delete(name);
+			this.childArrays?.delete(name);
+			if (value) (this.activeModels ??= new Set()).add(name);
+			else this.activeModels?.delete(name);
 			if (Array.isArray(value)) {
 				const adm = getAdministration(
 					value
@@ -503,7 +501,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				adm.change = (added, removed, commit) => {
 					this.changeModels(name, added, removed, commit);
 				};
-				this.childArrays.set(name, adm);
+				(this.childArrays ??= new Map()).set(name, adm);
 			}
 			return true;
 		});
@@ -664,7 +662,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		this.disposed = true;
 		batch(() => {
 			try {
-				for (const name of this.activeModels) {
+				for (const name of this.activeModels ?? []) {
 					const child = this.source[name] as Model | Model[] | undefined;
 					if (Array.isArray(child)) {
 						for (let i = 0; i < child.length; i++) {
@@ -676,9 +674,11 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				}
 				if (this._parent) this.detach();
 			} finally {
-				for (const array of this.childArrays.values()) array.dispose();
-				this.childArrays.clear();
-				this.activeModels.clear();
+				if (this.childArrays) {
+					for (const array of this.childArrays.values()) array.dispose();
+					this.childArrays.clear();
+				}
+				this.activeModels?.clear();
 			}
 		});
 	}
@@ -721,8 +721,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				case CommonCfgTypes.child:
 					const child: Model | Model[] | undefined = this.proxy[key];
 					if (Array.isArray(child)) {
-						if (!this.snapshotMap.has(key)) {
-							this.snapshotMap.set(
+						const snapshotMap = (this.snapshotMap ??= new Map());
+						if (!snapshotMap.has(key)) {
+							snapshotMap.set(
 								key,
 								createComputed(() => {
 									const value = this.proxy[key];
@@ -749,7 +750,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 								})
 							);
 						}
-						json[key] = this.snapshotMap.get(key)!.get();
+						json[key] = snapshotMap.get(key)!.get();
 						break;
 					}
 					json[key] = child ? getModelAdm(child).getSnapshot() : null;
@@ -916,7 +917,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 					);
 				}
 				snapshotIds.add(id);
-				match = getModelById(this.root.proxy, Ctor, id);
+				match = peekModelById(this.root.proxy, Ctor, id);
 				if (match) {
 					const adm = getModelAdm(match);
 					if (adm.parent !== this || adm.parentName !== key) match = undefined;
