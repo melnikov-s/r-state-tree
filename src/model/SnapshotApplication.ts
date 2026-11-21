@@ -171,15 +171,9 @@ export class SnapshotApplication {
 		const config = this.access.configuration(model);
 		const clearId = this.access.snapshotIdUndo(model, snapshot);
 		if (!configHasChildren(config)) {
-			// Leaf hydration needs no release plan. Capture inputs before writing:
-			// a snapshot getter can depend on a field we are about to replace.
-			const keys = Object.keys(snapshot);
-			const fields = new Array<unknown>(keys.length * 3);
-			for (let i = 0; i < keys.length; i++) {
-				const key = keys[i];
-				fields[3 * i] = key;
-				fields[3 * i + 1] = snapshot[key];
-				fields[3 * i + 2] = getConfigType(config[key]);
+			const fields: unknown[] = [];
+			for (const key of Object.keys(snapshot)) {
+				fields.push(key, snapshot[key], getConfigType(config[key]));
 			}
 			this.writeSnapshotFields(model, fields, undo, clearId);
 			return;
