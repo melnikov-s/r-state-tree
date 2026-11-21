@@ -18,6 +18,7 @@ export class ChildModelsAdministration<
 > extends ArrayAdministration<T> {
 	private members = new Set<T>();
 	private mutating = false;
+	private disposed = false;
 	// The owner validates before commit, then publishes ownership in the same batch.
 	change?: (added: T[], removed: T[], commit: () => void) => void;
 
@@ -77,7 +78,14 @@ export class ChildModelsAdministration<
 		},
 	});
 
+	dispose(): void {
+		this.disposed = true;
+		this.change = undefined;
+	}
+
 	assertMutable(): void {
+		if (this.disposed)
+			throw new Error("r-state-tree: cannot use a disposed model");
 		if (this.mutating)
 			throw new Error("r-state-tree: reentrant child array mutation");
 	}

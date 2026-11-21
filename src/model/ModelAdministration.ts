@@ -299,7 +299,10 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	referencedAtoms!: Map<PropertyKey, AtomNode>;
 	referencedModels!: Map<PropertyKey, ComputedNode<readonly Model[]>>;
 	activeModels: Set<PropertyKey> = new Set();
-	private modelsTraceUnsub: Map<PropertyKey, () => void> = new Map();
+	private childArrays = new Map<
+		PropertyKey,
+		ChildModelsAdministration<Model>
+	>();
 	private writeInProgress: Set<PropertyKey> = new Set();
 	private computedSnapshot: ComputedNode<Snapshot<Model>> | undefined;
 	private snapshotMap: Map<string, ComputedNode<unknown[]>> = new Map();
@@ -483,8 +486,9 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		return batch(() => {
 			if (!this.changeModels(name, children(value), children(current), commit))
 				return false;
-			this.modelsTraceUnsub.get(name)?.();
-			this.modelsTraceUnsub.delete(name);
+			const previousArray = this.childArrays.get(name);
+			if (previousArray) previousArray.change = undefined;
+			this.childArrays.delete(name);
 			if (value) this.activeModels.add(name);
 			else this.activeModels.delete(name);
 			if (Array.isArray(value)) {
@@ -494,9 +498,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				adm.change = (added, removed, commit) => {
 					this.changeModels(name, added, removed, commit);
 				};
-				this.modelsTraceUnsub.set(name, () => {
-					adm.change = undefined;
-				});
+				this.childArrays.set(name, adm);
 			}
 			return true;
 		});
@@ -647,27 +649,33 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	dispose(internal = false): void {
 		if (this.disposed) return;
-		if (!internal && this.parent) {
+		if (!internal && this._parent) {
 			throw new Error(
 				"r-state-tree: cannot directly dispose an attached child model"
 			);
 		}
-		batch(() => {
-			this.activeModels.forEach((name) => {
-				const child = this.proxy[name] as Model | Model[] | null | undefined;
-				if (Array.isArray(child)) {
-					child.forEach((model) => getModelAdm(model).dispose(true));
-				} else if (child) {
-					getModelAdm(child).dispose(true);
-				}
-			});
-			if (this.parent) onModelDetached(this.proxy);
-			this.parent = null;
-			this.parentName = null;
-		});
+		// Detachment observers can reenter or throw when the batch flushes.
+		// Commit terminal state and release ownership hooks before that happens.
 		this.disposed = true;
-		this.modelsTraceUnsub.forEach((dispose) => dispose());
-		this.modelsTraceUnsub.clear();
+		batch(() => {
+			try {
+				for (const name of this.activeModels) {
+					const child = this.source[name] as Model | Model[] | undefined;
+					if (Array.isArray(child)) {
+						for (let i = 0; i < child.length; i++) {
+							getModelAdm(child[i]).dispose(true);
+						}
+					} else if (child) {
+						getModelAdm(child).dispose(true);
+					}
+				}
+				if (this._parent) this.detach();
+			} finally {
+				for (const array of this.childArrays.values()) array.dispose();
+				this.childArrays.clear();
+				this.activeModels.clear();
+			}
+		});
 	}
 
 	private toJSON(): Snapshot<Model> {

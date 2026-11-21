@@ -638,7 +638,9 @@ const stop = reaction(
 );
 ```
 
-The external caller owns `stop`. Detachment is reversible. `model[Symbol.dispose]()` is terminal and recursively disposes owned child models, but never model refs.
+The external caller owns `stop`. Detachment is reversible. Only a root model can be disposed directly. `model[Symbol.dispose]()` is terminal and recursively disposes owned child models, but never follows model refs.
+
+Disposal clears the owned children's parent links and identifier lookups before notifying observers. Assignments to disposed models and changes to their owned child collections are rejected, including from detachment observers. Repeated or reentrant disposal is a no-op. An observer error can propagate from the batch that notifies it, but does not undo disposal.
 
 ### Model configuration
 
