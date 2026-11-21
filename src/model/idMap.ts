@@ -1,8 +1,25 @@
+import { getConfigurationForCtor } from "../configuration.js";
 import { AtomMap } from "../observables/internal/NodeMap.js";
 import { getAdministration } from "../observables/internal/lookup.js";
-import type { IdType } from "../types.js";
+import { ModelCfgTypes, type IdType } from "../types.js";
 import type Model from "./Model.js";
 import type { ModelAdministration } from "./ModelAdministration.js";
+
+const ctorIdKeyMap = new WeakMap<typeof Model, string | null>();
+
+export function getModelIdKey(Ctor: typeof Model): string | null {
+	if (!ctorIdKeyMap.has(Ctor)) {
+		const config = getConfigurationForCtor(Ctor as unknown as Function);
+		const key =
+			Object.keys(config).find(
+				(prop) => (config as any)[prop]?.type === ModelCfgTypes.id
+			) ?? null;
+
+		ctorIdKeyMap.set(Ctor, key);
+	}
+
+	return ctorIdKeyMap.get(Ctor) ?? null;
+}
 
 export type ModelConstructor<T extends Model = Model> = new (
 	...args: any[]

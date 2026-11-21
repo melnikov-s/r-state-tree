@@ -24,6 +24,7 @@ import type {
 import { ModelCfgTypes, CommonCfgTypes } from "../types.js";
 import {
 	getIdentifier,
+	getModelIdKey,
 	getModelByIdAdm,
 	onModelsAttachedValidated,
 	onModelDetachedAdm,
@@ -40,8 +41,11 @@ import {
 	getConfigurationForCtor,
 } from "../configuration.js";
 import { ChildModelsAdministration } from "./ChildModelsAdministration.js";
+import {
+	serializeModelSnapshot,
+	type SnapshotReads,
+} from "./serializeModelSnapshot.js";
 
-const ctorIdKeyMap: WeakMap<typeof Model, string | null> = new WeakMap();
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
 const configHasChildMap: WeakMap<object, boolean> = new WeakMap();
 const configHasModelRefMap: WeakMap<object, boolean> = new WeakMap();
@@ -124,28 +128,6 @@ export function getConfigurationFromSnapshot(
 
 export function getModelAdm<T extends Model>(model: T): ModelAdministration {
 	return getAdministration(model)! as unknown as ModelAdministration;
-}
-
-function getIdKey(Ctor: typeof Model): string | null {
-	if (!ctorIdKeyMap.has(Ctor)) {
-		const config = getConfigurationForCtor(Ctor as unknown as Function);
-		const key =
-			Object.keys(config).find(
-				(prop) => (config as any)[prop]?.type === ModelCfgTypes.id
-			) ?? null;
-
-		ctorIdKeyMap.set(Ctor, key);
-	}
-
-	return ctorIdKeyMap.get(Ctor) ?? null;
-}
-
-function getModelRefSnapshotFromId(
-	Ctor: typeof Model,
-	id: IdType
-): RefSnapshot | null {
-	const idKey = getIdKey(Ctor);
-	return idKey ? { [idKey]: id } : null;
 }
 
 function getSnapshotRefId(snapshot: RefSnapshot): IdType {
@@ -547,7 +529,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 
 	/** Only the original undo payload on the recorded Model can restore its unset ID. */
 	recordSnapshotIdUndo(undo: object, next: object): void {
-		const key = getIdKey(Object.getPrototypeOf(this.proxy).constructor);
+		const key = getModelIdKey(Object.getPrototypeOf(this.proxy).constructor);
 		if (
 			key !== null &&
 			Object.hasOwn(undo, key) &&
@@ -932,155 +914,81 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		});
 	}
 
-	private writeSnapshotKey(
-		json: Record<string, unknown>,
-		config: ModelConfiguration<any>,
-		source: any,
-		key: string,
-		isOwn: boolean
-	): void {
-		switch (getConfigType(config[key])) {
-			case ModelCfgTypes.transient:
-				break;
-			case ModelCfgTypes.id: {
-				const idVal = this.read(key);
-				json[key] =
-					typeof idVal === "string" ||
-					typeof idVal === "number" ||
-					idVal === undefined ||
-					idVal === null
-						? idVal
-						: clone(getSource(idVal), key);
-				break;
-			}
-			case ModelCfgTypes.modelRef: {
-				this.getReferencedAtom(key).reportObserved();
-				const Type = this.getRequiredModelRefType(key);
-				const reference = source[key] as IdType | IdType[] | null | undefined;
-				if (Array.isArray(reference)) {
-					json[key] = clone(
-						reference.map((id) => getModelRefSnapshotFromId(Type, id)),
-						key
+	private static readonly snapshotReads: SnapshotReads = {
+		observeReference(model, key) {
+			model.getReferencedAtom(key).reportObserved();
+			return model.getRequiredModelRefType(key);
+		},
+		childArraySnapshot(model, key) {
+			return model.getChildArraySnapshot(key);
+		},
+	};
+
+	private getChildArraySnapshot(key: string): unknown[] {
+		const snapshotMap = (this._snapshotMap ??= new Map());
+		let childComputed = snapshotMap.get(key);
+		if (!childComputed) {
+			let chunkSource: ModelAdministration[] | undefined;
+			let chunkComputeds: ComputedNode<unknown[]>[] | undefined;
+			const CHUNK_SIZE = 16;
+			const CHUNK_THRESHOLD = 64;
+			childComputed = createComputed(() => {
+				const value = this.read(key);
+				if (!Array.isArray(value)) return [];
+				const array = getAdministration(value);
+				if (!(array instanceof ChildModelsAdministration)) {
+					return getSource(
+						value.map((model: Model) => getModelAdm(model).getSnapshot())
 					);
-					break;
 				}
-				json[key] =
-					reference == null
-						? null
-						: clone(getModelRefSnapshotFromId(Type, reference), key);
-				break;
-			}
-			case CommonCfgTypes.child: {
-				const child = this.read(key) as Model | Model[] | undefined;
-				if (Array.isArray(child)) {
-					const snapshotMap = (this._snapshotMap ??= new Map());
-					let childComputed = snapshotMap.get(key);
-					if (!childComputed) {
-						let chunkSource: ModelAdministration[] | undefined;
-						let chunkComputeds: ComputedNode<unknown[]>[] | undefined;
-						const CHUNK_SIZE = 16;
-						const CHUNK_THRESHOLD = 64;
-						childComputed = createComputed(() => {
-							const value = this.read(key);
-							if (!Array.isArray(value)) return [];
-							const array = getAdministration(value);
-							if (!(array instanceof ChildModelsAdministration)) {
-								return getSource(
-									value.map((model: Model) => getModelAdm(model).getSnapshot())
-								);
-							}
-							// The child array reports every structural write to this
-							// dependency; only the individual Model snapshots need
-							// tracking, not each proxy index read.
-							array.reportObserved();
-							array.atom.reportObserved(); // also track explicit reportChanged()
-							const adms = array.getMemberAdms();
-							const len = adms.length;
-							if (len < CHUNK_THRESHOLD) {
-								chunkSource = undefined;
-								chunkComputeds = undefined;
-								const snapshots = new Array(len);
-								for (let i = 0; i < len; i++) {
-									snapshots[i] = adms[i].getSnapshot();
-								}
-								return snapshots;
-							}
-							// O(sqrt(N)) incremental snapshot updates for large child arrays:
-							// a single leaf edit only re-evaluates its 16-item chunk.
-							if (chunkSource !== adms || !chunkComputeds) {
-								chunkSource = adms;
-								const chunkCount = Math.ceil(len / CHUNK_SIZE);
-								chunkComputeds = new Array(chunkCount);
-								for (let c = 0; c < chunkCount; c++) {
-									const start = c * CHUNK_SIZE;
-									const end = Math.min(start + CHUNK_SIZE, len);
-									const sliceAdms = adms;
-									chunkComputeds[c] = createComputed(() => {
-										const out = new Array(end - start);
-										for (let i = start; i < end; i++) {
-											out[i - start] = sliceAdms[i].getSnapshot();
-										}
-										return out;
-									});
-								}
-							}
-							const snapshots = new Array(len);
-							let offset = 0;
-							for (let c = 0; c < chunkComputeds.length; c++) {
-								const chunk = chunkComputeds[c].get();
-								for (let j = 0; j < chunk.length; j++) {
-									snapshots[offset++] = chunk[j];
-								}
-							}
-							return snapshots;
-						});
-						snapshotMap.set(key, childComputed);
+				// The child array reports every structural write to this
+				// dependency; only the individual Model snapshots need
+				// tracking, not each proxy index read.
+				array.reportObserved();
+				array.atom.reportObserved(); // also track explicit reportChanged()
+				const adms = array.getMemberAdms();
+				const len = adms.length;
+				if (len < CHUNK_THRESHOLD) {
+					chunkSource = undefined;
+					chunkComputeds = undefined;
+					const snapshots = new Array(len);
+					for (let i = 0; i < len; i++) {
+						snapshots[i] = adms[i].getSnapshot();
 					}
-					json[key] = childComputed.get();
-					break;
+					return snapshots;
 				}
-				json[key] = child ? getModelAdm(child).getSnapshot() : null;
-				break;
-			}
-			default:
-				if (isOwn) {
-					const val = this.read(key);
-					json[key] =
-						val === null ||
-						val === undefined ||
-						typeof val === "string" ||
-						typeof val === "number" ||
-						typeof val === "boolean"
-							? val
-							: clone(val, key);
+				// O(sqrt(N)) incremental snapshot updates for large child arrays:
+				// a single leaf edit only re-evaluates its 16-item chunk.
+				if (chunkSource !== adms || !chunkComputeds) {
+					chunkSource = adms;
+					const chunkCount = Math.ceil(len / CHUNK_SIZE);
+					chunkComputeds = new Array(chunkCount);
+					for (let c = 0; c < chunkCount; c++) {
+						const start = c * CHUNK_SIZE;
+						const end = Math.min(start + CHUNK_SIZE, len);
+						const sliceAdms = adms;
+						chunkComputeds[c] = createComputed(() => {
+							const out = new Array(end - start);
+							for (let i = start; i < end; i++) {
+								out[i - start] = sliceAdms[i].getSnapshot();
+							}
+							return out;
+						});
+					}
 				}
-				break;
+				const snapshots = new Array(len);
+				let offset = 0;
+				for (let c = 0; c < chunkComputeds.length; c++) {
+					const chunk = chunkComputeds[c].get();
+					for (let j = 0; j < chunk.length; j++) {
+						snapshots[offset++] = chunk[j];
+					}
+				}
+				return snapshots;
+			});
+			snapshotMap.set(key, childComputed);
 		}
-	}
-
-	private toJSON(): Snapshot<Model> {
-		// A field added after this read was not tracked as a value. Observe the
-		// key set as well, including when there are no existing snapshot fields.
-		this.keysAtom.reportObserved();
-		const source = this.source;
-		const config = this.configuration;
-		const json: Record<string, unknown> = {};
-
-		for (const key in source) {
-			if (Object.prototype.hasOwnProperty.call(source, key)) {
-				this.writeSnapshotKey(json, config, source, key, true);
-			}
-		}
-		for (const key in config) {
-			if (
-				Object.prototype.hasOwnProperty.call(config, key) &&
-				!Object.prototype.hasOwnProperty.call(source, key)
-			) {
-				this.writeSnapshotKey(json, config, source, key, false);
-			}
-		}
-
-		return json as Snapshot<any>;
+		return childComputed.get();
 	}
 
 	validateSnapshotFields(): void {
@@ -1268,7 +1176,7 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		let snapshotIds: Set<IdType> | undefined;
 		const Ctor = this.getCfgChildType(key) as typeof Model | undefined;
 		const inArray = Array.isArray(value);
-		const idKey = Ctor ? getIdKey(Ctor) : null;
+		const idKey = Ctor ? getModelIdKey(Ctor) : null;
 		const rawRootAdm = this.rawRoot;
 		const idBucketModels = Ctor
 			? rawRootAdm._lastIdType === Ctor
@@ -1678,7 +1586,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		if (this._constructing) this._constructing = false;
 		if (!this.computedSnapshot) {
 			this.computedSnapshot = createComputed(() => {
-				const snapshot = this.toJSON();
+				// Changes to the key set matter even when there are no existing fields.
+				this.keysAtom.reportObserved();
+				const snapshot = serializeModelSnapshot(
+					this,
+					this.configuration,
+					ModelAdministration.snapshotReads
+				);
 				configMap.set(snapshot, this.configuration);
 				return snapshot;
 			});
