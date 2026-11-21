@@ -171,7 +171,6 @@ export function createListener(
 ): Listener {
 	let primed = false;
 	let disposeEffect: (() => void) | undefined;
-	let lastvalue!: unknown;
 
 	const listener: Listener = {
 		dispose() {
@@ -195,12 +194,8 @@ export function createListener(
 					return;
 				}
 
-				if (Object.is(lastvalue, value)) {
-					return;
-				}
-
-				lastvalue = value;
-
+				// Let the owner compare against its reconciled value, which may
+				// also have changed through a synchronous read inside a batch.
 				untracked(() => {
 					listener.callback(listener);
 				});

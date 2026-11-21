@@ -173,6 +173,12 @@ class ListStore extends Store {
 - The `@child` getter's framework wrapper reconciles descriptors into realized Stores. Matching keys and compatible Store types preserve instances within that parent's child property, not globally. Unkeyed array children match by position. Removing a child disposes it; reusing its key later creates a new instance.
 - `@child` must decorate a getter. Root descriptors become realized Stores through `mount()`.
 
+After the first successful read of a child getter, reactive changes reconcile it
+without another read. If a single-child getter starts returning `null` or
+`undefined`, the realized child is disposed when updates flush. Inside a batch,
+reading the getter reconciles it immediately; otherwise updates flush at the end
+of the batch.
+
 ```ts
 class ItemsStore extends Store {
 	items = [
