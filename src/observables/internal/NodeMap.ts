@@ -3,6 +3,7 @@ import {
 	createCachedAtom,
 	createCachedSignal,
 	type CachedNode,
+	type CachedNodeOwner,
 } from "./CachedNode.js";
 import { isNonPrimitive } from "./utils.js";
 
@@ -14,10 +15,10 @@ abstract class NodeMap<
 	GraphNode extends AtomNode | SignalNode<unknown> =
 		| AtomNode
 		| SignalNode<unknown>,
-> {
+> implements CachedNodeOwner {
 	private map: Map<unknown, CachedNode<GraphNode>> | undefined;
 	private weakMap: WeakMap<object, CachedNode<GraphNode>> | undefined;
-	private inactive = new Map<unknown, CachedNode<GraphNode>>();
+	private inactive: Map<unknown, CachedNode<GraphNode>> | undefined;
 
 	protected abstract createNode(initialValue?: unknown): CachedNode<GraphNode>;
 
@@ -26,11 +27,21 @@ abstract class NodeMap<
 	}
 
 	private retainInactive(key: unknown, entry: CachedNode<GraphNode>): void {
-		this.inactive.delete(key);
-		this.inactive.set(key, entry);
-		while (this.inactive.size > MAX_INACTIVE_NODES) {
-			const oldestKey = this.inactive.keys().next().value;
+		const inactive = (this.inactive ??= new Map());
+		inactive.delete(key);
+		inactive.set(key, entry);
+		while (inactive.size > MAX_INACTIVE_NODES) {
+			const oldestKey = inactive.keys().next().value;
 			this.delete(oldestKey as K);
+		}
+	}
+
+	onEntryObservedStateChange(key: unknown, observing: boolean): void {
+		if (observing) {
+			this.inactive?.delete(key);
+		} else {
+			// Preserve eager cleanup after the last live subscriber leaves.
+			this.delete(key as K);
 		}
 	}
 
@@ -44,10 +55,11 @@ abstract class NodeMap<
 			this.weakMap?.delete(key);
 		} else {
 			this.map?.delete(key);
-			this.inactive.delete(key);
+			this.inactive?.delete(key);
 		}
-		// Disconnect the lifecycle closure as well: an evicted dependency retained
+		// Disconnect ownership references as well: an evicted dependency retained
 		// by a lazy computed must not retain the entire cache through its callback.
+		entry.setOwner?.(undefined, undefined);
 		entry.onObservedStateChange = undefined;
 		entry.invalidate();
 	}
@@ -68,14 +80,13 @@ abstract class NodeMap<
 				this.map ??= new Map();
 				entry = this.createNode(value);
 				this.map.set(key, entry);
-				entry.onObservedStateChange = (observing) => {
-					if (observing) {
-						this.inactive.delete(key);
-					} else {
-						// Preserve eager cleanup after the last live subscriber leaves.
-						this.delete(key);
-					}
-				};
+				if (entry.setOwner) {
+					entry.setOwner(this, key);
+				} else {
+					entry.onObservedStateChange = (observing) => {
+						this.onEntryObservedStateChange(key, observing);
+					};
+				}
 			}
 			if (!entry.observing) this.retainInactive(key, entry);
 		}

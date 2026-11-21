@@ -6,7 +6,11 @@ import {
 	MAX_INACTIVE_NODES,
 	SignalMap,
 } from "../src/observables/internal/NodeMap";
-import { createCachedSignal } from "../src/observables/internal/CachedNode";
+import {
+	createCachedAtom,
+	createCachedSignal,
+} from "../src/observables/internal/CachedNode";
+import { createObservedAtom, Signal } from "../src/observables/preact";
 
 function churn(nodes: { reportObserved(key: number): void }) {
 	for (let key = 0; key <= MAX_INACTIVE_NODES; key++) {
@@ -335,5 +339,48 @@ describe("computed dependencies across eviction", () => {
 		expect(runs).toBe(2);
 		entry.node!.value = 43;
 		expect(value.value).toBe(43);
+	});
+
+	test("cached nodes and observed atoms expose Signal instances and observed-state transitions", () => {
+		const cachedSig = createCachedSignal(10);
+		const cachedAtom = createCachedAtom();
+		const observed = createObservedAtom();
+		expect(cachedSig.node).toBeInstanceOf(Signal);
+		expect(cachedAtom.node).toBeInstanceOf(Signal);
+		expect(observed.node).toBeInstanceOf(Signal);
+
+		const sigStates: boolean[] = [];
+		const atomStates: boolean[] = [];
+		const obsStates: boolean[] = [];
+		cachedSig.onObservedStateChange = (state) => sigStates.push(state);
+		cachedAtom.onObservedStateChange = (state) => atomStates.push(state);
+		const offObs = observed.onObservedStateChange((state) =>
+			obsStates.push(state)
+		);
+
+		const stop = effect(() => {
+			void cachedSig.node!.value;
+			cachedAtom.reportObserved();
+			observed.reportObserved();
+		});
+		expect(cachedSig.observing).toBe(true);
+		expect(cachedAtom.observing).toBe(true);
+		expect(observed.observing).toBe(true);
+		expect(sigStates).toEqual([true]);
+		expect(atomStates).toEqual([true]);
+		expect(obsStates).toEqual([true]);
+
+		stop();
+		expect(cachedSig.observing).toBe(false);
+		expect(cachedAtom.observing).toBe(false);
+		expect(observed.observing).toBe(false);
+		expect(sigStates).toEqual([true, false]);
+		expect(atomStates).toEqual([true, false]);
+		expect(obsStates).toEqual([true, false]);
+
+		offObs();
+		const stop2 = effect(() => observed.reportObserved());
+		stop2();
+		expect(obsStates).toEqual([true, false]);
 	});
 });

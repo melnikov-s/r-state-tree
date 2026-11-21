@@ -6,7 +6,7 @@ import {
 	effect,
 	untracked,
 } from "@preact/signals-core";
-import type { ReadonlySignal } from "@preact/signals-core";
+import type { ReadonlySignal, SignalOptions } from "@preact/signals-core";
 
 import { computedType } from "../types.js";
 import { retainedChildRead } from "./internal/retainedRead.js";
@@ -56,75 +56,110 @@ export interface ListenerNode {
 	isDisposed: boolean;
 }
 
-export function createObservedAtom() {
-	let value = 0;
-	const callbacks = new Set<(observing: boolean) => void>();
-	let observing = false;
+const observedAtomOptions: SignalOptions<number> = {
+	watched(this: Signal<number>) {
+		(this as ObservedAtom).notifyObservedState(true);
+	},
+	unwatched(this: Signal<number>) {
+		(this as ObservedAtom).notifyObservedState(false);
+	},
+};
 
-	const signal = new Signal(value, {
-		watched() {
-			callbacks.forEach((callback) => callback(true));
-			observing = true;
-		},
-		unwatched() {
-			callbacks.forEach((callback) => callback(false));
-			observing = false;
-		},
-	});
+class ObservedAtom extends Signal<number> implements ObservedAtomNode {
+	private _revision = 0;
+	private _observing = false;
+	private _callbacks: Set<(observing: boolean) => void> | undefined;
 
-	return {
-		node: signal,
-		reportObserved() {
-			return signal.value;
-		},
-		reportChanged() {
-			return (signal.value = ++value);
-		},
-		get observing() {
-			return observing;
-		},
-		onObservedStateChange(callback: (observing: boolean) => void) {
-			callbacks.add(callback);
-			return () => {
-				callbacks.delete(callback);
-			};
-		},
-	};
+	constructor() {
+		super(0, observedAtomOptions);
+	}
+
+	get node(): Signal<unknown> {
+		return this;
+	}
+
+	get observing(): boolean {
+		return this._observing;
+	}
+
+	notifyObservedState(observing: boolean): void {
+		if (this._callbacks) {
+			for (const callback of this._callbacks) {
+				callback(observing);
+			}
+		}
+		this._observing = observing;
+	}
+
+	reportObserved(): void {
+		void super.value;
+	}
+
+	reportChanged(): void {
+		super.value = ++this._revision;
+	}
+
+	onObservedStateChange(callback: (observing: boolean) => void): () => void {
+		const callbacks = (this._callbacks ??= new Set());
+		callbacks.add(callback);
+		return () => {
+			callbacks.delete(callback);
+		};
+	}
+}
+
+class ValueSignal<T> extends Signal<T> implements SignalNode<T> {
+	get node(): Signal<T> {
+		return this;
+	}
+
+	reportChanged(value: T): void {
+		super.value = value;
+	}
+
+	reportObserved(): void {
+		void super.value;
+	}
+
+	get(): T {
+		return super.value;
+	}
+
+	set(value: T): T {
+		return (super.value = value);
+	}
+}
+
+class Atom extends Signal<number> implements AtomNode {
+	private _revision = 0;
+
+	constructor() {
+		super(0);
+	}
+
+	get node(): Signal<unknown> {
+		return this;
+	}
+
+	reportChanged(): void {
+		super.value = ++this._revision;
+	}
+
+	reportObserved(): void {
+		void super.value;
+	}
+}
+
+export function createObservedAtom(): ObservedAtomNode {
+	return new ObservedAtom();
 }
 
 export function createSignal<T>(initialValue: T): SignalNode<T> {
-	const s = preactSignal(initialValue);
-
-	return {
-		node: s,
-		reportChanged(value) {
-			return (s.value = value);
-		},
-		reportObserved() {
-			return s.value;
-		},
-		get: () => {
-			return s.value as T;
-		},
-		set: (value) => {
-			return (s.value = value as T);
-		},
-	};
+	return new ValueSignal(initialValue);
 }
 
 export function createAtom(): AtomNode {
-	let value = 0;
-	const s = preactSignal(value);
-
-	return {
-		node: s,
-		reportChanged() {
-			return (s.value = ++value);
-		},
-		reportObserved() {
-			return s.value;
-		},
-	};
+	return new Atom();
 }
 
 export { effect, batch, untracked, Signal };
