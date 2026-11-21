@@ -1011,6 +1011,8 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		extractChildModels: (model, field) => model.extractChildModels(field),
 		tryReplaceRetainedChildArray: (model, key, previous, members) =>
 			model.tryReplaceRetainedChildArray(key, previous, members),
+		writeUnobservedLeafPrefix: (model, fields) =>
+			model.writeUnobservedLeafPrefix(fields),
 		tryWriteScalar: (model, key, current, value) =>
 			model.tryWriteSnapshotScalar(key, current, value),
 		writeReference: (model, key, value) => model.writeReference(key, value),
@@ -1058,6 +1060,46 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 			throw new TypeError(`r-state-tree: cannot write child field '${key}'`);
 		this.updateChildSlot(key, next.proxy);
 		return true;
+	}
+
+	/** A detached leaf with ordinary data properties needs no observable notifications.
+	 * Stop at the first general write: it can run user code and invalidate these guards. */
+	private writeUnobservedLeafPrefix(fields: unknown[]): number {
+		if (
+			debugEnabled ||
+			this.disposed ||
+			!this._cleanOwnDescriptors ||
+			this._parent ||
+			this.hasAnyObservers()
+		)
+			return 0;
+		const source = this.source;
+		let i = 0;
+		for (; i < fields.length; i += 3) {
+			const key = fields[i] as string;
+			const value = fields[i + 1];
+			const type = fields[i + 2];
+			if (!Object.hasOwn(source, key)) break;
+			if (type === ModelCfgTypes.id) {
+				if (typeof value !== "string" && typeof value !== "number") break;
+				if (this._modelId !== value) {
+					this._modelId = value;
+					source[key] = value;
+				}
+			} else if (type === undefined) {
+				const previous = source[key];
+				if (
+					(previous !== null && typeof previous === "object") ||
+					typeof previous === "function" ||
+					(value !== null && typeof value === "object") ||
+					typeof value === "function" ||
+					this.hasExplicitObservable(key)
+				)
+					break;
+				if (previous !== value) source[key] = value;
+			} else break;
+		}
+		return i;
 	}
 
 	/** Skip the observable write path for unobserved ordinary scalar fields. */

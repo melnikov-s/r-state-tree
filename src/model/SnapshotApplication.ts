@@ -39,6 +39,10 @@ type SnapshotAccess = {
 		previous: ChildModelsAdministration<Model>,
 		members: ModelAdministration[]
 	): boolean;
+	writeUnobservedLeafPrefix(
+		model: ModelAdministration,
+		fields: unknown[]
+	): number;
 	tryWriteScalar(
 		model: ModelAdministration,
 		key: string,
@@ -175,7 +179,11 @@ export class SnapshotApplication {
 			for (const key of Object.keys(snapshot)) {
 				fields.push(key, snapshot[key], getConfigType(config[key]));
 			}
-			this.writeSnapshotFields(model, fields, undo, clearId);
+			const start =
+				undo || clearId
+					? 0
+					: this.access.writeUnobservedLeafPrefix(model, fields);
+			this.writeSnapshotFields(model, fields, undo, clearId, start);
 			return;
 		}
 		const plan: SnapshotPlan = { releases: [], writes: [], undo };
@@ -502,9 +510,10 @@ export class SnapshotApplication {
 		model: ModelAdministration,
 		fields: unknown[],
 		undo?: SnapshotUndo,
-		clearId?: SnapshotIdUndo
+		clearId?: SnapshotIdUndo,
+		start = 0
 	): void {
-		for (let i = 0; i < fields.length; i += 3) {
+		for (let i = start; i < fields.length; i += 3) {
 			this.loadSnapshotField(
 				model,
 				fields[i] as string,
