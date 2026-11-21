@@ -13,13 +13,12 @@ import {
 import type { ComputedNode, AtomNode } from "../observables/index.js";
 import { debugWrite, debugEnabled } from "../observables/internal/debug.js";
 import { getPropertyDescriptor } from "../observables/internal/utils.js";
-import Model, { createModelInstance } from "../model/Model.js";
+import Model from "./Model.js";
 import type {
 	ModelConfiguration,
 	IdType,
 	Snapshot,
 	SnapshotChange,
-	RefSnapshot,
 } from "../types.js";
 import { ModelCfgTypes, CommonCfgTypes } from "../types.js";
 import {
@@ -34,7 +33,7 @@ import {
 	type ModelConstructor,
 	type TypeMap,
 } from "./idMap.js";
-import { clone, hydrateSnapshotValue } from "../utils.js";
+import { clone } from "../utils.js";
 import {
 	getConfigChildType,
 	getConfigType,
@@ -46,28 +45,17 @@ import {
 	type SnapshotReads,
 } from "./serializeModelSnapshot.js";
 
+import {
+	SnapshotApplication,
+	type SnapshotIdUndo,
+	type SnapshotUndo,
+} from "./SnapshotApplication.js";
+
 const configMap: WeakMap<object, ModelConfiguration<unknown>> = new WeakMap();
-const configHasChildMap: WeakMap<object, boolean> = new WeakMap();
 const configHasModelRefMap: WeakMap<object, boolean> = new WeakMap();
 const EMPTY_MODELS: Model[] = [];
 const EMPTY_MODEL_ADMS: ModelAdministration[] = [];
 const EMPTY_MODEL_CONFIG: ModelConfiguration<any> = Object.create(null);
-let snapshotRollbackVersion = 0;
-
-function configHasChildren(config: ModelConfiguration<any>): boolean {
-	let has = configHasChildMap.get(config);
-	if (has === undefined) {
-		has = false;
-		for (const key in config) {
-			if (getConfigType(config[key]) === CommonCfgTypes.child) {
-				has = true;
-				break;
-			}
-		}
-		configHasChildMap.set(config, has);
-	}
-	return has;
-}
 
 function configHasModelRefs(config: ModelConfiguration<any>): boolean {
 	let has = configHasModelRefMap.get(config);
@@ -83,19 +71,6 @@ function configHasModelRefs(config: ModelConfiguration<any>): boolean {
 	}
 	return has;
 }
-
-type SnapshotPlan = {
-	releases: (() => void)[];
-	writes: Array<(() => void) | SnapshotFields>;
-	undo?: (() => void)[];
-};
-
-type SnapshotIdUndo = { key: string; id: IdType };
-type SnapshotFields = {
-	model: ModelAdministration;
-	fields: unknown[];
-	clearId?: SnapshotIdUndo;
-};
 
 // Snapshots contain only primitives, arrays, and plain objects. Compare values
 // only after rollback, when reloading can create an equivalent new snapshot.
@@ -128,17 +103,6 @@ export function getConfigurationFromSnapshot(
 
 export function getModelAdm<T extends Model>(model: T): ModelAdministration {
 	return getAdministration(model)! as unknown as ModelAdministration;
-}
-
-function getSnapshotRefId(snapshot: RefSnapshot): IdType {
-	const keys = Object.keys(snapshot);
-	if (keys.length !== 1) {
-		throw new Error(
-			"r-state-tree: ref snapshot can only contain one property which is the id key"
-		);
-	}
-
-	return snapshot[keys[0]];
 }
 
 function validateModelChildValue(
@@ -1025,12 +989,14 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 	}
 
 	onSnapshotChange(onChange: SnapshotChange<any>): () => void {
-		let rollbackVersion = snapshotRollbackVersion;
+		const application = ModelAdministration.snapshotApplication;
+		let rollbackVersion = application.rollbackVersion;
 		return reaction(
 			() => this.getSnapshot(),
 			(snapshot, previous) => {
-				const rolledBack = rollbackVersion !== snapshotRollbackVersion;
-				rollbackVersion = snapshotRollbackVersion;
+				const currentVersion = application.rollbackVersion;
+				const rolledBack = rollbackVersion !== currentVersion;
+				rollbackVersion = currentVersion;
 				// A lasting change in the same outer batch must still be delivered.
 				if (!rolledBack || !equalSnapshots(snapshot, previous))
 					onChange(snapshot, this.proxy);
@@ -1038,384 +1004,47 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		);
 	}
 
+	private static readonly snapshotApplication = new SnapshotApplication({
+		configuration: (model) => model.configuration,
+		snapshotIdUndo: (model, snapshot) => model.snapshotIdUndos?.get(snapshot),
+		peekField: (model, key) => model.peekField(key),
+		extractChildModels: (model, field) => model.extractChildModels(field),
+		tryReplaceRetainedChildArray: (model, key, previous, members) =>
+			model.tryReplaceRetainedChildArray(key, previous, members),
+		tryWriteScalar: (model, key, current, value) =>
+			model.tryWriteSnapshotScalar(key, current, value),
+		writeReference: (model, key, value) => model.writeReference(key, value),
+		writeId: (model, key, value, undo, clearId) =>
+			model.writeSnapshotId(key, value, undo, clearId),
+	});
+
 	applySnapshot(snapshot: Snapshot<any>): void {
-		const undo: (() => void)[] = [];
-		let rejection: { error: unknown } | undefined;
-		try {
-			batch(() => {
-				try {
-					this.loadSnapshot(snapshot, undo);
-				} catch (error) {
-					rejection = { error };
-					untracked(() => {
-						// Reverse writes so acquisitions are undone before restoring
-						// the original ownership edges and their identifiers.
-						for (let i = undo.length - 1; i >= 0; i--) {
-							try {
-								undo[i]();
-							} catch {
-								// Custom runtime behavior can make restoration fail.
-								// Keep restoring independent fields, and keep the cause.
-							}
-						}
-					});
-					snapshotRollbackVersion++;
-					throw error;
-				}
-			});
-		} catch (error) {
-			// A failed load takes precedence over any error while flushing the
-			// batch. A subscriber failure on success is not a load failure.
-			throw rejection ? rejection.error : error;
-		}
+		ModelAdministration.snapshotApplication.apply(this, snapshot);
 	}
 
-	loadSnapshot(snapshot: Snapshot<any>, undo?: (() => void)[]): void {
-		untracked(() => {
-			batch(() => {
-				this.loadSnapshotInBatch(snapshot, undo);
-			});
-		});
+	loadSnapshot(snapshot: Snapshot<any>, undo?: SnapshotUndo): void {
+		ModelAdministration.snapshotApplication.load(this, snapshot, undo);
 	}
 
 	/** @internal Assumes caller is already inside untracked() + batch(). */
-	loadSnapshotInBatch(snapshot: Snapshot<any>, undo?: (() => void)[]): void {
-		const config = this.configuration;
-		const clearId = this.snapshotIdUndos?.get(snapshot);
-		if (!configHasChildren(config)) {
-			const fields: unknown[] = [];
-			for (const key of Object.keys(snapshot)) {
-				fields.push(key, snapshot[key], getConfigType(config[key]));
-			}
-			this.writeSnapshotFields(fields, undo, clearId);
-			return;
-		}
-		const plan: SnapshotPlan = { releases: [], writes: [], undo };
-		this.planSnapshot(snapshot, plan, clearId);
-		// Release only edges absent from the final slots (at every depth)
-		// before acquiring new ones. The ordinary setters still validate all
-		// attachments against retained subtrees and other new children.
-		for (let i = 0; i < plan.releases.length; i++) plan.releases[i]();
-		for (const entry of plan.writes) {
-			if (typeof entry === "function") entry();
-			else entry.model.writeSnapshotFields(entry.fields, undo, entry.clearId);
-		}
-	}
-
-	private writeSnapshotFields(
-		fields: unknown[],
-		undo?: (() => void)[],
-		clearId?: SnapshotIdUndo
-	): void {
-		for (let i = 0; i < fields.length; i += 3) {
-			this.loadSnapshotField(
-				fields[i] as string,
-				fields[i + 1],
-				fields[i + 2] as ModelCfgTypes | CommonCfgTypes | undefined,
-				undo,
-				clearId
-			);
-		}
-	}
-
-	private assignSnapshotField(
-		key: string,
-		value: unknown,
-		undo?: (() => void)[],
-		previous = this.peekField(key)
-	): void {
-		const hadOwn = undo && Object.hasOwn(this.source, key);
-		this.proxy[key] = value;
-		if (undo && !Object.is(previous, value)) {
-			undo.push(() => {
-				if (!hadOwn && this.getCfgType(key) === CommonCfgTypes.child)
-					delete this.proxy[key];
-				else this.proxy[key] = previous;
-			});
-		}
-	}
-
-	private planSnapshot(
-		snapshot: Snapshot<any>,
-		plan: SnapshotPlan,
-		clearId?: SnapshotIdUndo
-	): void {
-		const config = this.configuration;
-		let fields: unknown[] | undefined;
-		for (const key of Object.keys(snapshot)) {
-			const value = snapshot[key];
-			const type = getConfigType(config[key]);
-			if (type === CommonCfgTypes.child) {
-				fields = undefined;
-				this.planSnapshotChild(key, value, plan);
-			} else {
-				if (!fields)
-					plan.writes.push({ model: this, fields: (fields = []), clearId });
-				fields.push(key, value, type);
-			}
-		}
-	}
-
-	private planSnapshotChild(key: string, value: any, plan: SnapshotPlan): void {
-		const current = this.peekField(key) as Model | Model[] | null | undefined;
-		const currentAdm = Array.isArray(current)
-			? getAdministration(current)
-			: undefined;
-		const currentChildArray =
-			currentAdm instanceof ChildModelsAdministration ? currentAdm : undefined;
-		const memberAdms = currentChildArray
-			? currentChildArray.getMemberAdms()
-			: undefined;
-		const currentChildren = memberAdms
-			? undefined
-			: this.extractChildModels(current);
-		const currentCount = memberAdms
-			? memberAdms.length
-			: currentChildren!.length;
-		let retained: Set<Model> | undefined;
-		let snapshotIds: Set<IdType> | undefined;
-		const Ctor = this.getCfgChildType(key) as typeof Model | undefined;
-		const inArray = Array.isArray(value);
-		const idKey = Ctor ? getModelIdKey(Ctor) : null;
-		const rawRootAdm = this.rawRoot;
-		const idBucketModels = Ctor
-			? rawRootAdm._lastIdType === Ctor
-				? rawRootAdm._lastIdBucket!.models
-				: rawRootAdm._idIndex?.get(Ctor)?.models
-			: undefined;
-
-		let prepareValue: Array<Model | Snapshot> | Model | Snapshot | null;
-		let allReusedInOrder = false;
-
-		if (inArray) {
-			const arr = value as Snapshot[];
-			const len = arr.length;
-			allReusedInOrder =
-				currentChildArray !== undefined && len === currentCount;
-			let prepared: Array<Model | Snapshot> | undefined = allReusedInOrder
-				? undefined
-				: new Array<Model | Snapshot>(len);
-
-			for (let i = 0; i < len; i++) {
-				const entry: Snapshot | Model = arr[i] ?? {};
-				let item: Model | Snapshot;
-				let isModel = false;
-				if (entry instanceof Model) {
-					item = getModelAdm(entry).proxy as Model;
-					isModel = true;
-				} else {
-					if (!Ctor) {
-						throw new Error(
-							"r-state-tree: child constructor must be specified to load snapshots with child/children. eg: `@child(ChildCtor) MyChild`"
-						);
-					}
-					const hasId =
-						idKey !== null &&
-						Object.prototype.hasOwnProperty.call(entry, idKey);
-					const id = hasId
-						? (entry as Record<string, IdType | undefined>)[idKey!]
-						: undefined;
-					let matchAdm: ModelAdministration | undefined;
-					if (id != null) {
-						if (snapshotIds === undefined) {
-							snapshotIds = new Set();
-							snapshotIds.add(id);
-						} else {
-							const prevSize = snapshotIds.size;
-							snapshotIds.add(id);
-							if (snapshotIds.size === prevSize) {
-								throw new Error(
-									"r-state-tree duplicate ids detected after snapshot was loaded"
-								);
-							}
-						}
-						if (
-							memberAdms &&
-							i < currentCount &&
-							memberAdms[i]._modelId === id &&
-							memberAdms[i]._modelCtor === Ctor
-						) {
-							matchAdm = memberAdms[i];
-						} else if (idBucketModels) {
-							const found = idBucketModels.get(id);
-							if (found) {
-								const adm = getModelAdm(found);
-								if (adm._parent === this && adm.parentName === key) {
-									matchAdm = adm;
-								}
-							}
-						}
-					} else if (Array.isArray(current)) {
-						// An omitted identifier can patch the positional child. An explicit
-						// unset ID describes an unidentified child, not a request to clear an
-						// established ID; recreate in that case instead of changing the ID.
-						if (memberAdms) {
-							const posAdm = i < currentCount ? memberAdms[i] : undefined;
-							if (posAdm && (!hasId || posAdm._modelId == null)) {
-								matchAdm = posAdm;
-							}
-						} else {
-							const positional = currentChildren![i];
-							if (positional && (!hasId || getIdentifier(positional) == null)) {
-								matchAdm = getModelAdm(positional);
-							}
-						}
-					}
-					if (matchAdm) {
-						matchAdm.planSnapshot(entry, plan);
-						item = matchAdm.proxy;
-						isModel = true;
-					} else {
-						item = entry;
-					}
-				}
-
-				if (allReusedInOrder) {
-					if (item !== memberAdms![i].proxy) {
-						allReusedInOrder = false;
-						prepared = new Array<Model | Snapshot>(len);
-						retained = new Set<Model>();
-						for (let j = 0; j < i; j++) {
-							const prevProxy = memberAdms![j].proxy;
-							prepared[j] = prevProxy;
-							retained.add(prevProxy);
-						}
-						prepared[i] = item;
-						if (isModel) retained.add(item as Model);
-					}
-				} else {
-					prepared![i] = item;
-					if (isModel && currentCount > 0) {
-						(retained ??= new Set()).add(item as Model);
-					}
-				}
-			}
-			if (allReusedInOrder) {
-				const previousArray = currentChildArray!;
-				const members = memberAdms!;
-				plan.writes.push(() =>
-					this.replaceRetainedChildArray(key, previousArray, members, plan.undo)
-				);
-				return;
-			}
-			prepareValue = prepared!;
-		} else if (value == null) {
-			prepareValue = null;
-		} else if (value instanceof Model) {
-			const model = getModelAdm(value).proxy as Model;
-			if (currentCount > 0) (retained ??= new Set()).add(model);
-			prepareValue = model;
-		} else {
-			if (!Ctor) {
-				throw new Error(
-					"r-state-tree: child constructor must be specified to load snapshots with child/children. eg: `@child(ChildCtor) MyChild`"
-				);
-			}
-			const hasId =
-				idKey !== null && Object.prototype.hasOwnProperty.call(value, idKey);
-			const id = hasId
-				? (value as Record<string, IdType | undefined>)[idKey!]
-				: undefined;
-			let matchAdm: ModelAdministration | undefined;
-			if (id != null && idBucketModels) {
-				const found = idBucketModels.get(id);
-				if (found) {
-					const adm = getModelAdm(found);
-					if (adm._parent === this && adm.parentName === key) {
-						matchAdm = adm;
-					}
-				}
-			}
-			if (matchAdm) {
-				if (currentCount > 0) (retained ??= new Set()).add(matchAdm.proxy);
-				matchAdm.planSnapshot(value, plan);
-				prepareValue = matchAdm.proxy;
-			} else {
-				prepareValue = value;
-			}
-		}
-
-		if (currentCount > 0 && (!retained || retained.size < currentCount)) {
-			const remaining: Model[] = [];
-			if (memberAdms) {
-				for (let i = 0; i < currentCount; i++) {
-					const childProxy = memberAdms[i].proxy;
-					if (retained?.has(childProxy)) remaining.push(childProxy);
-				}
-			} else {
-				for (let i = 0; i < currentCount; i++) {
-					if (retained?.has(currentChildren![i]))
-						remaining.push(currentChildren![i]);
-				}
-			}
-			if (remaining.length !== currentCount) {
-				plan.releases.push(() =>
-					this.assignSnapshotField(
-						key,
-						Array.isArray(current) ? remaining : null,
-						plan.undo
-					)
-				);
-			}
-		}
-
-		const createChild = (snapshot: Snapshot): Model => {
-			if (!plan.undo) {
-				return Ctor!.create === Model.create
-					? createModelInstance(Ctor!, snapshot, true)
-					: Ctor!.create(snapshot);
-			}
-			// During apply, an override still constructs without a snapshot so
-			// any subsequent ownership changes join the enclosing rollback.
-			if (Ctor!.create !== Model.create) {
-				const model = Ctor!.create();
-				getModelAdm(model).loadSnapshotInBatch(snapshot, plan.undo);
-				return model;
-			}
-			return createModelInstance(Ctor!, snapshot, true, plan.undo);
-		};
-		plan.writes.push(() => {
-			if (Array.isArray(prepareValue)) {
-				const len = prepareValue.length;
-				const models = new Array<Model>(len);
-				for (let i = 0; i < len; i++) {
-					const entry = prepareValue[i];
-					models[i] = entry instanceof Model ? entry : createChild(entry);
-				}
-				this.assignSnapshotField(key, models, plan.undo);
-			} else if (prepareValue == null) {
-				this.assignSnapshotField(key, null, plan.undo);
-			} else {
-				const resolved =
-					prepareValue instanceof Model
-						? prepareValue
-						: createChild(prepareValue);
-				this.assignSnapshotField(key, resolved, plan.undo);
-			}
-		});
+	loadSnapshotInBatch(snapshot: Snapshot<any>, undo?: SnapshotUndo): void {
+		ModelAdministration.snapshotApplication.loadInBatch(this, snapshot, undo);
 	}
 
 	/** Replace the array wrapper while preserving every existing ownership edge. */
-	private replaceRetainedChildArray(
+	private tryReplaceRetainedChildArray(
 		key: string,
 		previous: ChildModelsAdministration<Model>,
-		members: ModelAdministration[],
-		undo?: (() => void)[]
-	): void {
+		members: ModelAdministration[]
+	): boolean {
 		if (
 			debugEnabled ||
 			!this._cleanOwnDescriptors ||
 			this._childArrays?.get(key) !== previous ||
 			previous.getMemberAdms() !== members ||
 			this.getCfgType(key) !== CommonCfgTypes.child
-		) {
-			this.assignSnapshotField(
-				key,
-				members.map((adm) => adm.proxy),
-				undo
-			);
-			return;
-		}
+		)
+			return false;
 		this.assertUsable();
 		previous.assertMutable();
 		for (const adm of members) adm.assertUsable();
@@ -1428,157 +1057,99 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 		if (!this.write(key, next.proxy))
 			throw new TypeError(`r-state-tree: cannot write child field '${key}'`);
 		this.updateChildSlot(key, next.proxy);
-		if (undo)
-			undo.push(() => {
-				this.proxy[key] = previous.proxy;
-			});
+		return true;
 	}
 
-	private loadSnapshotField(
+	/** Skip the observable write path for unobserved ordinary scalar fields. */
+	private tryWriteSnapshotScalar(
 		key: string,
-		value: any,
-		type: ModelCfgTypes | CommonCfgTypes | undefined,
-		undo?: (() => void)[],
+		currentValue: unknown,
+		value: unknown
+	): boolean {
+		if (
+			!debugEnabled &&
+			!this.disposed &&
+			!this.hasAnyObservers() &&
+			!this.hasExplicitObservable(key) &&
+			typeof currentValue !== "function" &&
+			typeof value !== "function" &&
+			(this._cleanOwnDescriptors ||
+				Object.getOwnPropertyDescriptor(this.source, key)?.writable)
+		) {
+			if (currentValue !== value) this.source[key] = value;
+			return true;
+		}
+		return false;
+	}
+
+	private writeSnapshotId(
+		key: string,
+		value: IdType | undefined,
+		undo?: SnapshotUndo,
 		clearId?: SnapshotIdUndo
 	): void {
-		switch (type) {
-			case undefined: {
-				if (!Object.prototype.hasOwnProperty.call(this.source, key)) {
-					console.warn(
-						`r-state-tree: invalid key '${key}' found in snapshot, ignored.`
-					);
-					break;
-				}
-				const currentValue = this.peekField(key);
+		if (
+			!undo &&
+			!clearId &&
+			!debugEnabled &&
+			!this.disposed &&
+			!this._parent &&
+			!this.hasAnyObservers() &&
+			(typeof value === "string" || typeof value === "number")
+		) {
+			if (this._modelId !== value) {
 				if (
-					(currentValue === null || typeof currentValue !== "object") &&
-					(value === null || typeof value !== "object")
+					!this._hasCustomOwnDescriptor &&
+					Object.prototype.hasOwnProperty.call(this.source, key)
 				) {
-					if (
-						!debugEnabled &&
-						!this.disposed &&
-						!this.hasAnyObservers() &&
-						!this.hasExplicitObservable(key) &&
-						typeof currentValue !== "function" &&
-						typeof value !== "function" &&
-						(this._cleanOwnDescriptors ||
-							Object.getOwnPropertyDescriptor(this.source, key)?.writable)
-					) {
-						if (currentValue !== value) this.source[key] = value;
-						if (undo && !Object.is(currentValue, value))
-							undo.push(() => {
-								this.proxy[key] = currentValue;
-							});
-						break;
-					}
-					this.assignSnapshotField(key, value, undo, currentValue);
-					break;
+					this._modelId = value;
+					this.source[key] = value;
+					return;
 				}
-				const changeTracker = { changed: false, undo, copyInput: true };
-				const hydratedValue = hydrateSnapshotValue(
-					currentValue,
-					value,
-					changeTracker
-				);
-				this.assignSnapshotField(key, hydratedValue, undo, currentValue);
-				if (changeTracker.changed && Object.is(currentValue, hydratedValue)) {
-					this.reportChanged();
+				const own = Object.getOwnPropertyDescriptor(this.source, key);
+				if (own && "value" in own && own.writable) {
+					this._modelId = value;
+					this.source[key] = value;
+					return;
 				}
-				break;
+			} else {
+				return;
 			}
-			case ModelCfgTypes.transient:
-				console.warn(
-					`r-state-tree: transient Model key '${key}' found in snapshot, ignored.`
-				);
-				break;
-			case ModelCfgTypes.modelRef:
-				if (undo) {
-					const previous = this.source[key];
-					undo.push(() => this.writeReference(key, previous));
-				}
-				if (Array.isArray(value)) {
-					if ((value as unknown[])?.[0] instanceof Model) {
-						this.proxy[key] = value;
-					} else {
-						this.writeReference(
-							key,
-							value.map((snapshot: RefSnapshot) => getSnapshotRefId(snapshot))
-						);
-					}
-					break;
-				} else if (value instanceof Model) {
-					this.proxy[key] = value;
-				} else if (value == null) {
-					this.writeReference(key, undefined);
-				} else {
-					this.writeReference(key, getSnapshotRefId(value));
-				}
-				break;
-			case ModelCfgTypes.id:
-				if (
-					!undo &&
-					!clearId &&
-					!debugEnabled &&
-					!this.disposed &&
-					!this._parent &&
-					!this.hasAnyObservers() &&
-					(typeof value === "string" || typeof value === "number")
-				) {
-					if (this._modelId !== value) {
-						if (
-							!this._hasCustomOwnDescriptor &&
-							Object.prototype.hasOwnProperty.call(this.source, key)
-						) {
-							this._modelId = value;
-							this.source[key] = value;
-							break;
-						}
-						const own = Object.getOwnPropertyDescriptor(this.source, key);
-						if (own && "value" in own && own.writable) {
-							this._modelId = value;
-							this.source[key] = value;
-							break;
-						}
-					} else {
-						break;
-					}
-				}
-				if (undo) {
-					const previous = this.peekField(key);
-					const previousId = this._modelId;
-					if (
-						Object.is(previous, value) &&
-						Object.is(previousId, value) &&
-						!debugEnabled &&
-						!this.disposed &&
-						!this._hasCustomOwnDescriptor &&
-						(typeof value === "string" || typeof value === "number")
-					) {
-						break;
-					}
-					if (!Object.is(previous, value) || !Object.is(previousId, value)) {
-						undo.push(() => {
-							// Public writes still cannot clear an established ID.
-							setIdentifierAdm(this, previousId);
-							this.write(key, previous);
-						});
-					}
-				}
-				if (
-					clearId &&
-					value === undefined &&
-					clearId.key === key &&
-					Object.is(clearId.id, this._modelId)
-				) {
-					this.assertUsable();
-					if (!this.canWriteManagedField(key))
-						throw new TypeError(`r-state-tree: cannot write id field '${key}'`);
-					setIdentifierAdm(this, undefined);
-					this.write(key, undefined);
-				} else {
-					this.proxy[key] = value;
-				}
-				break;
+		}
+		if (undo) {
+			const previous = this.peekField(key);
+			const previousId = this._modelId;
+			if (
+				Object.is(previous, value) &&
+				Object.is(previousId, value) &&
+				!debugEnabled &&
+				!this.disposed &&
+				!this._hasCustomOwnDescriptor &&
+				(typeof value === "string" || typeof value === "number")
+			) {
+				return;
+			}
+			if (!Object.is(previous, value) || !Object.is(previousId, value)) {
+				undo.push(() => {
+					// Public writes still cannot clear an established ID.
+					setIdentifierAdm(this, previousId);
+					this.write(key, previous);
+				});
+			}
+		}
+		if (
+			clearId &&
+			value === undefined &&
+			clearId.key === key &&
+			Object.is(clearId.id, this._modelId)
+		) {
+			this.assertUsable();
+			if (!this.canWriteManagedField(key))
+				throw new TypeError(`r-state-tree: cannot write id field '${key}'`);
+			setIdentifierAdm(this, undefined);
+			this.write(key, undefined);
+		} else {
+			this.proxy[key] = value;
 		}
 	}
 

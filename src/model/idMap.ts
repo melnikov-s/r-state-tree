@@ -151,6 +151,16 @@ export function getIdentifier(model: Model): IdType | undefined {
 	return getAdm(model)._modelId;
 }
 
+/** Look up existing index entries without allocating a bucket or tracking reads. */
+export function getIndexedModelsOfType(
+	root: ModelAdministration,
+	Type: ModelConstructor
+): ReadonlyMap<IdType, Model> | undefined {
+	return root._lastIdType === Type
+		? root._lastIdBucket!.models
+		: root._idIndex?.get(Type)?.models;
+}
+
 export function getModelByIdAdm<T extends Model>(
 	rootAdm: ModelAdministration,
 	Type: ModelConstructor<T>,
