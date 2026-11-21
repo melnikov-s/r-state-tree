@@ -133,10 +133,12 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		return undefined;
 	}
 
-	private getExistingKey(key: K): K | typeof KEY_NOT_FOUND {
-		const target = getSource(key) as K;
+	private getExistingKey(
+		key: K,
+		target = getSource(key)
+	): K | typeof KEY_NOT_FOUND {
 		if (this.source.has(target)) return target;
-		if (this.source.has(key)) return key;
+		if (key !== target && this.source.has(key)) return key;
 
 		const proxy = this.getProxyVariant(key);
 		if (proxy !== undefined && this.source.has(proxy)) return proxy;
@@ -260,7 +262,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		const target = getSource(value);
 		this.hasMap.reportObserved(target);
 
-		return this.hasEntry(value);
+		return this.getExistingKey(value, target) !== KEY_NOT_FOUND;
 	}
 
 	entries(): IterableIterator<[K, V]> {
@@ -315,14 +317,12 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		const targetKey = getSource(key);
 		const sourceMap = this.source as Map<K, V>;
 
-		// Important: `get()` must react to key presence changes (add/delete) even when
-		// the key is currently missing. We do this by depending on `has(...)` which
-		// reports per-key observations via `hasMap`.
-		const has = this.has(key);
-		if (!has) return undefined;
-
-		const existingKey = this.getExistingKey(key);
-		const value = sourceMap.get(existingKey as K);
+		// Track presence even for a missing key, then reuse the resolved identity.
+		this.atom.reportObserved();
+		this.hasMap.reportObserved(targetKey);
+		const existingKey = this.getExistingKey(key, targetKey);
+		if (existingKey === KEY_NOT_FOUND) return undefined;
+		const value = sourceMap.get(existingKey);
 
 		this.valuesMap!.reportObserved(targetKey, value);
 		if (key !== targetKey) {
@@ -338,14 +338,15 @@ export class CollectionAdministration<K, V = K> extends Administration<
 		}
 		// Only return proxy if this key was explicitly assigned an observable
 		if (
-			this.hasExplicitObservable(targetKey) ||
-			this.hasExplicitObservable(key) ||
-			(proxyKey !== undefined && this.hasExplicitObservable(proxyKey))
+			value &&
+			typeof value === "object" &&
+			(this.hasExplicitObservable(targetKey) ||
+				this.hasExplicitObservable(key) ||
+				(proxyKey !== undefined && this.hasExplicitObservable(proxyKey))) &&
+			!Object.isFrozen(value)
 		) {
-			if (value && typeof value === "object" && !Object.isFrozen(value)) {
-				const existingAdm = getAdministration(value);
-				if (existingAdm) return existingAdm.proxy as V;
-			}
+			const existingAdm = getAdministration(value);
+			if (existingAdm) return existingAdm.proxy as V;
 		}
 		return value;
 	}
@@ -363,7 +364,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 			this.untrackExplicitObservable(key);
 		}
 
-		const existingKey = this.getExistingKey(key);
+		const existingKey = this.getExistingKey(key, targetKey);
 		const hasKey = existingKey !== KEY_NOT_FOUND;
 		const oldValue: V | undefined = hasKey
 			? sourceMap.get(existingKey as K)

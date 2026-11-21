@@ -11,24 +11,14 @@ import { resolveNode } from "./internal/utils.js";
 import { debugWrite, debugEnabled } from "./internal/debug.js";
 
 /**
- * Check if a property key is a valid array index per ECMAScript spec.
+ * Parse an array index per ECMAScript spec; return -1 for other keys.
  * An array index is a String-valued property key that is a canonical numeric string
  * and whose numeric value i satisfies 0 ≤ i < 2^32 - 1.
  */
-function isArrayIndexKey(key: PropertyKey): boolean {
-	if (typeof key === "symbol") return false;
-
-	const keyStr = String(key);
-	const num = Number(keyStr);
-
-	// Must be a non-negative integer in range [0, 2^32 - 2]
-	// AND the string must be the canonical form (String(num) === keyStr)
-	return (
-		Number.isInteger(num) &&
-		num >= 0 &&
-		num < 4294967295 && // 2^32 - 1
-		String(num) === keyStr
-	);
+function arrayIndex(key: string | symbol): number {
+	if (typeof key === "symbol") return -1;
+	const index = Number(key) >>> 0;
+	return index < 0xffffffff && String(index) === key ? index : -1;
 }
 
 /** ECMAScript ToIntegerOrInfinity (unary + also rejects BigInt and Symbol). */
@@ -89,9 +79,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 				return adm.getArrayLength();
 			}
 
-			if (isArrayIndexKey(name)) {
-				return adm.get(Number(name));
-			}
+			const index = arrayIndex(name);
+			if (index !== -1) return adm.get(index);
 
 			const arrayMethods = (adm.constructor as typeof ArrayAdministration)
 				.methods;
@@ -104,16 +93,12 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 			return Reflect.get(adm.source, name, receiver);
 		},
 
-		set(target, name, value) {
+		set(target, name, value, receiver) {
 			const adm = getAdministration(target) as ArrayAdministration<any>;
-
-			if (name === "length") {
-				return adm.setArrayLength(value);
-			} else if (isArrayIndexKey(name)) {
-				return adm.set(Number(name), value);
-			} else {
-				return Reflect.set(adm.source, name, value, arguments[3]);
-			}
+			if (name === "length") return adm.setArrayLength(value);
+			const index = arrayIndex(name);
+			if (index !== -1) return adm.set(index, value);
+			return Reflect.set(adm.source, name, value, receiver);
 		},
 
 		defineProperty(target, name, descriptor) {
@@ -140,13 +125,14 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 					if (name === "length") {
 						adm.keysAtom.reportChanged();
 						adm.atom.reportChanged();
-					} else if (isArrayIndexKey(name)) {
-						const index = Number(name);
-						adm.keysAtom.reportChanged();
-						adm.onArrayChanged(false, index, 1);
 					} else {
-						// Other properties
-						adm.atom.reportChanged();
+						const index = arrayIndex(name);
+						if (index !== -1) {
+							adm.keysAtom.reportChanged();
+							adm.onArrayChanged(false, index, 1);
+						} else {
+							adm.atom.reportChanged();
+						}
 					}
 				});
 			}
@@ -155,7 +141,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		deleteProperty(target, name) {
 			const adm = getAdministration(target) as ArrayAdministration<any>;
-			const isIndex = isArrayIndexKey(name);
+			const index = arrayIndex(name);
 
 			const had = name in adm.source;
 			const before = debugEnabled
@@ -164,8 +150,7 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 			const result = Reflect.deleteProperty(adm.source, name);
 			if (result && had && debugEnabled)
 				debugWrite(adm.source, name, "delete", before, undefined);
-			if (result && had && isIndex) {
-				const index = Number(name);
+			if (result && had && index !== -1) {
 				// Pass true for lengthChanged to trigger keysAtom (a hole was created)
 				adm.onArrayChanged(true, index, 1);
 			}
@@ -183,8 +168,8 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 
 		has(target, name) {
 			const adm = getAdministration(target) as ArrayAdministration<any>;
-			if (isArrayIndexKey(name)) {
-				const index = Number(name);
+			const index = arrayIndex(name);
+			if (index !== -1) {
 				adm.atom.reportObserved();
 				adm.valuesMap.reportObserved(index, adm.source[index]);
 				return index in adm.source;
