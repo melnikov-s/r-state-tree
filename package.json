@@ -1,6 +1,6 @@
 {
 	"name": "r-state-tree",
-	"version": "0.13.0",
+	"version": "0.14.0",
 	"type": "module",
 	"description": "reactive state management library",
 	"homepage": "https://github.com/melnikov-s/r-state-tree#readme",
