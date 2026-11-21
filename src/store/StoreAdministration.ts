@@ -277,7 +277,7 @@ export class StoreAdministration<
 	);
 
 	parent: StoreAdministration | null = null;
-	private readonly abortController = new AbortController();
+	private abortController?: AbortController;
 	private mounted = false;
 	private disposalState: "active" | "disposing" | "disposed" = "active";
 	private contextCache = new Map<symbol, ComputedNode<unknown>>();
@@ -290,6 +290,10 @@ export class StoreAdministration<
 	private pendingChildSnapshots: NonNullable<StoreSnapshot["children"]> = {};
 
 	get signal(): AbortSignal {
+		if (!this.abortController) {
+			this.abortController = new AbortController();
+			if (this.disposalState !== "active") this.abortController.abort();
+		}
 		return this.abortController.signal;
 	}
 
@@ -311,11 +315,12 @@ export class StoreAdministration<
 				type: getConfigType(this.configuration[key as string]),
 			})),
 			parent: this.parent?.proxy ?? null,
-			status: this.signal.aborted
-				? "disposed"
-				: this.isMounted
-					? "mounted"
-					: "unmounted",
+			status:
+				this.disposalState !== "active"
+					? "disposed"
+					: this.isMounted
+						? "mounted"
+						: "unmounted",
 		} as const;
 	}
 
@@ -508,7 +513,7 @@ export class StoreAdministration<
 				if (!this.isMounted || this.disposalState !== "active") break;
 				const adm = getStoreAdm(store);
 				// User callbacks may have synchronously replaced this child again.
-				if (!adm.signal.aborted && !adm.isMounted) {
+				if (adm.disposalState === "active" && !adm.isMounted) {
 					captureChildError(errors, () => adm.mount(this, name));
 				}
 			}
@@ -798,7 +803,7 @@ export class StoreAdministration<
 	}
 
 	private register(start: () => () => void): () => void {
-		if (this.signal.aborted) {
+		if (this.disposalState !== "active") {
 			throw new Error(
 				"r-state-tree: cannot register reactive resources on a disposed store"
 			);
@@ -847,7 +852,7 @@ export class StoreAdministration<
 		childName?: PropertyKey,
 		activationQueue?: StoreAdministration[]
 	): void {
-		if (this.signal.aborted) {
+		if (this.disposalState !== "active") {
 			throw new Error("r-state-tree: cannot mount a disposed store");
 		}
 		if (this.isMounted) {
@@ -927,7 +932,7 @@ export class StoreAdministration<
 	private disposeResources(): unknown[] {
 		const errors: unknown[] = [];
 		try {
-			this.abortController.abort();
+			this.abortController?.abort();
 		} catch (error) {
 			errors.push(error);
 		}

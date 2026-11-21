@@ -1,13 +1,36 @@
-import { observable, untracked } from "../observables/index.js";
+import { AtomMap } from "../observables/internal/NodeMap.js";
 import type { IdType } from "../types.js";
 import type Model from "./Model.js";
 
 export type ModelConstructor<T extends Model = Model> = new (
 	...args: any[]
 ) => T;
-type TypeMap = Map<ModelConstructor, Map<IdType, Model | undefined>>;
+// Identifier buckets are internal and already contain canonical Models and IDs.
+// Validate and move entries without observing the index; only public lookups
+// need a dependency, including lookups for identifiers not present yet.
+class IdBucket extends Map<IdType, Model> {
+	private reads?: AtomMap<IdType>;
 
-const attachedIdMap: WeakMap<Model, TypeMap> = new WeakMap();
+	read(id: IdType): Model | undefined {
+		(this.reads ??= new AtomMap()).reportObserved(id);
+		return this.get(id);
+	}
+
+	override set(id: IdType, model: Model): this {
+		if (this.get(id) === model) return this;
+		super.set(id, model);
+		this.reads?.reportChanged(id);
+		return this;
+	}
+
+	override delete(id: IdType): boolean {
+		const removed = super.delete(id);
+		if (removed) this.reads?.reportChanged(id);
+		return removed;
+	}
+}
+
+const attachedIdMap = new WeakMap<Model, Map<ModelConstructor, IdBucket>>();
 const idMap: WeakMap<Model, IdType> = new WeakMap();
 
 function getModelType(model: Model): ModelConstructor {
@@ -17,9 +40,7 @@ function getModelType(model: Model): ModelConstructor {
 function entriesFor(model: Model): Array<[ModelConstructor, IdType, Model]> {
 	const entries: Array<[ModelConstructor, IdType, Model]> = [];
 	attachedIdMap.get(model)?.forEach((ids, Type) => {
-		ids.forEach((value, id) => {
-			if (value) entries.push([Type, id, value]);
-		});
+		ids.forEach((value, id) => entries.push([Type, id, value]));
 	});
 	const id = idMap.get(model);
 	if (id != null) entries.push([getModelType(model), id, model]);
@@ -41,18 +62,15 @@ function assertAvailable(
 	}
 }
 
-function bucket(
-	node: Model,
-	Type: ModelConstructor
-): Map<IdType, Model | undefined> {
+function bucket(node: Model, Type: ModelConstructor): IdBucket {
 	let map = attachedIdMap.get(node);
 	if (!map) {
-		map = observable(new Map());
+		map = new Map();
 		attachedIdMap.set(node, map);
 	}
 	let ids = map.get(Type);
 	if (!ids) {
-		ids = observable(new Map());
+		ids = new IdBucket();
 		map.set(Type, ids);
 	}
 	return ids;
@@ -88,9 +106,8 @@ export function getModelById<T extends Model>(
 	Type: ModelConstructor<T>,
 	id: IdType
 ): T | undefined {
-	// Materialize a stable bucket on a miss, without observing its initialization.
-	const ids = untracked(() => bucket(root, Type));
-	return ids.get(id) as T | undefined;
+	// A stable bucket also lets misses observe the first insertion of this type.
+	return bucket(root, Type).read(id) as T | undefined;
 }
 
 /** Validate only the changed subtrees, allowing identifiers released by removals. */
@@ -102,7 +119,7 @@ export function validateModelAttachments(
 	const released = new Set(
 		removed.flatMap(entriesFor).map(([, , model]) => model)
 	);
-	const incoming: TypeMap = new Map();
+	const incoming = new Map<ModelConstructor, Map<IdType, Model>>();
 	for (const model of added) {
 		for (const [Type, id, value] of entriesFor(model)) {
 			const duplicate = incoming.get(Type)?.get(id);
