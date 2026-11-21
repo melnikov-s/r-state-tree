@@ -42,3 +42,26 @@ pnpm benchmark:baseline --compare node_modules/.cache/before.json node_modules/.
 ```
 
 The helper checks harness source hash, reported environment, measurement options, case definitions and counters before comparing median and spread by case ID. Hardware labels are not proof of identical machines. Positive percent change means slower. Repeat the pair in reverse run order to check small deltas against local variation; a timing change near run-to-run spread is inconclusive. If a runtime intentionally changes workload semantics, adjust and re-run both revisions with a version of the harness that verifies the intended behavior rather than timing unequal work. Don't compare a fresh run on your machine against the absolute numbers checked in here.
+
+## Initial measured baseline
+
+The [full baseline JSON](../benchmarks/baselines/runtime-6d5a7ce.json) records all 19 cases against clean runtime `6d5a7ce3c375ea8184cc58287a26bebe80b6155d` and separately identifies the harness revision and source hash. It was measured on an Apple M4 (10 logical CPUs), macOS 26.3 (Darwin 25.3.0), arm64, Node 24.9.0, pnpm 10.17.1 and esbuild 0.28.2. TypeScript 7.0.2 was used for type checks, not emit. `NODE_ENV` and `NODE_OPTIONS` were unset. The full run took about 22 seconds.
+
+```sh
+base=6d5a7ce3c375ea8184cc58287a26bebe80b6155d
+pnpm benchmark:baseline --runtime "$base" --json node_modules/.cache/runtime-base-full.json
+pnpm benchmark:baseline --runtime "$base" --smoke
+```
+
+| Case | Median (µs/op) | p25–p75 (µs/op) |
+| --- | ---: | ---: |
+| `observable.write.none` / `.subscribers` | 0.473 / 1.202 | 0.472–0.474 / 1.197–1.206 |
+| `observable.write.computed` / `.batch` | 11.265 / 4.360 | 11.245–11.278 / 4.323–4.416 |
+| `model.create.wide` / `.nested` | 5,006 / 6,082 | 4,960–5,103 / 5,829–6,185 |
+| `model.lookup.nested` | 0.806 | 0.799–0.812 |
+| `store.children.mount` / `.realize` | 6.50 / 979 | 5.44–9.00 / 767–1,000 |
+| `store.children.reorder` / `.replace` | 124 / 1,395 | 123–127 / 1,384–1,854 |
+| `persistence.edit.leaf` / `.root` / `.batched-root` | 18.4 / 291 / 72.7 | 17.0–29.8 / 284–298 / 70.4–86.1 |
+| `workspace.editor.cycle` | 456 | 439–466 |
+
+The workspace sample ran 48 cycles, reused 384 editor identities across reorders, and started and cleaned up 384 subscriptions. It ended with zero fixture-owned watchers and emitted exactly 48 callbacks, one per document edit. A second full run against identical `src/` produced the same counters; 18 of 19 medians shifted by less than 4%, but the leaf persistence median shifted about 15%. Unopened mount and first realization also had wide within-run spreads. Treat small timing differences as noise until reproduced.

@@ -1,0 +1,468 @@
+{
+	"schema": 1,
+	"recordedAt": "2026-11-21T04:52:38.323Z",
+	"runtime": {
+		"commit": "6d5a7ce3c375ea8184cc58287a26bebe80b6155d",
+		"packageVersion": "0.13.0"
+	},
+	"harness": {
+		"checkoutCommit": "c45adf647e04161e6b3f0f205a554c4c6403d3f2",
+		"sourceSha256": "008a08736e7b29a157254ad22d12421406d3442f25d28a3c2d1618c5ce31e1ca"
+	},
+	"environment": {
+		"node": "v24.9.0",
+		"v8": "13.6.233.10-node.27",
+		"nodeEnv": "unset",
+		"os": "darwin",
+		"osRelease": "25.3.0",
+		"arch": "arm64",
+		"cpu": "Apple M4",
+		"logicalCpuCount": 10,
+		"compiler": {
+			"esbuild": "0.28.2",
+			"target": "node22",
+			"format": "esm",
+			"decorators": "standard",
+			"minify": false
+		},
+		"dependencies": {
+			"@preact/signals-core": "1.14.4",
+			"@tsmetadata/polyfill": "1.1.3"
+		}
+	},
+	"measurement": {
+		"smoke": false,
+		"warmups": 4,
+		"samples": 9,
+		"clock": "performance.now (wall time)",
+		"processIsolation": "one Node process per case",
+		"gc": "default, not forced"
+	},
+	"cases": [
+		{
+			"id": "observable.write.none",
+			"operation": "one field, index and Map entry write",
+			"phase": "steady",
+			"parameters": {
+				"collectionSize": 16,
+				"writesPerOperation": 3
+			},
+			"iterations": 16000,
+			"usPerOperation": {
+				"median": 0.473,
+				"p25": 0.47223,
+				"p75": 0.47367,
+				"min": 0.46683,
+				"max": 0.47604
+			},
+			"counters": {
+				"writes": 48000,
+				"callbacks": 0,
+				"computedEvaluations": 0
+			}
+		},
+		{
+			"id": "observable.write.subscribers",
+			"operation": "one field, index and Map entry write",
+			"phase": "steady",
+			"parameters": {
+				"collectionSize": 16,
+				"writesPerOperation": 3
+			},
+			"iterations": 16000,
+			"usPerOperation": {
+				"median": 1.2018,
+				"p25": 1.197,
+				"p75": 1.2059,
+				"min": 1.1835,
+				"max": 1.2139
+			},
+			"counters": {
+				"writes": 48000,
+				"callbacks": 48000,
+				"computedEvaluations": 0
+			}
+		},
+		{
+			"id": "observable.write.computed",
+			"operation": "one field, index and Map entry write",
+			"phase": "steady",
+			"parameters": {
+				"collectionSize": 16,
+				"writesPerOperation": 3
+			},
+			"iterations": 16000,
+			"usPerOperation": {
+				"median": 11.265,
+				"p25": 11.245,
+				"p75": 11.278,
+				"min": 11.232,
+				"max": 11.34
+			},
+			"counters": {
+				"writes": 48000,
+				"callbacks": 48000,
+				"computedEvaluations": 48001
+			}
+		},
+		{
+			"id": "observable.write.batch",
+			"operation": "one field, index and Map entry write",
+			"phase": "steady",
+			"parameters": {
+				"collectionSize": 16,
+				"writesPerOperation": 3
+			},
+			"iterations": 16000,
+			"usPerOperation": {
+				"median": 4.3603,
+				"p25": 4.3225,
+				"p75": 4.4162,
+				"min": 4.2963,
+				"max": 4.7106
+			},
+			"counters": {
+				"writes": 48000,
+				"callbacks": 16000,
+				"computedEvaluations": 16001
+			}
+		},
+		{
+			"id": "model.create.wide",
+			"operation": "Model.create from snapshot",
+			"phase": "fresh",
+			"parameters": {
+				"documents": 256,
+				"folders": 0
+			},
+			"iterations": 32,
+			"usPerOperation": {
+				"median": 5006.1,
+				"p25": 4960.4,
+				"p75": 5102.6,
+				"min": 4832.2,
+				"max": 5452
+			},
+			"counters": {
+				"roots": 32,
+				"hydratedDocuments": 8192
+			}
+		},
+		{
+			"id": "model.create.nested",
+			"operation": "Model.create from snapshot",
+			"phase": "fresh",
+			"parameters": {
+				"documents": 256,
+				"folders": 8
+			},
+			"iterations": 32,
+			"usPerOperation": {
+				"median": 6082.2,
+				"p25": 5829.1,
+				"p75": 6185.2,
+				"min": 5541.9,
+				"max": 6880.9
+			},
+			"counters": {
+				"roots": 32,
+				"hydratedDocuments": 8192
+			}
+		},
+		{
+			"id": "model.apply.nested",
+			"operation": "apply a full snapshot to an existing keyed tree",
+			"phase": "steady",
+			"parameters": {
+				"documents": 256,
+				"folders": 8
+			},
+			"iterations": 12,
+			"usPerOperation": {
+				"median": 1833.4,
+				"p25": 1824.3,
+				"p75": 1932.5,
+				"min": 1732.7,
+				"max": 2212.8
+			},
+			"counters": {
+				"snapshotApplications": 12,
+				"verifiedReusedDocuments": 256
+			}
+		},
+		{
+			"id": "model.lookup.nested",
+			"operation": "findModelById lookup",
+			"phase": "steady",
+			"parameters": {
+				"documents": 256,
+				"folders": 8
+			},
+			"iterations": 200000,
+			"usPerOperation": {
+				"median": 0.80552,
+				"p25": 0.79914,
+				"p75": 0.8117,
+				"min": 0.79188,
+				"max": 0.8355
+			},
+			"counters": {
+				"lookups": 200000,
+				"checksum": 25500000
+			}
+		},
+		{
+			"id": "model.transfer.branch",
+			"operation": "detach branch and attach it to the other root",
+			"phase": "steady",
+			"parameters": {
+				"documents": 32,
+				"roots": 2
+			},
+			"iterations": 600,
+			"usPerOperation": {
+				"median": 89.178,
+				"p25": 87.869,
+				"p75": 89.755,
+				"min": 86.216,
+				"max": 91.578
+			},
+			"counters": {
+				"parentCallbacks": 1200,
+				"attached": 600,
+				"detached": 600
+			}
+		},
+		{
+			"id": "store.children.mount",
+			"operation": "mount root descriptor (leave child list unopened)",
+			"phase": "fresh",
+			"parameters": {
+				"children": 128
+			},
+			"iterations": 600,
+			"usPerOperation": {
+				"median": 6.5019,
+				"p25": 5.4416,
+				"p75": 8.9978,
+				"min": 4.3093,
+				"max": 13.148
+			},
+			"counters": {
+				"getterRuns": 0,
+				"constructed": 0,
+				"cleaned": 0,
+				"verifiedReusedChildren": 0,
+				"checksum": 0
+			}
+		},
+		{
+			"id": "store.children.realize",
+			"operation": "first child list read after mount",
+			"phase": "fresh",
+			"parameters": {
+				"children": 128
+			},
+			"iterations": 32,
+			"usPerOperation": {
+				"median": 978.86,
+				"p25": 767.17,
+				"p75": 999.51,
+				"min": 755.46,
+				"max": 2016.6
+			},
+			"counters": {
+				"getterRuns": 32,
+				"constructed": 4096,
+				"cleaned": 0,
+				"verifiedReusedChildren": 0,
+				"checksum": 0
+			}
+		},
+		{
+			"id": "store.children.reads",
+			"operation": "traverse list via repeated getter and indexed reads",
+			"phase": "steady",
+			"parameters": {
+				"children": 128
+			},
+			"iterations": 4000,
+			"usPerOperation": {
+				"median": 43.185,
+				"p25": 43.041,
+				"p75": 43.422,
+				"min": 42.71,
+				"max": 44.321
+			},
+			"counters": {
+				"getterRuns": 1,
+				"constructed": 128,
+				"cleaned": 0,
+				"verifiedReusedChildren": 128,
+				"checksum": 32512000
+			}
+		},
+		{
+			"id": "store.children.reorder",
+			"operation": "reverse realized list, reusing keys",
+			"phase": "steady",
+			"parameters": {
+				"children": 128
+			},
+			"iterations": 100,
+			"usPerOperation": {
+				"median": 124.36,
+				"p25": 123.42,
+				"p75": 126.87,
+				"min": 111.66,
+				"max": 154.81
+			},
+			"counters": {
+				"getterRuns": 101,
+				"constructed": 128,
+				"cleaned": 0,
+				"verifiedReusedChildren": 128,
+				"checksum": 0
+			}
+		},
+		{
+			"id": "store.children.replace",
+			"operation": "swap a disjoint set of keys into realized list",
+			"phase": "steady",
+			"parameters": {
+				"children": 128
+			},
+			"iterations": 36,
+			"usPerOperation": {
+				"median": 1395,
+				"p25": 1384.2,
+				"p75": 1854.2,
+				"min": 1366.4,
+				"max": 1969.9
+			},
+			"counters": {
+				"getterRuns": 37,
+				"constructed": 4736,
+				"cleaned": 4608,
+				"verifiedReusedChildren": 0,
+				"checksum": 0
+			}
+		},
+		{
+			"id": "store.children.dispose",
+			"operation": "dispose root with realized list",
+			"phase": "fresh",
+			"parameters": {
+				"children": 128
+			},
+			"iterations": 32,
+			"usPerOperation": {
+				"median": 523.69,
+				"p25": 519.71,
+				"p75": 538.54,
+				"min": 513.26,
+				"max": 563.01
+			},
+			"counters": {
+				"getterRuns": 32,
+				"constructed": 4096,
+				"cleaned": 4096,
+				"verifiedReusedChildren": 0,
+				"checksum": 0
+			}
+		},
+		{
+			"id": "persistence.edit.leaf",
+			"operation": "four writes to one leaf with synchronous snapshot JSON serialization",
+			"phase": "steady",
+			"parameters": {
+				"documents": 256,
+				"writesPerOperation": 4
+			},
+			"iterations": 160,
+			"usPerOperation": {
+				"median": 18.412,
+				"p25": 17.024,
+				"p75": 29.849,
+				"min": 15.832,
+				"max": 34.958
+			},
+			"counters": {
+				"writes": 640,
+				"callbacks": 640,
+				"serializedBytes": 42022
+			}
+		},
+		{
+			"id": "persistence.edit.root",
+			"operation": "four writes to one leaf with synchronous snapshot JSON serialization",
+			"phase": "steady",
+			"parameters": {
+				"documents": 256,
+				"writesPerOperation": 4
+			},
+			"iterations": 160,
+			"usPerOperation": {
+				"median": 291.4,
+				"p25": 283.71,
+				"p75": 297.62,
+				"min": 269.45,
+				"max": 317.11
+			},
+			"counters": {
+				"writes": 640,
+				"callbacks": 640,
+				"serializedBytes": 10446502
+			}
+		},
+		{
+			"id": "persistence.edit.batched-root",
+			"operation": "four writes to one leaf with synchronous snapshot JSON serialization",
+			"phase": "steady",
+			"parameters": {
+				"documents": 256,
+				"writesPerOperation": 4
+			},
+			"iterations": 160,
+			"usPerOperation": {
+				"median": 72.696,
+				"p25": 70.354,
+				"p75": 86.143,
+				"min": 69.238,
+				"max": 98.866
+			},
+			"counters": {
+				"writes": 640,
+				"callbacks": 160,
+				"serializedBytes": 2611627
+			}
+		},
+		{
+			"id": "workspace.editor.cycle",
+			"operation": "mount saved workspace, open, reorder, edit, save, close and dispose",
+			"phase": "fresh",
+			"parameters": {
+				"documents": 64,
+				"editors": 8
+			},
+			"iterations": 48,
+			"usPerOperation": {
+				"median": 456.49,
+				"p25": 439.01,
+				"p75": 466.48,
+				"min": 366.86,
+				"max": 533.62
+			},
+			"counters": {
+				"started": 384,
+				"cleaned": 384,
+				"active": 0,
+				"peak": 8,
+				"callbacks": 48,
+				"unopened": 48,
+				"reused": 384,
+				"closed": 48
+			}
+		}
+	]
+}
