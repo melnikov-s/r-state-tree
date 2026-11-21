@@ -16,6 +16,7 @@ class Node extends Model {
 }
 
 class Tree extends Model {
+	value = 0;
 	@child(Node) leaf?: Node;
 	@child(Node) list?: Node[];
 	@modelRef(Node) ref?: Node;
@@ -241,18 +242,36 @@ it("keeps reflective writes guarded when a reaction runs during assignment", () 
 	}
 });
 
-it("does not attach a model when the child field cannot be added", () => {
-	const tree = Tree.create();
-	Reflect.deleteProperty(tree, "leaf");
-	Object.preventExtensions(tree);
-	const child = Node.create({ id: 1 });
+it.each<[string, (model: Tree) => unknown]>([
+	["Object.preventExtensions", Object.preventExtensions],
+	["Reflect.preventExtensions", Reflect.preventExtensions],
+	["Object.seal", Object.seal],
+	["Object.freeze", Object.freeze],
+])("rejects %s without changing the live model", (_name, restrict) => {
+	const tree = makeTree();
+	const leaf = tree.leaf!;
+	const item = tree.list![0];
+	const descriptors = Object.getOwnPropertyDescriptors(tree);
 	const before = toSnapshot(tree);
-	expect(Reflect.set(tree, "leaf", child)).toBe(false);
-	expect(Reflect.defineProperty(tree, "leaf", { value: child })).toBe(false);
-	expect(Object.hasOwn(tree, "leaf")).toBe(false);
-	expect(child.parent).toBeNull();
-	expect(findModelById(tree, Node, 1)).toBeUndefined();
+
+	expect(() => restrict(tree)).toThrow(TypeError);
+	expect(Object.isExtensible(tree)).toBe(true);
+	expect(Object.getOwnPropertyDescriptors(tree)).toEqual(descriptors);
+	expect(tree.leaf).toBe(leaf);
+	expect(leaf.parent).toBe(tree);
+	expect(item.parent).toBe(tree);
+	expect(findModelById(tree, Node, 1)).toBe(leaf);
+	expect(findModelById(tree, Node, 2)).toBe(item);
+	expect(tree.ref).toBe(leaf);
 	expect(toSnapshot(tree)).toBe(before);
+
+	tree.value = 1;
+	const replacement = Node.create({ id: 1 });
+	tree.leaf = replacement;
+	expect(tree.value).toBe(1);
+	expect(leaf.parent).toBeNull();
+	expect(replacement.parent).toBe(tree);
+	expect(tree.ref).toBe(replacement);
 });
 
 it("does not delete configured identity or reference properties", () => {

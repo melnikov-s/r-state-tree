@@ -266,6 +266,13 @@ export class ModelAdministration extends PreactObjectAdministration<any> {
 				return result;
 			},
 
+			// Seal and freeze both reach this trap before modifying any descriptors.
+			preventExtensions(): never {
+				throw new TypeError(
+					"r-state-tree: Model instances must remain extensible"
+				);
+			},
+
 			deleteProperty(target, name) {
 				const adm = getAdministration(target) as ModelAdministration;
 				switch (adm.getCfgType(name)) {
