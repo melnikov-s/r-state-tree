@@ -64,12 +64,16 @@ abstract class NodeMap<
 		entry.invalidate();
 	}
 
-	getOrCreate(key: K, value?: unknown): GraphNode {
-		let entry = isNonPrimitive(key)
-			? this.weakMap?.get(key)
-			: this.map?.get(key);
+	/** Whether this cache contains any primitive-key dependencies, even lazy ones. */
+	get hasPrimitiveKeys(): boolean {
+		return (this.map?.size ?? 0) > 0;
+	}
 
-		if (isNonPrimitive(key)) {
+	getOrCreate(key: K, value?: unknown): GraphNode {
+		const weak = isNonPrimitive(key);
+		let entry = weak ? this.weakMap?.get(key) : this.map?.get(key);
+
+		if (weak) {
 			if (!entry) {
 				this.weakMap ??= new WeakMap();
 				entry = this.createNode(value);

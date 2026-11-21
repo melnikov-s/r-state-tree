@@ -361,7 +361,7 @@ export class CollectionAdministration<K, V = K> extends Administration<
 			this.trackExplicitObservable(targetKey);
 		} else {
 			this.untrackExplicitObservable(targetKey);
-			this.untrackExplicitObservable(key);
+			if (key !== targetKey) this.untrackExplicitObservable(key);
 		}
 
 		const existingKey = this.getExistingKey(key, targetKey);

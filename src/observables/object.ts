@@ -1,7 +1,6 @@
 import { batch, createAtom, createComputed, untracked } from "./preact.js";
 import type { AtomNode, ComputedNode } from "./preact.js";
 import {
-	getSource,
 	getAction,
 	getAdministration,
 	isObservable,
@@ -380,10 +379,13 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 		const hadOwn = ownDesc !== undefined || Object.hasOwn(this.source, key);
 		const direct = ownDesc && "value" in ownDesc;
 		const oldValue: T[keyof T] = direct ? ownDesc.value : this.get(key);
-		const targetValue = getSource(newValue);
-
+		const newAdm =
+			newValue && typeof newValue === "object"
+				? getAdministration(newValue)
+				: undefined;
+		const targetValue = newAdm ? newAdm.source : newValue;
+		const newExplicit = newAdm !== undefined && newAdm.proxy === newValue;
 		const oldExplicit = this.explicitObservables?.has(key) ?? false;
-		const newExplicit = isObservable(newValue);
 
 		// Update strict shallow tracking
 		if (newExplicit) {
@@ -401,10 +403,9 @@ export class ObjectAdministration<T extends object> extends Administration<T> {
 
 		const changed =
 			!hadOwn ||
-			(!isObservable(oldValue) && oldExplicit !== newExplicit) ||
 			(isObservable(oldValue)
 				? oldValue !== newValue
-				: oldValue !== targetValue);
+				: oldExplicit !== newExplicit || oldValue !== targetValue);
 
 		if (changed) {
 			if (direct) {

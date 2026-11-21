@@ -42,7 +42,11 @@ function reportConflict(): void {
 
 export class ArrayAdministration<T> extends Administration<T[]> {
 	valuesMap: SignalMap<number>;
-	keysAtom: AtomNode;
+	private _keysAtom?: AtomNode;
+
+	get keysAtom(): AtomNode {
+		return (this._keysAtom ??= createAtom());
+	}
 	/**
 	 * Parent-based ownership tracking: sources assigned as observable.
 	 * Unlike index-based tracking, this doesn't require updates on reorder ops.
@@ -127,12 +131,12 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 					adm.flushChange();
 
 					if (name === "length") {
-						adm.keysAtom.reportChanged();
+						adm._keysAtom?.reportChanged();
 						adm.atom.reportChanged();
 					} else {
 						const index = arrayIndex(name);
 						if (index !== -1) {
-							adm.keysAtom.reportChanged();
+							adm._keysAtom?.reportChanged();
 							adm.onArrayChanged(false, index, 1);
 						} else {
 							adm.atom.reportChanged();
@@ -345,7 +349,6 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 	constructor(source: T[] = []) {
 		super(source);
 		this.valuesMap = new SignalMap();
-		this.keysAtom = createAtom();
 	}
 
 	getNode(key?: number): unknown {
@@ -526,12 +529,19 @@ export class ArrayAdministration<T> extends Administration<T[]> {
 	}
 
 	onArrayChanged(lengthChanged = false, index?: number, count?: number): void {
+		if (
+			index != null &&
+			!(lengthChanged && this._keysAtom) &&
+			!this.hasForceObservedAtom &&
+			!this.valuesMap.hasPrimitiveKeys
+		)
+			return;
 		batch(() => {
 			if (lengthChanged) {
-				this.keysAtom.reportChanged();
+				this._keysAtom?.reportChanged();
 			}
 			if (index == null) {
-				this.atom.reportChanged();
+				super.reportChanged();
 			} else if (count === 1 && Number.isInteger(index)) {
 				// An indexed write need not enumerate unrelated tracked indices.
 				// Non-integer bounds (e.g. from fill) still use the range check.

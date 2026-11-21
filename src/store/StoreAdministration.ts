@@ -528,11 +528,12 @@ export class StoreAdministration<
 
 	private updateStore(
 		name: PropertyKey,
-		restore?: { snapshot: ChildSnapshot | undefined }
+		restore?: { snapshot: ChildSnapshot | undefined },
+		data?: ChildStoreData
 	): void {
 		// Abort handlers and child cleanups can mutate dependencies before listeners stop.
 		if (this.disposalState !== "active") return;
-		const childStoreData = this.childStoreDataMap.get(name)!;
+		const childStoreData = data ?? this.childStoreDataMap.get(name)!;
 		const storeElement = childStoreData.listener
 			? childStoreData.computed.get()
 			: this.trackStoreGetter(name, childStoreData);
@@ -587,12 +588,13 @@ export class StoreAdministration<
 
 		let data = childStoreData;
 		if (!data) {
-			data = {
+			const entry: ChildStoreData = {
 				computed: untracked(() => this.getComputedGetter(name)),
 				value: createSignal<Store | Store[] | null>(null),
-				refresh: () => this.updateStore(name),
+				refresh: () => this.updateStore(name, undefined, entry),
 			};
-			this.childStoreDataMap.set(name, data);
+			this.childStoreDataMap.set(name, entry);
+			data = entry;
 		}
 		// Refresh stale descriptors synchronously, including inside a batch before
 		// the listener runs. Unchanged descriptors need no reconciliation work.
