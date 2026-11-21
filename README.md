@@ -177,6 +177,11 @@ pnpm build
 `pnpm test` runs Vitest and type checks. `pnpm lint` checks Oxlint rules, lint
 fixtures, and formatting; `pnpm format` applies formatting.
 
+Run `pnpm benchmark:baseline --smoke` to check the performance workloads or
+`pnpm benchmark:baseline` for measurements. See the
+[benchmark guide](https://github.com/melnikov-s/r-state-tree/blob/master/docs/benchmarks.md)
+for sampling, JSON output, and revision comparison.
+
 The package uses `"type": "module"`: ESM bundles and shared chunks use `.js`,
 while CommonJS bundles and shared chunks use `.cjs`. Builds emit both formats
 and declarations under `dist/`. Package exports select the appropriate format.

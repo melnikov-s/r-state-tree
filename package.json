@@ -62,6 +62,7 @@
 		"test": "vitest run && pnpm run test:types",
 		"test:watch": "vitest",
 		"test:inspector:serve": "vite --configLoader runner --config tests/fixtures/live-inspector/vite.config.mts",
+		"benchmark:baseline": "node benchmarks/runtime-baseline.ts",
 		"benchmark:activity": "esbuild benchmarks/inspection-activity.ts --bundle --platform=node --format=esm --external:esbuild --outfile=node_modules/.cache/inspection-activity.mjs && node node_modules/.cache/inspection-activity.mjs",
 		"benchmark:snapshot-diff": "esbuild benchmarks/snapshot-diff.ts --bundle --platform=node --format=esm --external:esbuild --external:vitest/node --outfile=node_modules/.cache/snapshot-diff.mjs && node node_modules/.cache/snapshot-diff.mjs",
 		"test:inspector:e2e": "pnpm build && playwright test --config playwright.inspector.config.mts",
