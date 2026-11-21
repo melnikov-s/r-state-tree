@@ -4,11 +4,8 @@ import type {
 	StoreConfiguration,
 	StoreElement,
 } from "../types.js";
-import {
-	getStoreAdm,
-	StoreAdministration,
-	updateProps,
-} from "./StoreAdministration.js";
+import { StoreAdministration } from "./StoreAdministration.js";
+import { updateProps } from "./storeProps.js";
 import {
 	getAdministration,
 	getObservable,
@@ -16,6 +13,10 @@ import {
 	untracked,
 } from "../observables/index.js";
 import { debugEnabled } from "../observables/internal/debug.js";
+
+export function getStoreAdm(store: Store): StoreAdministration {
+	return getAdministration(store) as unknown as StoreAdministration;
+}
 
 type StoreConstruction = { administration?: StoreAdministration };
 let currentConstruction: StoreConstruction | undefined;

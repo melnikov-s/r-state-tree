@@ -13,12 +13,16 @@ import {
 } from "../observables/index.js";
 import type {
 	ListenerNode,
-	SignalNode,
 	ComputedNode,
 	AtomNode,
 } from "../observables/index.js";
-import Store, { constructStore, STORE_ELEMENT } from "./Store.js";
-import { debugWrite, debugEnabled } from "../observables/internal/debug.js";
+import Store, { getStoreAdm } from "./Store.js";
+import {
+	batchChildChanges,
+	reconcileChildStores,
+} from "./ChildReconciliation.js";
+import type { ChildSlot, ChildSnapshot } from "./ChildReconciliation.js";
+import { debugEnabled } from "../observables/internal/debug.js";
 import { retainedChildRead } from "../observables/internal/retainedRead.js";
 import type {
 	StoreConfiguration,
@@ -36,8 +40,9 @@ import {
 	hydrateSnapshotValue,
 } from "../utils.js";
 
+export { getStoreAdm } from "./Store.js";
+
 const MAX_MOUNT_DEPTH = 100;
-const EMPTY_STORES: Store[] = [];
 const EMPTY_CONFIG: StoreConfiguration<any> = Object.create(null);
 type MountFrame = {
 	storeName: string;
@@ -88,219 +93,11 @@ function createCircularMountError(frame: MountFrame): Error {
 	);
 }
 
-function updatePropsByAdm(
-	adm: ObjectAdministration<Props>,
-	newProps: Props
-): void {
-	if (debugEnabled) {
-		const proxy = adm.proxy;
-		for (const key in newProps) {
-			if (Object.prototype.hasOwnProperty.call(newProps, key)) {
-				proxy[key] = newProps[key];
-			}
-		}
-		return;
-	}
-	const source = adm.source;
-	for (const key in newProps) {
-		if (!Object.prototype.hasOwnProperty.call(newProps, key)) continue;
-		const val = newProps[key];
-		const isObj = typeof val === "object" && val !== null;
-		if (isObj) {
-			const valAdm = getAdministration(val);
-			if (valAdm && valAdm.proxy === val) {
-				if (
-					adm.hasExplicitObservable(key) &&
-					Object.prototype.hasOwnProperty.call(source, key) &&
-					source[key] === valAdm.source
-				) {
-					continue;
-				}
-				adm.write(key, val);
-				continue;
-			}
-		}
-		if (
-			Object.prototype.hasOwnProperty.call(source, key) &&
-			source[key] === val &&
-			!adm.hasExplicitObservable(key)
-		) {
-			continue;
-		}
-		adm.write(key, val);
-	}
-}
-
-function updateRawProps(adm: StoreAdministration, newProps: Props): void {
-	const source = (adm.source as any).props as Record<string, unknown>;
-	let explicitKeys = adm._propsExplicitKeys;
-	for (const key in newProps) {
-		if (!Object.prototype.hasOwnProperty.call(newProps, key)) continue;
-		const val = newProps[key];
-		if (
-			source[key] === val &&
-			!explicitKeys?.has(key) &&
-			Object.prototype.hasOwnProperty.call(source, key)
-		) {
-			continue;
-		}
-		if (typeof val === "object" && val !== null) {
-			const valAdm = getAdministration(val);
-			if (valAdm && valAdm.proxy === val) {
-				(explicitKeys ??= adm._propsExplicitKeys = new Set()).add(key);
-				source[key] = valAdm.source;
-				continue;
-			}
-		}
-		explicitKeys?.delete(key);
-		source[key] = val;
-	}
-}
-
-function updateStoreProps(adm: StoreAdministration, newProps: Props): void {
-	if (adm.propsAdm) {
-		updatePropsByAdm(adm.propsAdm, newProps);
-	} else if (debugEnabled) {
-		updatePropsInner(adm.proxy.props, newProps);
-	} else {
-		updateRawProps(adm, newProps);
-	}
-}
-function updatePropsInner(props: Props, newProps: Props): void {
-	const adm = getAdministration(props);
-	if (adm) {
-		updatePropsByAdm(adm, newProps);
-		return;
-	}
-	for (const key in newProps) {
-		if (Object.prototype.hasOwnProperty.call(newProps, key)) {
-			props[key] = newProps[key];
-		}
-	}
-}
-
-export function updateProps(props: Props, newProps: Props): void {
-	untracked(() => {
-		batch(() => {
-			updatePropsInner(props, newProps);
-		});
-	});
-}
-
-export function getStoreAdm(store: Store): StoreAdministration {
-	return getAdministration(store) as unknown as StoreAdministration;
-}
-
-function isStoreElement(value: unknown): value is StoreElement {
-	if (typeof value !== "object" || value === null) return false;
-	if ((value as any)[STORE_ELEMENT] === true) return true;
-	return (
-		"Type" in value &&
-		"props" in value &&
-		typeof (value as any).Type === "function" &&
-		typeof (value as any).props === "object"
-	);
-}
-
-function validateStoreChildValue(
-	value: unknown,
-	propertyName: PropertyKey,
-	parentTypeName: string
-): void {
-	if (value === null || value === undefined) {
-		return;
-	}
-
-	if (Array.isArray(value)) {
-		const len = value.length;
-		let keys: Set<unknown> | undefined;
-		for (let i = 0; i < len; i++) {
-			const item = value[i];
-			if (item === null || item === undefined) continue;
-			if (!isStoreElement(item)) {
-				throw new Error(
-					`r-state-tree: child property '${String(
-						propertyName
-					)}' must be a StoreElement ({ Type, props, key }), an array of StoreElements, or null/undefined. Found invalid array item: ${typeof item}`
-				);
-			}
-			const key = item.key;
-			if (key !== undefined) {
-				if (keys === undefined) {
-					keys = new Set();
-					keys.add(key);
-				} else {
-					const prevSize = keys.size;
-					keys.add(key);
-					if (keys.size === prevSize) {
-						const formattedKey =
-							typeof key === "string" ? JSON.stringify(key) : String(key);
-						throw new Error(
-							`r-state-tree: duplicate key ${formattedKey} in child property ${JSON.stringify(
-								String(propertyName)
-							)} of ${parentTypeName}`
-						);
-					}
-				}
-			}
-		}
-		return;
-	}
-
-	if (isStoreElement(value)) {
-		return;
-	}
-
-	throw new Error(
-		`r-state-tree: child property '${String(
-			propertyName
-		)}' must be a StoreElement ({ Type, props, key }), an array of StoreElements, or null/undefined. Found: ${typeof value}`
-	);
-}
-
-type ChildStoreData = {
-	initialized?: boolean;
-	reconciledElement?: StoreElement | null | StoreElement[];
-	value: SignalNode<Store | null | Store[]>;
+type ChildStoreData = ChildSlot & {
 	computed: ComputedNode<StoreElement | null | StoreElement[]>;
 	peek: () => StoreElement | null | StoreElement[];
 	listener?: ListenerNode;
-	keyedStores?: Map<string | number, Store>;
 };
-
-type ChildSnapshot = NonNullable<StoreSnapshot["children"]>[string];
-
-type ChildStorePlan = {
-	value: Store | Store[] | null;
-	retired: Iterable<Store>;
-	keyedStores?: Map<string | number, Store>;
-};
-
-function captureChildError(errors: unknown[], operation: () => void): void {
-	try {
-		operation();
-	} catch (error) {
-		errors.push(error);
-	}
-}
-
-function batchChildChanges(operation: (errors: unknown[]) => void): void {
-	const errors: unknown[] = [];
-	// A reaction flushing at the end of the batch must not mask an earlier error.
-	captureChildError(errors, () =>
-		batch(() => captureChildError(errors, () => operation(errors)))
-	);
-	if (errors.length === 1) throw errors[0];
-	if (errors.length) {
-		throw new AggregateError(
-			errors,
-			"r-state-tree: child reconciliation failed",
-			{
-				cause: errors[0],
-			}
-		);
-	}
-}
 
 type ReactiveRegistration = {
 	effectFn?: () => void | (() => void);
@@ -549,285 +346,19 @@ export class StoreAdministration<
 			: undefined;
 	}
 
-	private matchChildSnapshots(snapshots: ChildSnapshot | undefined) {
-		if (!snapshots) return undefined;
-
-		const keyed = new Map<string | number, StoreChildSnapshot>();
-		const positional: (StoreChildSnapshot | null)[] = [];
-		const list = Array.isArray(snapshots) ? snapshots : [snapshots];
-		for (let i = 0; i < list.length; i++) {
-			const snapshot = list[i];
-			if (snapshot === undefined) continue;
-			if (snapshot?.key === undefined) {
-				positional.push(snapshot);
-			} else if (!keyed.has(snapshot.key)) {
-				keyed.set(snapshot.key, snapshot);
-			}
-		}
-
-		// Assign once in target order, including null snapshot slots for empty
-		// unkeyed stores. The retained input is not changed until the plan succeeds.
-		let position = 0;
-		return (key: string | number | undefined) =>
-			key === undefined ? positional[position++] : keyed.get(key);
-	}
-
-	private finishPendingChildSnapshots(name: PropertyKey): void {
+	/** @internal Consume the pending snapshot only after a reconciliation plan succeeds. */
+	finishPendingChildSnapshots(name: PropertyKey): void {
 		if (this.getPendingChildSnapshot(name) !== undefined) {
 			delete this._pendingChildSnapshots![String(name)];
 			if (this._childStoreDataMap?.get(name)?.initialized) {
-				this._snapshotStructureAtom?.reportChanged();
+				this.reportChildStructureChanged();
 			}
 		}
 	}
 
-	private validateStoreChildValue(value: unknown, name: PropertyKey): void {
-		validateStoreChildValue(value, name, getStoreName(this));
-	}
-
-	private planStoreList(
-		elements: Array<StoreElement | null>,
-		snapshots: ChildSnapshot | undefined,
-		previous: Store | Store[] | null,
-		created: Store[],
-		cachedKeyed?: Map<string | number, Store>
-	): ChildStorePlan {
-		const matchSnapshot = this.matchChildSnapshots(snapshots);
-
-		// Fast path: initial realization with no previous children
-		if (!previous || (Array.isArray(previous) && previous.length === 0)) {
-			const stores: Store[] = [];
-			for (let i = 0; i < elements.length; i++) {
-				const element = elements[i];
-				if (!element) continue;
-				const store = constructStore(element.Type, element.props);
-				created.push(store);
-				if (matchSnapshot) {
-					const snapshot = matchSnapshot(element.key);
-					if (snapshot) getStoreAdm(store).loadSnapshot(snapshot);
-				}
-				stores.push(store);
-			}
-			const unchanged = Array.isArray(previous) && stores.length === 0;
-			return { value: unchanged ? previous : stores, retired: EMPTY_STORES };
-		}
-
-		const isPrevArray = Array.isArray(previous);
-		const oldStores = isPrevArray ? previous : EMPTY_STORES;
-		const oldLen = oldStores.length;
-		const stores: Store[] = [];
-		const updateStores: Store[] = [];
-		const updatePropsList: Props[] = [];
-		const updateSnapshots:
-			| (StoreChildSnapshot | null | undefined)[]
-			| undefined = matchSnapshot ? [] : undefined;
-		let keyed = cachedKeyed;
-		if (!keyed && oldLen > 0) {
-			for (let i = 0; i < oldLen; i++) {
-				const store = oldStores[i];
-				const k = store.key;
-				if (k !== undefined) {
-					(keyed ??= new Map()).set(k, store);
-				}
-			}
-		}
-
-		for (let i = 0; i < elements.length; i++) {
-			const element = elements[i];
-			if (!element) continue;
-			const { key, props, Type } = element;
-			// Descriptors without a child do not occupy a realized position.
-			const old =
-				key === undefined ? oldStores[stores.length] : keyed?.get(key);
-			const snapshot = matchSnapshot?.(key);
-			if (
-				(key !== undefined || old?.key === undefined) &&
-				old instanceof Type
-			) {
-				updateStores.push(old);
-				updatePropsList.push(props);
-				if (updateSnapshots) updateSnapshots.push(snapshot);
-				stores.push(old);
-			} else {
-				const store = constructStore(Type, props);
-				created.push(store);
-				if (snapshot) getStoreAdm(store).loadSnapshot(snapshot);
-				stores.push(store);
-			}
-		}
-
-		const reusedCount = updateStores.length;
-		for (let i = 0; i < reusedCount; i++) {
-			const storeAdm = getStoreAdm(updateStores[i]);
-			updateStoreProps(storeAdm, updatePropsList[i]);
-			const snapshot = updateSnapshots?.[i];
-			if (snapshot) storeAdm.loadSnapshot(snapshot);
-		}
-
-		let retired: Iterable<Store>;
-		if (!isPrevArray) {
-			retired = [previous];
-		} else if (reusedCount === oldLen) {
-			retired = EMPTY_STORES;
-		} else if (reusedCount === 0) {
-			retired = oldStores;
-		} else {
-			const reusedSet = new Set(updateStores);
-			const retiredList: Store[] = [];
-			for (let i = 0; i < oldLen; i++) {
-				if (!reusedSet.has(oldStores[i])) retiredList.push(oldStores[i]);
-			}
-			retired = retiredList;
-		}
-
-		let unchanged = isPrevArray && stores.length === oldLen;
-		if (unchanged) {
-			for (let i = 0; i < stores.length; i++) {
-				if (stores[i] !== oldStores[i]) {
-					unchanged = false;
-					break;
-				}
-			}
-		}
-		return {
-			value: unchanged ? oldStores : stores,
-			retired,
-			keyedStores: keyed,
-		};
-	}
-
-	private planSingleStore(
-		element: StoreElement | null,
-		snapshots: ChildSnapshot | undefined,
-		previous: Store | Store[] | null,
-		created: Store[]
-	): ChildStorePlan {
-		const oldStore = Array.isArray(previous) ? null : previous;
-		const snapshot = element
-			? this.matchChildSnapshots(snapshots)?.(element.key)
-			: undefined;
-		if (
-			element &&
-			oldStore?.key === element.key &&
-			oldStore instanceof element.Type
-		) {
-			const oldAdm = getStoreAdm(oldStore);
-			updateStoreProps(oldAdm, element.props);
-			if (snapshot) oldAdm.loadSnapshot(snapshot);
-			return { value: oldStore, retired: EMPTY_STORES };
-		}
-
-		// Construction must succeed before retiring the currently valid child.
-		let replacement: Store | null = null;
-		if (element) {
-			const { Type, props } = element;
-			replacement = constructStore(Type, props);
-			created.push(replacement);
-			if (snapshot) getStoreAdm(replacement).loadSnapshot(snapshot);
-		}
-		return {
-			value: replacement,
-			retired: Array.isArray(previous)
-				? previous
-				: previous
-					? [previous]
-					: EMPTY_STORES,
-		};
-	}
-
-	private reconcileStore(
-		name: PropertyKey,
-		storeElement: StoreElement | null | StoreElement[],
-		snapshots = this.getPendingChildSnapshot(name)
-	): void {
-		this.validateStoreChildValue(storeElement, name);
-		const data = this._childStoreDataMap!.get(name)!;
-		const previous = untracked(() => data.value.get());
-		const wasInitialized = data.initialized;
-		batchChildChanges((errors) => {
-			const created: Store[] = [];
-			let plan: ChildStorePlan;
-			try {
-				plan = Array.isArray(storeElement)
-					? this.planStoreList(
-							storeElement,
-							snapshots,
-							previous,
-							created,
-							data.keyedStores
-						)
-					: this.planSingleStore(storeElement, snapshots, previous, created);
-			} catch (error) {
-				errors.push(error);
-				for (let i = 0; i < created.length; i++) {
-					captureChildError(errors, () =>
-						getStoreAdm(created[i]).dispose(true)
-					);
-				}
-				return;
-			}
-
-			// Ownership is committed before running callbacks. Failures in those
-			// callbacks must not retry construction or abandon the published stores.
-			this.finishPendingChildSnapshots(name);
-			data.reconciledElement = storeElement;
-			data.initialized = true;
-			if (Array.isArray(plan.value)) {
-				if (plan.value.length === 0) {
-					data.keyedStores = undefined;
-				} else if (created.length === 0 && plan.retired === EMPTY_STORES) {
-					if (plan.keyedStores) data.keyedStores = plan.keyedStores;
-				} else if (plan.keyedStores) {
-					const keyed = plan.keyedStores;
-					if (plan.retired === previous) {
-						keyed.clear();
-					} else {
-						for (const store of plan.retired) {
-							const k = store.key;
-							if (k !== undefined && keyed.get(k) === store) {
-								keyed.delete(k);
-							}
-						}
-					}
-					for (let i = 0; i < created.length; i++) {
-						const store = created[i];
-						const k = store.key;
-						if (k !== undefined) keyed.set(k, store);
-					}
-					data.keyedStores = keyed.size > 0 ? keyed : undefined;
-				} else {
-					data.keyedStores = undefined;
-				}
-			} else {
-				data.keyedStores = undefined;
-			}
-			if (plan.value !== previous) {
-				if (Array.isArray(plan.value)) Object.freeze(plan.value);
-				data.value.set(plan.value);
-			}
-
-			for (const store of plan.retired) {
-				captureChildError(errors, () => getStoreAdm(store).dispose(true));
-			}
-			for (let i = 0; i < created.length; i++) {
-				if (!this.isMounted || this.disposalState !== "active") break;
-				const adm = getStoreAdm(created[i]);
-				// User callbacks may have synchronously replaced this child again.
-				if (adm.disposalState === "active" && !adm.isMounted) {
-					captureChildError(errors, () => adm.mount(this, name));
-				}
-			}
-			if (!wasInitialized && errors.length) {
-				// The lazy initializer's normal notification will not run on error.
-				this._snapshotStructureAtom?.reportChanged();
-			}
-			if (debugEnabled) {
-				const before = wasInitialized ? previous : undefined;
-				const after = this.peekInspectionChild(name).value;
-				if (before !== after)
-					debugWrite(this.source, name, "child", before, after);
-			}
-		});
+	/** @internal Invalidate snapshot readers when a child is first realized. */
+	reportChildStructureChanged(): void {
+		this._snapshotStructureAtom?.reportChanged();
 	}
 
 	private updateStore(
@@ -835,7 +366,7 @@ export class StoreAdministration<
 		restore?: { snapshot: ChildSnapshot | undefined }
 	): void {
 		// Abort handlers and child cleanups can mutate dependencies before listeners stop.
-		if (this.disposalState !== "active") return;
+		if (!this.isActive) return;
 		const childStoreData = this._childStoreDataMap!.get(name)!;
 		const storeElement = childStoreData.listener
 			? childStoreData.computed.get()
@@ -846,8 +377,15 @@ export class StoreAdministration<
 			!initialized ||
 			!Object.is(childStoreData.reconciledElement, storeElement)
 		) {
-			this.reconcileStore(name, storeElement, restore?.snapshot);
-			if (!initialized) this._snapshotStructureAtom?.reportChanged();
+			const snapshot = restore?.snapshot;
+			reconcileChildStores(
+				this,
+				name,
+				childStoreData,
+				storeElement,
+				snapshot === undefined ? this.getPendingChildSnapshot(name) : snapshot
+			);
+			if (!initialized) this.reportChildStructureChanged();
 		}
 	}
 
@@ -1130,6 +668,11 @@ export class StoreAdministration<
 
 	isRoot(): boolean {
 		return !this.parent;
+	}
+
+	/** @internal Inactive stores cannot acquire new children during reconciliation. */
+	get isActive(): boolean {
+		return this.disposalState === "active";
 	}
 
 	get isMounted(): boolean {

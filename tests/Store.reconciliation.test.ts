@@ -8,18 +8,15 @@ import {
 	snapshot,
 	Store,
 } from "../src/index";
-import { getStoreAdm } from "../src/store/StoreAdministration";
+import * as childReconciliation from "../src/store/ChildReconciliation";
 
-function observeReconciliation(store: Store) {
-	return vi.spyOn(
-		getStoreAdm(store) as unknown as {
-			reconcileStore: (...args: unknown[]) => void;
-		},
-		"reconcileStore"
-	);
+function observeReconciliation() {
+	return vi.spyOn(childReconciliation, "reconcileChildStores");
 }
 
 describe("Store child reconciliation caching", () => {
+	afterEach(() => vi.restoreAllMocks());
+
 	test.each([32, 128])(
 		"does not reconcile during indexed iteration over %i unchanged children",
 		(size) => {
@@ -35,7 +32,7 @@ describe("Store child reconciliation caching", () => {
 				}
 			}
 			const root = mount(createStore(Root));
-			const reconcile = observeReconciliation(root);
+			const reconcile = observeReconciliation();
 			const children = root.children;
 			expect(reconcile).toHaveBeenCalledTimes(1);
 			reconcile.mockClear();
@@ -81,7 +78,7 @@ describe("Store child reconciliation caching", () => {
 			}
 		}
 		const root = mount(createStore(Root));
-		const reconcile = observeReconciliation(root);
+		const reconcile = observeReconciliation();
 		for (const name of ["single", "absent", "missing", "empty"] as const) {
 			const child = root[name];
 			reconcile.mockClear();
@@ -105,7 +102,7 @@ describe("Store child reconciliation caching", () => {
 		}
 		const root = mount(createStore(Root));
 		const original = root.children;
-		const reconcile = observeReconciliation(root);
+		const reconcile = observeReconciliation();
 		batch(() => {
 			root.state.value = 1;
 			expect(root.children).toBe(original);
@@ -179,7 +176,7 @@ describe("Store child reconciliation caching", () => {
 		}
 		const root = mount(createStore(Root));
 		const leaf = root.leaf;
-		const reconcile = observeReconciliation(root);
+		const reconcile = observeReconciliation();
 		dependency.value++;
 		expect(root.leaf).toBe(leaf);
 		expect(getterRuns).toBe(2);
@@ -212,7 +209,7 @@ describe("Store child reconciliation caching", () => {
 		expect(root.children).toBe(children);
 		expect(leaf.value).toBe(7);
 		expect(children[0].value).toBe(8);
-		const reconcile = observeReconciliation(root);
+		const reconcile = observeReconciliation();
 		void root.leaf;
 		void root.children;
 		expect(reconcile).toHaveBeenCalledTimes(0);
@@ -249,7 +246,7 @@ describe("Store child reconciliation caching", () => {
 		fail = false;
 		expect(root.children[0]).toBe(original[0]);
 		expect(root.children.map((leaf) => leaf.props.value)).toEqual([1, 2]);
-		const reconcile = observeReconciliation(root);
+		const reconcile = observeReconciliation();
 		void root.children;
 		expect(reconcile).toHaveBeenCalledTimes(0);
 		root[Symbol.dispose]();
@@ -276,7 +273,7 @@ describe("Store child reconciliation caching", () => {
 		fail = false;
 		expect(root.leaf).toBeInstanceOf(Leaf);
 		expect(attempts).toBe(3);
-		const reconcile = observeReconciliation(root);
+		const reconcile = observeReconciliation();
 		void root.leaf;
 		expect(reconcile).toHaveBeenCalledTimes(0);
 		root[Symbol.dispose]();
