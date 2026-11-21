@@ -68,20 +68,28 @@ function getParentConstructor(Ctor: Ctor | undefined): Ctor | undefined {
 		: undefined;
 }
 
-function getCtorChain(ctor: Ctor): Ctor[] {
-	const chain: Ctor[] = [];
-	let node: Ctor | undefined = ctor;
-	while (node) {
-		chain.push(node);
-		const parent = getParentConstructor(node);
-		if (!parent || parent === Object || parent === Function) {
-			break;
+// The chain is kept derived-first so it can be checked as we walk it.
+function getCtorChain(
+	ctor: Ctor,
+	previous: readonly Ctor[] = []
+): readonly Ctor[] {
+	let changed: Ctor[] | undefined;
+	let length = 0;
+	let node = ctor;
+	while (true) {
+		if (!changed && previous[length] !== node) {
+			changed = previous.slice(0, length);
 		}
+		changed?.push(node);
+		length++;
+		const parent = getParentConstructor(node);
+		if (!parent || parent === Object || parent === Function) break;
 		node = parent;
 	}
-	// Base first, derived last
-	chain.reverse();
-	return chain;
+	return (
+		changed ??
+		(previous.length === length ? previous : previous.slice(0, length))
+	);
 }
 
 function getMetadataSymbol(): symbol | undefined {
@@ -114,14 +122,49 @@ function mergeInto(target: Config, source: unknown): void {
 	}
 }
 
+type ConfigurationRefs = { ctor: Ctor; typesRef: unknown; metaRef: unknown };
+
 type CacheEntry = {
-	refs: Array<{ ctor: Ctor; typesRef: unknown; metaRef: unknown }>;
+	chain: readonly Ctor[];
+	refs: readonly ConfigurationRefs[];
 	merged: Config;
 };
 
-const configurationCache: WeakMap<Ctor, CacheEntry> = new WeakMap();
+const configurationCache = new WeakMap<Ctor, { entry?: CacheEntry }>();
 
-function refsEqual(a: CacheEntry["refs"], b: CacheEntry["refs"]): boolean {
+function collectRefs(
+	chain: readonly Ctor[],
+	previous?: readonly ConfigurationRefs[]
+): readonly ConfigurationRefs[] {
+	let changed: ConfigurationRefs[] | undefined;
+	// Evaluate config getters once, base-first, even when the cache misses.
+	for (let i = chain.length - 1; i >= 0; i--) {
+		const ctor = chain[i];
+		const typesRef = getOwnStaticTypes(ctor);
+		const metaRef = getOwnMetadata(ctor);
+		const index = chain.length - 1 - i;
+		const prior = previous?.[index];
+		if (
+			!changed &&
+			prior &&
+			prior.typesRef === typesRef &&
+			prior.metaRef === metaRef
+		)
+			continue;
+		(changed ??= previous?.slice(0, index) ?? []).push({
+			ctor,
+			typesRef,
+			metaRef,
+		});
+	}
+	return changed ?? previous!;
+}
+
+function refsEqual(
+	a: readonly ConfigurationRefs[],
+	b: readonly ConfigurationRefs[]
+): boolean {
+	if (a === b) return true;
 	if (a.length !== b.length) return false;
 	for (let i = 0; i < a.length; i++) {
 		if (a[i].ctor !== b[i].ctor) return false;
@@ -144,17 +187,21 @@ function refsEqual(a: CacheEntry["refs"], b: CacheEntry["refs"]): boolean {
 export function getConfigurationForCtor(ctor: Ctor | undefined): Config {
 	if (!ctor) return {};
 
-	const chain = getCtorChain(ctor);
-	const refs = chain.map((c) => ({
-		ctor: c,
-		typesRef: getOwnStaticTypes(c as any),
-		metaRef: getOwnMetadata(c as any),
-	}));
-
-	const cached = configurationCache.get(ctor);
-	if (cached && refsEqual(cached.refs, refs)) {
-		return cached.merged;
+	let slot = configurationCache.get(ctor);
+	if (!slot) {
+		slot = {};
+		configurationCache.set(ctor, slot);
 	}
+	const cached = slot.entry;
+	const chain = getCtorChain(ctor, cached?.chain);
+	const refs = collectRefs(
+		chain,
+		cached?.chain === chain ? cached.refs : undefined
+	);
+	// A static getter can reenter configuration resolution for this constructor.
+	// Compare against the latest entry, using the references already collected.
+	const latest = slot.entry;
+	if (latest && refsEqual(latest.refs, refs)) return latest.merged;
 
 	const merged: Config = {};
 	for (let i = 0; i < refs.length; i++) {
@@ -165,7 +212,7 @@ export function getConfigurationForCtor(ctor: Ctor | undefined): Config {
 		mergeInto(merged, typesRef);
 	}
 
-	configurationCache.set(ctor, { refs, merged });
+	slot.entry = { chain, refs, merged };
 	return merged;
 }
 
